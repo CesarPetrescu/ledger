@@ -1,0 +1,54 @@
+# Private project context and deployment details
+/.private/
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+credentials*
+secrets*
+
+# Build outputs
+/bin/
+/dist/
+/ledger-auth
+/ledger-mcp
+/ledger-index
+*.test
+*.out
+coverage.*
+
+# Local data
+/data/
+/pgdata/
+*.db
+*.sqlite*
+
+# Backups
+/ledger.sql
+*.dump
+*.backup
+backup/
+backups/
+
+# Go and tooling
+/vendor/
+.gocache/
+.gomodcache/
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Temporary files
+/tmp/
+*.log

@@ -1,0 +1,97 @@
+x-common-env: &common-env
+  LEDGER_PUBLIC_URL: ${LEDGER_PUBLIC_URL:?set LEDGER_PUBLIC_URL}
+  LEDGER_DATABASE_URL: postgres://ledger:${LEDGER_POSTGRES_PASSWORD}@postgres:5432/ledger?sslmode=disable
+  LEDGER_PASSWORD_HASH: ${LEDGER_PASSWORD_HASH:?set LEDGER_PASSWORD_HASH}
+  LEDGER_TRUSTED_PROXY_CIDR: ${LEDGER_TRUSTED_PROXY_CIDR:?set LEDGER_TRUSTED_PROXY_CIDR}
+
+x-postgres-ready: &postgres-ready
+  condition: service_healthy
+
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "8080:8080"
+    environment:
+      LEDGER_TRUSTED_PROXY_CIDR: ${LEDGER_TRUSTED_PROXY_CIDR:?set LEDGER_TRUSTED_PROXY_CIDR}
+      NGINX_ENVSUBST_FILTER: LEDGER_TRUSTED_PROXY_CIDR
+    volumes:
+      - ./nginx.conf:/etc/nginx/templates/default.conf.template:ro
+    depends_on:
+      ledger-auth:
+        condition: service_started
+      ledger-mcp:
+        condition: service_started
+    networks:
+      ledger-internal:
+        ipv4_address: ${LEDGER_NGINX_INTERNAL_IP:-10.251.250.254}
+
+  ledger-auth:
+    build:
+      context: .
+      args:
+        CMD: ledger-auth
+    environment:
+      <<: *common-env
+      LEDGER_INTERNAL_PROXY_CIDR: ${LEDGER_NGINX_INTERNAL_IP:-10.251.250.254}/32
+    depends_on:
+      postgres: *postgres-ready
+    networks:
+      - ledger-internal
+
+  ledger-mcp:
+    build:
+      context: .
+      args:
+        CMD: ledger-mcp
+    environment:
+      <<: *common-env
+      LEDGER_INDEX_URL: http://ledger-index:8083
+    depends_on:
+      postgres: *postgres-ready
+      ledger-index:
+        condition: service_started
+    networks:
+      - ledger-internal
+
+  ledger-index:
+    build:
+      context: .
+      args:
+        CMD: ledger-index
+    environment:
+      <<: *common-env
+      LEDGER_INFER_URL: ${LEDGER_INFER_URL:?set LEDGER_INFER_URL}
+      LEDGER_EMBED_MODEL: ${LEDGER_EMBED_MODEL:-qwen3-embedding}
+      LEDGER_EMBED_DIM: ${LEDGER_EMBED_DIM:-4096}
+      LEDGER_RERANK_MODEL: ${LEDGER_RERANK_MODEL:-qwen3-reranker}
+      LEDGER_INFER_API_KEY: ${LEDGER_INFER_API_KEY:-}
+    depends_on:
+      postgres: *postgres-ready
+    networks:
+      - ledger-internal
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: ledger
+      POSTGRES_USER: ledger
+      POSTGRES_PASSWORD: ${LEDGER_POSTGRES_PASSWORD:?set LEDGER_POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ledger -d ledger"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - ledger-internal
+
+volumes:
+  pgdata:
+
+networks:
+  ledger-internal:
+    ipam:
+      config:
+        - subnet: ${LEDGER_INTERNAL_SUBNET:-10.251.250.0/24}
