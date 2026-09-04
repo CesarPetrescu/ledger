@@ -80,6 +80,7 @@ func (s *eventStream) listen(ctx context.Context) error {
 	if _, err := conn.Exec(ctx, `LISTEN ledger_admin_event`); err != nil {
 		return err
 	}
+	s.broadcast()
 	for {
 		_, err := conn.Conn().WaitForNotification(ctx)
 		if err != nil {
