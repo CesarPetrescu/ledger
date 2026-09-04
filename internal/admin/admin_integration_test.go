@@ -99,6 +99,19 @@ func TestCommittedChangesReachAuthenticatedWebSockets(t *testing.T) {
 	if err != nil || !strings.Contains(string(payload), `"entity":"*"`) {
 		t.Fatalf("live event = %q, %v", payload, err)
 	}
+	if _, err := db.RevokeAdminSessions(ctx); err != nil {
+		t.Fatal(err)
+	}
+	revokedCtx, cancelRevoked := context.WithTimeout(ctx, 5*time.Second)
+	defer cancelRevoked()
+	for {
+		if _, _, err := connection.Read(revokedCtx); err != nil {
+			if revokedCtx.Err() != nil {
+				t.Fatal("revoked session kept receiving live events")
+			}
+			break
+		}
+	}
 }
 
 func TestLoginIssuesHardenedCookieAndSessionLifecycle(t *testing.T) {

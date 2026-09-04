@@ -94,6 +94,13 @@ func (s *eventStream) serve(origin string, w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusForbidden, "origin not allowed")
 		return
 	}
+	session, ok := r.Context().Value(sessionKey{}).(store.AdminSession)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	sessionCtx, cancelSession := context.WithDeadline(r.Context(), session.ExpiresAt)
+	defer cancelSession()
 	// Origin is checked above against the configured public URL, including scheme and port.
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: []string{origin}})
 	if err != nil {
@@ -101,7 +108,7 @@ func (s *eventStream) serve(origin string, w http.ResponseWriter, r *http.Reques
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
-	ctx := conn.CloseRead(r.Context())
+	ctx := conn.CloseRead(sessionCtx)
 	updates, unsubscribe := s.subscribe()
 	defer unsubscribe()
 	heartbeat := time.NewTicker(25 * time.Second)
@@ -113,6 +120,9 @@ func (s *eventStream) serve(origin string, w http.ResponseWriter, r *http.Reques
 		case <-ctx.Done():
 			return
 		case <-updates:
+			if _, err := s.db.LookupAdminSession(ctx, session.ID); err != nil {
+				return
+			}
 			payload = changeEvent
 		case <-heartbeat.C:
 		}

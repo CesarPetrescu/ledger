@@ -492,6 +492,7 @@ label > textarea {
   border-top: 1px solid var(--border);
 }
 .sidebar-live { min-height: 28px; }
+.mobile-signout { display: none; }
 
 .content {
   grid-area: main;
@@ -718,6 +719,7 @@ label > textarea {
   .search-trigger { min-width: var(--control); width: var(--control); padding: 0; }
   .search-trigger span,
   .search-trigger kbd { display: none; }
+  .mobile-signout { display: inline-flex; }
 }
 
 @media (max-width: 620px) {

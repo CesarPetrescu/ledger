@@ -67,6 +67,9 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
           <span>Search</span>
           <kbd>{isMac ? '⌘K' : 'Ctrl K'}</kbd>
         </button>
+        <button type="button" className="icon-button mobile-signout" aria-label="End session" title="Sign out" disabled={signingOut} onClick={() => void handleSignOut()}>
+          <Icon name="logout" />
+        </button>
       </header>
       <aside id="sidebar" className="sidebar">
         <div className="brand">
