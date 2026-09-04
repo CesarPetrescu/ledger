@@ -1,7 +1,7 @@
 import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
-import { anonymousSession, authenticatedSession, clients, mockApi, overview, renderApp } from './helpers'
+import { anonymousSession, authenticatedSession, clients, futureSessionExpiry, mockApi, overview, renderApp } from './helpers'
 
 describe('authenticated shell and routing', () => {
   it('renders navigation, routes by path, and signs out with CSRF', async () => {
@@ -59,7 +59,7 @@ describe('authenticated shell and routing', () => {
   it('shows the sign-in panel for deep links without a session and returns there after sign-in', async () => {
     mockApi({
       'GET /admin/api/session': anonymousSession,
-      'POST /admin/api/login': { body: { csrf_token: 'csrf-new', expires_at: '2026-09-04T20:00:00Z' } },
+      'POST /admin/api/login': { body: { csrf_token: 'csrf-new', expires_at: futureSessionExpiry() } },
       'GET /admin/api/oauth/clients': { body: { clients } },
     })
     renderApp('/admin/clients')

@@ -1,7 +1,7 @@
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
-import { anonymousSession, authenticatedSession, mockApi, overview, renderApp } from './helpers'
+import { anonymousSession, authenticatedSession, futureSessionExpiry, mockApi, overview, renderApp } from './helpers'
 
 describe('login', () => {
   it('shows a compact password-only sign-in when there is no session', async () => {
@@ -50,7 +50,7 @@ describe('login', () => {
   it('submits with Enter, shows a busy state, and lands on the overview', async () => {
     const { calls } = mockApi({
       'GET /admin/api/session': anonymousSession,
-      'POST /admin/api/login': { body: { csrf_token: 'csrf-new', expires_at: '2026-09-04T20:00:00Z' } },
+      'POST /admin/api/login': { body: { csrf_token: 'csrf-new', expires_at: futureSessionExpiry() } },
       'GET /admin/api/overview': { body: overview },
     })
     renderApp()

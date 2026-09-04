@@ -42,7 +42,11 @@ export function renderApp(path = '/admin/') {
   return render(<App />)
 }
 
-export const authenticatedSession = { status: 200, body: { authenticated: true, csrf_token: 'csrf-123', expires_at: '2026-09-04T20:00:00Z' } }
+export function futureSessionExpiry() {
+  return new Date(Date.now() + 60 * 60 * 1000).toISOString()
+}
+
+export const authenticatedSession = { status: 200, body: { authenticated: true, csrf_token: 'csrf-123', expires_at: futureSessionExpiry() } }
 export const anonymousSession = { status: 401, body: { error: 'unauthenticated' } }
 
 export const atlas: Project = {
