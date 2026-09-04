@@ -3,9 +3,11 @@
 package admin
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -59,6 +61,108 @@ func authed(s session, mutating bool) map[string]string {
 		headers["X-CSRF-Token"] = s.csrf
 	}
 	return headers
+}
+
+func TestHandoffAdminFlowUploadsPublishesAndListsProjectFiles(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "ledger", Name: "Ledger", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
+	_, signedIn := login(t, server, "correct horse", "")
+	created := request(t, server, http.MethodPost, "/admin/api/handoffs", `{"title":"Backend handoff","description":"For the next agent","scope":"ledger","project_slug":"ledger","body":"Continue the implementation.","target":"Claude","draft":true}`, authed(signedIn, true))
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create handoff = %d %s", created.Code, created.Body.String())
+	}
+	var payload struct {
+		Handoff struct {
+			ID string `json:"id"`
+		} `json:"handoff"`
+		Messages []struct {
+			ID string `json:"id"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &payload); err != nil || payload.Handoff.ID == "" || len(payload.Messages) != 1 {
+		t.Fatalf("created handoff = %s, %v", created.Body.String(), err)
+	}
+
+	var upload bytes.Buffer
+	writer := multipart.NewWriter(&upload)
+	part, err := writer.CreateFormFile("file", "notes.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = part.Write([]byte("attachment body"))
+	_ = writer.Close()
+	req := httptest.NewRequest(http.MethodPost, "/admin/api/handoff-messages/"+payload.Messages[0].ID+"/files", &upload)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Cookie", signedIn.cookie)
+	req.Header.Set("Origin", testPublicURL)
+	req.Header.Set("X-CSRF-Token", signedIn.csrf)
+	res := httptest.NewRecorder()
+	server.ServeHTTP(res, req)
+	if res.Code != http.StatusCreated {
+		t.Fatalf("upload = %d %s", res.Code, res.Body.String())
+	}
+	var file struct {
+		ID        string `json:"id"`
+		HandoffID string `json:"handoff_id"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &file); err != nil || file.ID == "" || file.HandoffID != payload.Handoff.ID {
+		t.Fatalf("uploaded file = %s, %v", res.Body.String(), err)
+	}
+
+	published := request(t, server, http.MethodPost, "/admin/api/handoff-messages/"+payload.Messages[0].ID+"/actions", `{"action":"publish"}`, authed(signedIn, true))
+	var publishedPayload struct {
+		WorkState string `json:"work_state"`
+		Files     []struct {
+			Filename  string `json:"filename"`
+			HandoffID string `json:"handoff_id"`
+		} `json:"files"`
+	}
+	if err := json.Unmarshal(published.Body.Bytes(), &publishedPayload); err != nil || published.Code != http.StatusOK || publishedPayload.WorkState != "ready" || len(publishedPayload.Files) != 1 || publishedPayload.Files[0].Filename != "notes.txt" || publishedPayload.Files[0].HandoffID != payload.Handoff.ID {
+		t.Fatalf("publish = %d %s", published.Code, published.Body.String())
+	}
+	missing := request(t, server, http.MethodPost, "/admin/api/handoffs/999999/messages", `{"body":"missing parent"}`, authed(signedIn, true))
+	if missing.Code != http.StatusNotFound || !strings.Contains(missing.Body.String(), "handoff item not found") {
+		t.Fatalf("append missing handoff = %d %s", missing.Code, missing.Body.String())
+	}
+	listed := request(t, server, http.MethodGet, "/admin/api/handoffs?q=backend", "", authed(signedIn, false))
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), `"title":"Backend handoff"`) {
+		t.Fatalf("list = %d %s", listed.Code, listed.Body.String())
+	}
+	if invalid := request(t, server, http.MethodGet, "/admin/api/handoffs?target="+strings.Repeat("t", 101), "", authed(signedIn, false)); invalid.Code != http.StatusBadRequest {
+		t.Fatalf("long target filter = %d %s", invalid.Code, invalid.Body.String())
+	}
+	projectFiles := request(t, server, http.MethodGet, "/admin/api/projects/ledger/files", "", authed(signedIn, false))
+	if projectFiles.Code != http.StatusOK || !strings.Contains(projectFiles.Body.String(), `"filename":"notes.txt"`) {
+		t.Fatalf("project files = %d %s", projectFiles.Code, projectFiles.Body.String())
+	}
+	download := request(t, server, http.MethodGet, "/admin/api/handoff-files/"+file.ID, "", authed(signedIn, false))
+	if download.Code != http.StatusOK || download.Body.String() != "attachment body" || !strings.HasPrefix(download.Header().Get("Content-Disposition"), "attachment;") {
+		t.Fatalf("download = %d %q %#v", download.Code, download.Body.String(), download.Header())
+	}
+}
+
+func TestHandoffExportIncludesMoreThanTenThousandMessages(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	detail, err := db.CreateHandoff(ctx,
+		store.Handoff{Title: "Large handoff", Source: "agent", ClientID: "client"},
+		store.HandoffMessage{Body: "oldest-message-must-survive", WorkState: "ready", Source: "agent", ClientID: "client"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO handoff_message(handoff_id,body,work_state,source,client_id,status_updated_source,status_updated_client_id)
+SELECT $1,'message-'||n,'ready','agent','client','agent','client' FROM generate_series(1,10000) n`, detail.Handoff.ID); err != nil {
+		t.Fatal(err)
+	}
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
+	_, signedIn := login(t, server, "correct horse", "")
+	exported := request(t, server, http.MethodGet, "/admin/api/handoffs/"+strconv.FormatInt(detail.Handoff.ID, 10)+"/export", "", authed(signedIn, false))
+	if exported.Code != http.StatusOK || !strings.Contains(exported.Body.String(), "oldest-message-must-survive") || !strings.Contains(exported.Body.String(), "message-10000") {
+		t.Fatalf("export = %d, bytes=%d", exported.Code, exported.Body.Len())
+	}
 }
 
 func TestCommittedChangesReachAuthenticatedWebSockets(t *testing.T) {

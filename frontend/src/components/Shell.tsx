@@ -6,11 +6,12 @@ import { useToast } from './Toast'
 import { Icon, formatRelative, type IconName } from './ui'
 import { useLiveUpdates } from '../live'
 
-const NAV: { to: string; label: string; icon: IconName; match: (path: string) => boolean }[] = [
+const NAV: { to: string; label: string; icon: IconName; match: (path: string) => boolean; mobileHidden?: boolean }[] = [
   { to: '/', label: 'Overview', icon: 'home', match: (path) => path === '/' },
   { to: '/projects', label: 'Projects', icon: 'projects', match: (path) => path.startsWith('/projects') },
   { to: '/calendar', label: 'Calendar', icon: 'calendar', match: (path) => path === '/calendar' },
-  { to: '/search', label: 'Search', icon: 'search', match: (path) => path === '/search' },
+  { to: '/handoffs', label: 'Handoffs', icon: 'handoffs', match: (path) => path.startsWith('/handoffs') },
+  { to: '/search', label: 'Search', icon: 'search', match: (path) => path === '/search', mobileHidden: true },
   { to: '/clients', label: 'Agents', icon: 'clients', match: (path) => path === '/clients' },
 ]
 
@@ -79,7 +80,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
         </div>
         <nav aria-label="Primary" className="primary-nav">
           {NAV.map((item) => (
-            <Link key={item.to} to={item.to} aria-current={item.match(path) ? 'page' : undefined}>
+            <Link key={item.to} to={item.to} className={item.mobileHidden ? 'mobile-hidden' : undefined} aria-current={item.match(path) ? 'page' : undefined}>
               <Icon name={item.icon} />
               {item.label}
             </Link>

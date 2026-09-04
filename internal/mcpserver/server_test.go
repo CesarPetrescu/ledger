@@ -33,6 +33,8 @@ func TestToolsListIsExactAndAnnotated(t *testing.T) {
 	want := map[string]bool{
 		"list_projects": true, "get_project": true, "search": true, "upsert_project": false, "append_entry": false,
 		"list_calendars": true, "list_calendar_events": true, "create_calendar_event": false, "update_calendar_event": false, "delete_calendar_event": false,
+		"list_handoffs": true, "get_handoff": true, "create_handoff": false, "append_handoff_message": false,
+		"update_handoff_message": false, "attach_handoff_file": false, "read_handoff_file": true,
 	}
 	if len(result.Tools) != len(want) {
 		t.Fatalf("got %d tools", len(result.Tools))
@@ -48,6 +50,8 @@ func TestToolsListIsExactAndAnnotated(t *testing.T) {
 			if tool.Annotations.OpenWorldHint == nil || !*tool.Annotations.OpenWorldHint {
 				t.Errorf("calendar tool %q must declare open-world access", tool.Name)
 			}
+		} else if strings.Contains(tool.Name, "handoff") {
+			suffix = HandoffDescriptionSuffix
 		}
 		if !strings.HasSuffix(tool.Description, suffix) {
 			t.Errorf("tool %q description missing required suffix", tool.Name)

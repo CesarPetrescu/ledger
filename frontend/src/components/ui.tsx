@@ -6,6 +6,8 @@ import {
   IconArrowRight,
   IconBook2,
   IconCalendarEvent,
+  IconClipboardText,
+  IconCopy,
   IconEye,
   IconEyeOff,
   IconFolder,
@@ -15,6 +17,7 @@ import {
   IconLogout,
   IconMenu2,
   IconPlus,
+  IconPaperclip,
   IconRefresh,
   IconSearch,
   IconWifi,
@@ -24,7 +27,7 @@ import {
   type IconProps,
 } from '@tabler/icons-react'
 
-export type IconName = 'eye' | 'eye-off' | 'menu' | 'close' | 'search' | 'arrow' | 'filter' | 'logout' | 'plus' | 'alert' | 'back' | 'refresh' | 'book' | 'home' | 'projects' | 'calendar' | 'clients' | 'external' | 'trash' | 'live' | 'offline'
+export type IconName = 'eye' | 'eye-off' | 'menu' | 'close' | 'search' | 'arrow' | 'filter' | 'logout' | 'plus' | 'alert' | 'back' | 'refresh' | 'book' | 'home' | 'projects' | 'calendar' | 'handoffs' | 'copy' | 'paperclip' | 'clients' | 'external' | 'trash' | 'live' | 'offline'
 
 const icons: Record<IconName, ComponentType<IconProps>> = {
   eye: IconEye,
@@ -43,6 +46,9 @@ const icons: Record<IconName, ComponentType<IconProps>> = {
   home: IconHome,
   projects: IconFolder,
   calendar: IconCalendarEvent,
+  handoffs: IconClipboardText,
+  copy: IconCopy,
+  paperclip: IconPaperclip,
   clients: IconKey,
   external: IconExternalLink,
   trash: IconTrash,

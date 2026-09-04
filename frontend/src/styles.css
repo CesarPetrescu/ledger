@@ -270,6 +270,18 @@ textarea:focus { border-color: var(--accent); outline: 3px solid rgba(23, 105, 2
 input::placeholder,
 textarea::placeholder { color: var(--text-faint); }
 textarea { min-height: 108px; resize: vertical; }
+input::file-selector-button {
+  min-height: 30px;
+  margin: -4px 10px -4px -7px;
+  padding: 0 10px;
+  border: 0;
+  border-right: 1px solid var(--border-strong);
+  background: var(--surface-soft);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
 
 label {
   display: flex;
@@ -648,6 +660,60 @@ label > textarea {
 .composer-row label { width: 170px; }
 .counter { white-space: nowrap; }
 .timeline-section > .panel-title { margin-bottom: 6px; }
+.detail-tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--border); }
+.detail-tabs a { padding: 9px 2px 10px; border-bottom: 2px solid transparent; color: var(--text-muted); font-weight: 600; }
+.detail-tabs a:hover { color: var(--text); }
+.detail-tabs a[aria-current='page'] { border-bottom-color: var(--accent); color: var(--accent); }
+.project-related > .section-title { margin-bottom: 14px; }
+.project-related > ul { border-top: 1px solid var(--border); }
+.project-related li { border-bottom: 1px solid var(--border); }
+.project-related li > a { display: grid; gap: 4px; padding: 15px 8px; color: var(--text); }
+.project-related li > a:hover { background: var(--surface-soft); }
+.project-related li span { overflow-wrap: anywhere; }
+
+/* Handoffs */
+.handoff-filter-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.handoff-list { border-top: 1px solid var(--border); }
+.handoff-list li { border-bottom: 1px solid var(--border); }
+.handoff-list a { display: grid; gap: 5px; padding: 16px 10px 16px 13px; border-left: 3px solid transparent; color: var(--text); }
+.handoff-list a:hover { background: var(--surface-soft); }
+.handoff-list a[aria-current='page'] { border-left-color: var(--accent); background: var(--surface-accent); }
+.handoff-list strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.handoff-list .clamp { color: var(--text-muted); font-size: 0.78rem; -webkit-line-clamp: 2; }
+.handoff-list-meta { color: var(--text-faint); font-size: 0.7rem; }
+.handoff-counts { display: flex; flex-wrap: wrap; gap: 5px 10px; margin-top: 3px; color: var(--text-muted); font-size: 0.68rem; }
+.handoff-counts [data-status='blocked'] { color: var(--danger); }
+.handoff-counts [data-status='ready'] { color: var(--accent); }
+.handoff-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin: 0; }
+.handoff-summary div { padding-bottom: 18px; border-bottom: 1px solid var(--border); }
+.handoff-summary dt { margin-bottom: 6px; color: var(--text-faint); font-size: 0.68rem; font-weight: 650; letter-spacing: 0.07em; text-transform: uppercase; }
+.handoff-summary dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.handoff-thread > ol { border-top: 1px solid var(--border); }
+.handoff-message { padding: 22px 4px; border-bottom: 1px solid var(--border); }
+.handoff-message > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.handoff-message-meta,
+.handoff-message-states,
+.message-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px 11px; }
+.handoff-message-meta { color: var(--text-muted); font-size: 0.74rem; }
+.handoff-message-meta strong { color: var(--text); }
+.handoff-message-states { justify-content: flex-end; }
+.handoff-badge[data-kind='delivery'][data-status='unseen'] { background: #fff3dc; color: #94600a; }
+.handoff-badge[data-kind='delivery'][data-status='seen'],
+.handoff-badge[data-status='done'] { background: #edf6ed; color: #347044; }
+.handoff-badge[data-status='ready'] { background: #e9f1ff; color: #145fc8; }
+.handoff-badge[data-status='in_progress'] { background: #f2eafd; color: #7052a0; }
+.handoff-badge[data-status='blocked'] { background: var(--danger-soft); color: var(--danger); }
+.handoff-body { max-width: 80ch; margin: 18px 0; white-space: pre-wrap; overflow-wrap: anywhere; color: #293449; line-height: 1.65; }
+.handoff-files { margin: 0 0 15px; border-block: 1px solid var(--border); }
+.handoff-files li { display: flex; align-items: center; gap: 9px; min-height: 42px; padding: 6px 8px; border: 0; }
+.handoff-files li + li { border-top: 1px solid var(--border); }
+.handoff-files a { min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
+.handoff-files .link-button { margin-left: auto; }
+.draft-upload { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 9px; margin: 14px 0; padding: 14px; border-left: 3px solid var(--warning); background: #fffaf0; }
+.draft-upload .field-error { grid-column: 1 / -1; }
+.message-actions { justify-content: flex-end; }
+.message-actions .btn-quiet { margin-right: auto; }
+.message-actions .btn { min-height: 36px; padding-inline: 11px; font-size: 0.75rem; }
 
 /* Search */
 .search-page { width: min(100%, 1080px); }
@@ -837,6 +903,7 @@ label > textarea {
   .sidebar .brand,
   .sidebar-foot { display: none; }
   .primary-nav { display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px; }
+  .primary-nav .mobile-hidden { display: none; }
   .primary-nav a { flex-direction: column; justify-content: center; gap: 2px; min-height: 56px; padding: 3px; font-size: 0.65rem; }
   .primary-nav a[aria-current='page'] { background: transparent; }
   .primary-nav svg { width: 20px; height: 20px; }
@@ -894,6 +961,14 @@ label > textarea {
   .form-actions .muted { flex-basis: 100%; margin-right: 0; }
   .form-actions .btn { flex: 1; }
   .detail-head .btn { width: 100%; }
+  .handoff-filter-row,
+  .handoff-summary { grid-template-columns: 1fr; }
+  .handoff-summary { gap: 14px; }
+  .handoff-message > header { flex-direction: column; }
+  .handoff-message-states { justify-content: flex-start; }
+  .draft-upload { grid-template-columns: 1fr; }
+  .message-actions .btn { flex: 1; }
+  .message-actions .btn-quiet { flex-basis: 100%; margin-right: 0; }
 
   .search-query-row { grid-template-columns: minmax(0, 1fr) 46px; gap: 10px; }
   .search-query-row input { min-height: 46px; font-size: 1.125rem; }

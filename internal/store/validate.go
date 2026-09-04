@@ -12,12 +12,14 @@ import (
 const (
 	maxContextHeaderRunes = 200
 	maxEntryBodyRunes     = 4000
+	maxHandoffBodyRunes   = 100000
 )
 
 var (
 	projectSlugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,63}$`)
 	Tiers              = []string{"focus", "maintain", "park"}
 	EntryKinds         = []string{"decision", "note", "todo", "status"}
+	HandoffWorkStates  = []string{"draft", "ready", "in_progress", "blocked", "done"}
 )
 
 func ValidateProjectSlug(slug string) error {
@@ -61,6 +63,35 @@ func ValidateEntry(kind, body string) error {
 	}
 	if length := utf8.RuneCountInString(body); length == 0 || length > maxEntryBodyRunes {
 		return fmt.Errorf("body must be 1 to %d characters", maxEntryBodyRunes)
+	}
+	return nil
+}
+
+func ValidateHandoff(title, description, scope string) error {
+	if err := ValidateContextHeader("title", title, true); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(description) > 2000 {
+		return fmt.Errorf("description must be at most 2000 characters")
+	}
+	if utf8.RuneCountInString(scope) > 500 {
+		return fmt.Errorf("scope must be at most 500 characters")
+	}
+	return nil
+}
+
+func ValidateHandoffMessage(body, target, workState string) error {
+	if length := utf8.RuneCountInString(body); length == 0 || length > maxHandoffBodyRunes {
+		return fmt.Errorf("body must be 1 to %d characters", maxHandoffBodyRunes)
+	}
+	if err := ValidateContextHeader("target", target, false); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(target) > 100 {
+		return fmt.Errorf("target must be at most 100 characters on one line")
+	}
+	if !slices.Contains(HandoffWorkStates, workState) {
+		return fmt.Errorf("work_state must be one of %s", strings.Join(HandoffWorkStates, ", "))
 	}
 	return nil
 }

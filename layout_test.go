@@ -258,6 +258,7 @@ func TestEdgeProxyRoutesAdminSameOriginAndKeepsInternalRoutesPrivate(t *testing.
 		"location = / { return 302 /admin/; }",
 		"location = /admin { return 302 /admin/; }",
 		"absolute_redirect off;",
+		"client_max_body_size 40m;",
 		"location ^~ /admin/api",
 		"proxy_pass http://ledger-admin:8084",
 		"location ^~ /admin/",

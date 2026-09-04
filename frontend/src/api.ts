@@ -148,6 +148,83 @@ export interface CalendarEventInput {
   description?: string
 }
 
+export type HandoffWorkState = 'draft' | 'ready' | 'in_progress' | 'blocked' | 'done'
+export type HandoffDeliveryState = 'unseen' | 'seen'
+
+export interface Handoff {
+  id: string
+  project_slug: string
+  project_name: string
+  title: string
+  description: string
+  scope: string
+  source: string
+  client_id?: string
+  created_at: string
+  updated_at: string
+  archived_at?: string
+  draft_count: number
+  ready_count: number
+  in_progress_count: number
+  blocked_count: number
+  done_count: number
+}
+
+export interface HandoffFile {
+  id: string
+  message_id: string
+  handoff_id?: string
+  handoff_title?: string
+  filename: string
+  media_type: string
+  size_bytes: number
+  sha256: string
+  created_at: string
+}
+
+export interface HandoffMessage {
+  id: string
+  handoff_id: string
+  body: string
+  target: string
+  delivery_state: HandoffDeliveryState
+  work_state: HandoffWorkState
+  source: string
+  client_id?: string
+  seen_at?: string
+  seen_source?: string
+  seen_client_id?: string
+  claimed_at?: string
+  claimed_source?: string
+  claimed_client_id?: string
+  status_updated_at: string
+  status_updated_source: string
+  status_updated_client_id?: string
+  created_at: string
+  files: HandoffFile[]
+}
+
+export interface HandoffDetail {
+  handoff: Handoff
+  messages: HandoffMessage[]
+  next_before?: string
+}
+
+export interface HandoffPage {
+  handoffs: Handoff[]
+  next_before?: string
+}
+
+export interface HandoffCreateInput {
+  project_slug?: string
+  title: string
+  description: string
+  scope: string
+  body: string
+  target?: string
+  draft: boolean
+}
+
 export interface Session {
   csrf_token: string
   expires_at: string
@@ -186,7 +263,7 @@ export function onUnauthorized(listener: () => void): () => void {
 
 async function request<T>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' }
-  if (body !== undefined) {
+  if (body !== undefined && !(body instanceof FormData)) {
     headers['Content-Type'] = 'application/json'
   }
   if (method !== 'GET') {
@@ -194,7 +271,7 @@ async function request<T>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: strin
   }
   const init: RequestInit = { method, headers, credentials: 'same-origin', cache: 'no-store' }
   if (body !== undefined) {
-    init.body = JSON.stringify(body)
+    init.body = body instanceof FormData ? body : JSON.stringify(body)
   }
   let response: Response
   try {
@@ -215,6 +292,16 @@ async function request<T>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: strin
     throw new ApiError(response.status, response.status < 500 && serverMessage ? serverMessage : GENERIC_FAILURE)
   }
   return data as T
+}
+
+async function requestText(path: string): Promise<string> {
+  const response = await fetch(`/admin/api${path}`, { headers: { Accept: 'text/markdown' }, credentials: 'same-origin', cache: 'no-store' })
+  if (response.status === 401) {
+    for (const listener of unauthorizedListeners) listener()
+    throw new UnauthorizedError()
+  }
+  if (!response.ok) throw new ApiError(response.status, GENERIC_FAILURE)
+  return response.text()
 }
 
 export const api = {
@@ -242,6 +329,24 @@ export const api = {
   createCalendarEvent: (calendarId: string, input: CalendarEventInput) => request<CalendarEvent>('POST', '/calendar/events', { calendar_id: calendarId, ...input }),
   updateCalendarEvent: (id: string, etag: string, input: CalendarEventInput) => request<CalendarEvent>('PUT', `/calendar/events/${encodeURIComponent(id)}`, { etag, ...input }),
   deleteCalendarEvent: (id: string, etag: string) => request<void>('DELETE', `/calendar/events/${encodeURIComponent(id)}`, { etag }),
+  listHandoffs: (params: { q?: string; project?: string; status?: string; archive?: string; target?: string; before?: string } = {}) => {
+    const query = new URLSearchParams()
+    for (const [key, value] of Object.entries(params)) if (value) query.set(key, value)
+    return request<HandoffPage>('GET', `/handoffs${query.size ? `?${query}` : ''}`)
+  },
+  getHandoff: (id: string, before?: string) => request<HandoffDetail>('GET', `/handoffs/${encodeURIComponent(id)}?messages=50${before ? `&before=${encodeURIComponent(before)}` : ''}`),
+  createHandoff: (input: HandoffCreateInput) => request<HandoffDetail>('POST', '/handoffs', input),
+  saveHandoff: (id: string, input: Pick<HandoffCreateInput, 'project_slug' | 'title' | 'description' | 'scope'>) => request<Handoff>('PUT', `/handoffs/${encodeURIComponent(id)}`, input),
+  appendHandoffMessage: (id: string, input: { body: string; target?: string; draft: boolean }) => request<HandoffMessage>('POST', `/handoffs/${encodeURIComponent(id)}/messages`, input),
+  updateHandoffMessage: (id: string, action: string, target = '') => request<HandoffMessage>('POST', `/handoff-messages/${encodeURIComponent(id)}/actions`, { action, target }),
+  uploadHandoffFile: (messageId: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request<HandoffFile>('POST', `/handoff-messages/${encodeURIComponent(messageId)}/files`, form)
+  },
+  deleteHandoffFile: (id: string) => request<void>('DELETE', `/handoff-files/${encodeURIComponent(id)}`),
+  listProjectFiles: (slug: string) => request<{ files: HandoffFile[] }>('GET', `/projects/${encodeURIComponent(slug)}/files`).then((response) => response.files),
+  exportHandoff: (id: string) => requestText(`/handoffs/${encodeURIComponent(id)}/export`),
 }
 
 export function describeError(error: unknown): string {
