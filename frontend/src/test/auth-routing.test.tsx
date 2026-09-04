@@ -29,6 +29,23 @@ describe('authenticated shell and routing', () => {
     expect(new Headers(logout?.init.headers).get('X-CSRF-Token')).toBe('csrf-123')
   })
 
+  it('keeps the authenticated shell and reports an error when sign-out fails', async () => {
+    mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/oauth/clients': { body: { clients } },
+      'POST /admin/api/logout': { status: 500, body: { error: 'internal detail must stay hidden' } },
+    })
+    renderApp('/admin/clients')
+    expect(await screen.findByRole('heading', { name: /oauth clients/i })).toBeInTheDocument()
+
+    await userEvent.setup().click(screen.getByRole('button', { name: /sign out/i }))
+
+    expect(await screen.findByRole('heading', { name: /oauth clients/i })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /operator sign-in/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('status', { name: /notifications/i })).toHaveTextContent(/server could not complete the request/i)
+    expect(screen.getByRole('status', { name: /notifications/i })).not.toHaveTextContent(/internal detail/i)
+  })
+
   it('drops to the sign-in panel with an expiry notice when the API answers 401 mid-session', async () => {
     mockApi({
       'GET /admin/api/session': authenticatedSession,

@@ -1,6 +1,6 @@
 x-service-env: &service-env
   LEDGER_PUBLIC_URL: ${LEDGER_PUBLIC_URL:?set LEDGER_PUBLIC_URL}
-  LEDGER_DATABASE_URL: postgres://ledger:${LEDGER_POSTGRES_PASSWORD}@postgres:5432/ledger?sslmode=disable
+  LEDGER_DATABASE_URL: postgres://ledger:${LEDGER_POSTGRES_PASSWORD:?set LEDGER_POSTGRES_PASSWORD}@postgres:5432/ledger?sslmode=disable
 
 x-common-env: &common-env
   <<: *service-env

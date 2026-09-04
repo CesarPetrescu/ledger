@@ -1,6 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react'
+import { describeError } from '../api'
 import { useAuth } from '../auth'
 import { Link, navigate, useLocation } from '../router'
+import { useToast } from './Toast'
 import { Icon, formatRelative } from './ui'
 
 const NAV = [
@@ -19,6 +21,8 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
   const { state, signOut } = useAuth()
   const { path } = useLocation()
   const [navOpen, setNavOpen] = useState(false)
+  const [signingOut, setSigningOut] = useState(false)
+  const toast = useToast()
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -35,6 +39,16 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
 
   const expires = state.status === 'authenticated' ? state.expiresAt : ''
   const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
+  const handleSignOut = async () => {
+    setSigningOut(true)
+    try {
+      await signOut()
+    } catch (failure) {
+      toast(describeError(failure), 'error')
+    } finally {
+      setSigningOut(false)
+    }
+  }
 
   return (
     <div className="shell" data-nav-open={navOpen || undefined}>
@@ -70,8 +84,8 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
               Session ends <time dateTime={expires}>{formatRelative(expires)}</time>
             </p>
           )}
-          <button type="button" className="btn btn-quiet" onClick={() => void signOut()}>
-            <Icon name="logout" /> Sign out
+          <button type="button" className="btn btn-quiet" disabled={signingOut} onClick={() => void handleSignOut()}>
+            <Icon name="logout" /> {signingOut ? 'Signing out…' : 'Sign out'}
           </button>
         </div>
       </aside>

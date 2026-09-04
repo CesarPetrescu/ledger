@@ -26,15 +26,15 @@ function TierTable({ tier, projects }: { tier: string; projects: Project[] }) {
         <tbody>
           {projects.map((project) => (
             <tr key={project.slug}>
-              <td>
+              <td data-label="Project">
                 <Link to={`/projects/${project.slug}`}>{project.name}</Link>
               </td>
-              <td>
+              <td data-label="Slug">
                 <code>{project.slug}</code>
               </td>
-              <td className="num">{project.hours_wk}</td>
-              <td>{project.deadline || <span className="muted">—</span>}</td>
-              <td>{project.last_entry_at ? <Timestamp iso={project.last_entry_at} /> : <span className="muted">none</span>}</td>
+              <td data-label="Hours per week" className="num">{project.hours_wk}</td>
+              <td data-label="Deadline">{project.deadline || <span className="muted">—</span>}</td>
+              <td data-label="Last entry">{project.last_entry_at ? <Timestamp iso={project.last_entry_at} /> : <span className="muted">none</span>}</td>
             </tr>
           ))}
         </tbody>

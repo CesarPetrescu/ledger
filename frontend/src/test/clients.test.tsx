@@ -17,6 +17,8 @@ describe('oauth clients', () => {
     expect(rows[1]).toHaveTextContent('Client ID metadata')
     expect(rows[1]).toHaveTextContent('https://app.example/client.json')
     expect(table.textContent).not.toMatch(/hash|secret|refresh_token/i)
+    const firstRowCells = within(rows[0]!).getAllByRole('cell')
+    expect(firstRowCells.map((cell) => cell.getAttribute('data-label'))).toEqual(['Name', 'Type', 'Client ID', 'Redirect URIs', 'Created', 'Last used', 'Active tokens', 'Actions'])
   })
 
   it('requires explicit confirmation before revoking and reports the result', async () => {

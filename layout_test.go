@@ -219,6 +219,17 @@ func TestOnlyTheEdgeProxyPublishesAHostPort(t *testing.T) {
 	}
 }
 
+func TestComposeUsesTheConfiguredPostgresPassword(t *testing.T) {
+	services := loadCompose(t)
+	want := "postgres://ledger:${LEDGER_POSTGRES_PASSWORD:?set LEDGER_POSTGRES_PASSWORD}@postgres:5432/ledger?sslmode=disable"
+	for _, name := range []string{"ledger-auth", "ledger-mcp", "ledger-index", "ledger-admin"} {
+		got := fmt.Sprint(services[name].Environment["LEDGER_DATABASE_URL"])
+		if got != want {
+			t.Errorf("%s LEDGER_DATABASE_URL = %q, want configured password interpolation", name, got)
+		}
+	}
+}
+
 func TestEdgeProxyRoutesAdminSameOriginAndKeepsInternalRoutesPrivate(t *testing.T) {
 	body, err := os.ReadFile("nginx.conf")
 	if err != nil {

@@ -49,11 +49,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const signOut = useCallback(async () => {
-    try {
-      await api.logout()
-    } catch {
-      // The server session may already be gone; the client forgets it regardless.
-    }
+    await api.logout()
     setCsrfToken(null)
     setState({ status: 'anonymous', notice: 'signed-out' })
   }, [])

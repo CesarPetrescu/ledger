@@ -17,6 +17,8 @@ describe('overview', () => {
     expect(within(counts).getByText('Admin sessions').nextElementSibling).toHaveTextContent('1')
     const focus = screen.getByRole('region', { name: /^focus/i })
     expect(within(focus).getByRole('link', { name: /atlas/i })).toHaveAttribute('href', '/admin/projects/atlas')
+    const projectCells = within(focus).getAllByRole('cell')
+    expect(projectCells.map((cell) => cell.getAttribute('data-label'))).toEqual(['Project', 'Slug', 'Hours per week', 'Deadline', 'Last entry'])
     const park = screen.getByRole('region', { name: /^park/i })
     expect(within(park).getByRole('link', { name: /beacon/i })).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: /^maintain/i })).not.toBeInTheDocument()

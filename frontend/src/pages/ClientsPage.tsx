@@ -64,12 +64,12 @@ export function ClientsPage() {
           <tbody>
             {clients.data.map((client) => (
               <tr key={client.client_id}>
-                <td>{client.client_name || <span className="muted">unnamed</span>}</td>
-                <td>{KIND_LABEL[client.kind]}</td>
-                <td>
+                <td data-label="Name">{client.client_name || <span className="muted">unnamed</span>}</td>
+                <td data-label="Type">{KIND_LABEL[client.kind]}</td>
+                <td data-label="Client ID">
                   <code className="break">{client.client_id}</code>
                 </td>
-                <td>
+                <td data-label="Redirect URIs">
                   <ul className="plain">
                     {client.redirect_uris.map((uri) => (
                       <li key={uri}>
@@ -78,14 +78,14 @@ export function ClientsPage() {
                     ))}
                   </ul>
                 </td>
-                <td>
+                <td data-label="Created">
                   <Timestamp iso={client.created_at} />
                 </td>
-                <td>
+                <td data-label="Last used">
                   <Timestamp iso={client.last_used_at} />
                 </td>
-                <td className="num">{client.active_access_tokens}</td>
-                <td>
+                <td data-label="Active tokens" className="num">{client.active_access_tokens}</td>
+                <td data-label="Actions">
                   <button type="button" className="btn btn-danger-quiet" onClick={() => setTarget(client)}>
                     Revoke tokens
                   </button>

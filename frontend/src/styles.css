@@ -1178,7 +1178,15 @@ label > textarea {
   }
 
   .table thead {
-    display: none;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 
   .table tr {
@@ -1188,9 +1196,21 @@ label > textarea {
   }
 
   .table td {
-    display: block;
+    display: grid;
+    grid-template-columns: minmax(7rem, 0.45fr) minmax(0, 1fr);
+    gap: 12px;
     border: 0;
-    padding: 2px 0;
+    padding: 5px 0;
+    text-align: left;
+  }
+
+  .table td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
   }
 
   .table td.num {
