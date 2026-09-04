@@ -26,6 +26,9 @@ describe('live updates', () => {
     const socket = FakeWebSocket.instances.at(-1)!
 
     expect(socket.url).toBe('ws://localhost:3000/admin/api/events')
+    socket.onopen?.({} as Event)
+    expect(changed).toHaveBeenCalledWith('*')
+    changed.mockClear()
     socket.onmessage?.({ data: '{"type":"heartbeat"}' } as MessageEvent)
     socket.onmessage?.({ data: '{"type":"change","entity":"*"}' } as MessageEvent)
     expect(changed).toHaveBeenCalledWith('*')

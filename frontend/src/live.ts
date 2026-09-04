@@ -33,7 +33,9 @@ function connect(currentGeneration: number) {
   }
   socket = next
   next.onopen = () => {
-    if (currentGeneration === generation) setStatus('live')
+    if (currentGeneration !== generation) return
+    setStatus('live')
+    for (const listener of changeListeners) listener('*')
   }
   next.onmessage = (event) => {
     if (typeof event.data !== 'string' || event.data.includes('"heartbeat"')) return
