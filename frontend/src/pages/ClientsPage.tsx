@@ -6,9 +6,11 @@ import { EmptyState, ErrorState, Loading, StaleNotice, Timestamp } from '../comp
 import { useResource } from '../hooks/useResource'
 
 const KIND_LABEL: Record<Client['kind'], string> = { dcr: 'Dynamic registration', cimd: 'Client ID metadata' }
+const PAGE_SIZE = 50
 
 export function ClientsPage() {
-  const clients = useResource(() => api.listClients(), 'clients')
+  const [offset, setOffset] = useState(0)
+  const page = useResource(() => api.listClients(offset), `clients:${offset}`)
   const [target, setTarget] = useState<Client | null>(null)
   const [busy, setBusy] = useState(false)
   const toast = useToast()
@@ -20,7 +22,7 @@ export function ClientsPage() {
       const result = await api.revokeClient(target.client_id)
       toast(`Revoked ${result.revoked} tokens.`)
       setTarget(null)
-      clients.reload()
+      page.reload()
     } catch (failure) {
       toast(describeError(failure), 'error')
     } finally {
@@ -34,15 +36,16 @@ export function ClientsPage() {
         <h1>OAuth clients</h1>
         <p className="muted">Registered MCP clients and their live credentials. Secrets and token hashes are never shown.</p>
       </header>
-      {clients.loading && <Loading label="Loading clients…" />}
-      {!clients.loading && !clients.data && <ErrorState message="Couldn't load OAuth clients." onRetry={clients.reload} />}
-      {clients.stale && <StaleNotice message="Client list may be out of date." onRetry={clients.reload} />}
-      {clients.data && clients.data.length === 0 && (
+      {page.loading && <Loading label="Loading clients…" />}
+      {!page.loading && !page.data && <ErrorState message="Couldn't load OAuth clients." onRetry={page.reload} />}
+      {page.stale && <StaleNotice message="Client list may be out of date." onRetry={page.reload} />}
+      {page.data && page.data.clients.length === 0 && (
         <EmptyState>
           <p>No OAuth clients registered.</p>
         </EmptyState>
       )}
-      {clients.data && clients.data.length > 0 && (
+      {page.data && page.data.clients.length > 0 && (
+        <>
         <table className="table clients">
           <caption className="visually-hidden">OAuth clients</caption>
           <thead>
@@ -62,7 +65,7 @@ export function ClientsPage() {
             </tr>
           </thead>
           <tbody>
-            {clients.data.map((client) => (
+            {page.data.clients.map((client) => (
               <tr key={client.client_id}>
                 <td data-label="Name">{client.client_name || <span className="muted">unnamed</span>}</td>
                 <td data-label="Type">{KIND_LABEL[client.kind]}</td>
@@ -94,6 +97,19 @@ export function ClientsPage() {
             ))}
           </tbody>
         </table>
+        <nav className="form-actions" aria-label="Client pages">
+          {offset > 0 && (
+            <button type="button" className="btn" onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>
+              Previous page
+            </button>
+          )}
+          {page.data.next_offset !== undefined && (
+            <button type="button" className="btn" onClick={() => setOffset(page.data!.next_offset!)}>
+              Next page
+            </button>
+          )}
+        </nav>
+        </>
       )}
       <ConfirmDialog open={target !== null} title={`Revoke tokens for ${target?.client_name || target?.client_id || ''}?`} confirmLabel="Revoke" busy={busy} onCancel={() => setTarget(null)} onConfirm={() => void revoke()}>
         <p>Every active access and refresh token for this client stops working immediately. The client can authorize again through the normal OAuth flow.</p>

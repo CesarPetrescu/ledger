@@ -104,6 +104,11 @@ export interface Client {
   active_access_tokens: number
 }
 
+export interface ClientPage {
+  clients: Client[]
+  next_offset?: number
+}
+
 export interface Session {
   csrf_token: string
   expires_at: string
@@ -183,7 +188,7 @@ export const api = {
   saveProject: (slug: string, input: ProjectInput) => request<Project>('PUT', `/projects/${encodeURIComponent(slug)}`, input),
   appendEntry: (slug: string, kind: string, body: string) => request<Entry>('POST', `/projects/${encodeURIComponent(slug)}/entries`, { kind, body }),
   search: (input: SearchRequest) => request<SearchResponse>('POST', '/search', input),
-  listClients: () => request<{ clients: Client[] }>('GET', '/oauth/clients').then((r) => r.clients),
+  listClients: (offset = 0) => request<ClientPage>('GET', `/oauth/clients?limit=50&offset=${offset}`),
   revokeClient: (clientId: string) => request<{ revoked: number }>('POST', '/oauth/revoke', { client_id: clientId }),
 }
 

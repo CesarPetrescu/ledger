@@ -51,4 +51,19 @@ describe('oauth clients', () => {
     renderApp('/admin/clients')
     expect(await screen.findByText(/no oauth clients registered/i)).toBeInTheDocument()
   })
+
+  it('navigates bounded client pages', async () => {
+    const { calls } = mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/oauth/clients': [{ body: { clients: [clients[0]], next_offset: 50 } }, { body: { clients: [clients[1]] } }],
+    })
+    renderApp('/admin/clients')
+    expect(await screen.findByText('Agent One')).toBeInTheDocument()
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: /next page/i }))
+    expect(await screen.findByText('Desk app')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /previous page/i })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: /next page/i })).not.toBeInTheDocument()
+    expect(calls.some((call) => call.url.search === '?limit=50&offset=50')).toBe(true)
+  })
 })

@@ -295,6 +295,39 @@ func TestProjectsEntriesOverviewAndClientsThroughTheAPI(t *testing.T) {
 	}
 }
 
+func TestClientListIsBoundedAndPaginated(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
+	_, s := login(t, server, "correct horse", "")
+	for _, id := range []string{"client-a", "client-b", "client-c"} {
+		if _, err := db.PutClient(ctx, store.OAuthClient{ClientID: id, Kind: "dcr", Name: id, RedirectURIs: []string{"http://127.0.0.1/cb"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var first struct {
+		Clients    []clientSummary `json:"clients"`
+		NextOffset *int            `json:"next_offset"`
+	}
+	res := request(t, server, http.MethodGet, "/admin/api/oauth/clients?limit=2&offset=0", "", authed(s, false))
+	if err := json.Unmarshal(res.Body.Bytes(), &first); err != nil || res.Code != http.StatusOK || len(first.Clients) != 2 || first.NextOffset == nil || *first.NextOffset != 2 {
+		t.Fatalf("first client page = %d %s", res.Code, res.Body.String())
+	}
+	var second struct {
+		Clients    []clientSummary `json:"clients"`
+		NextOffset *int            `json:"next_offset"`
+	}
+	res = request(t, server, http.MethodGet, "/admin/api/oauth/clients?limit=2&offset=2", "", authed(s, false))
+	if err := json.Unmarshal(res.Body.Bytes(), &second); err != nil || res.Code != http.StatusOK || len(second.Clients) != 1 || second.Clients[0].ClientID != "client-c" || second.NextOffset != nil {
+		t.Fatalf("second client page = %d %s", res.Code, res.Body.String())
+	}
+	for _, path := range []string{"/admin/api/oauth/clients?limit=101", "/admin/api/oauth/clients?limit=0", "/admin/api/oauth/clients?offset=-1"} {
+		if res := request(t, server, http.MethodGet, path, "", authed(s, false)); res.Code != http.StatusBadRequest {
+			t.Errorf("invalid pagination %s = %d", path, res.Code)
+		}
+	}
+}
+
 func TestSearchAddsProvenanceFiltersAndDegradesGracefully(t *testing.T) {
 	db, ctx := testdb.Open(t)
 	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {

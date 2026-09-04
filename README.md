@@ -41,7 +41,7 @@ Only nginx publishes a host port. PostgreSQL, the indexing service, the admin AP
 ## Requirements
 
 - Docker with Compose for the supported stack workflow
-- Alternatively, Go 1.25, Node.js 24, and PostgreSQL 16 with `vector` and `unaccent` for a native deployment
+- Alternatively, Go 1.26 or newer, Node.js 24, and PostgreSQL 16 with `vector` and `unaccent` for a native deployment
 - An HTTPS reverse proxy for production; the admin console sets `Secure` cookies and will not work over plain HTTP except on `localhost`
 - An OpenAI-compatible embeddings endpoint and a Jina/Cohere-style reranking endpoint
 
@@ -203,7 +203,7 @@ Back up authoritative data with PostgreSQL tooling. Search chunks are derivable 
 
 ```sh
 docker compose exec -T postgres \
-  pg_dump -U ledger -d ledger --exclude-table=chunk --exclude-table=chunk_dirty --exclude-table=admin_session \
+  pg_dump -U ledger -d ledger --exclude-table=chunk --exclude-table=chunk_dirty --exclude-table-data=admin_session \
   > ledger.sql
 
 docker compose exec -T postgres psql -U ledger -d ledger < ledger.sql

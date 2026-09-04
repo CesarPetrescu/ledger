@@ -61,6 +61,23 @@ func (db *DB) ListClients(ctx context.Context) ([]OAuthClient, error) {
 	return out, rows.Err()
 }
 
+func (db *DB) ListClientsPage(ctx context.Context, limit, offset int) ([]OAuthClient, error) {
+	rows, err := db.Pool.Query(ctx, `SELECT client_id,kind,redirect_uris,name,created_at,last_used_at FROM oauth_client ORDER BY created_at,client_id LIMIT $1 OFFSET $2`, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]OAuthClient, 0, limit)
+	for rows.Next() {
+		var c OAuthClient
+		if err := rows.Scan(&c.ClientID, &c.Kind, &c.RedirectURIs, &c.Name, &c.CreatedAt, &c.LastUsedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
 func (db *DB) Revoke(ctx context.Context, clientID string, all bool) (int64, error) {
 	if all {
 		result, err := db.Pool.Exec(ctx, `UPDATE oauth_token SET revoked=true WHERE NOT revoked`)

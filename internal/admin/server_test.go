@@ -2,10 +2,12 @@ package admin
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cesarpetrescu/ledger/internal/oauth"
 )
@@ -183,10 +185,39 @@ func TestLoginRequestRateLimitAppliesBeforePasswordVerification(t *testing.T) {
 	}
 }
 
+func TestCrossOriginLoginDoesNotConsumeRequestQuota(t *testing.T) {
+	server := newTestServer(t, "correct horse")
+	for i := 0; i < 20; i++ {
+		res := request(t, server, http.MethodPost, "/admin/api/login", `{}`, map[string]string{"Origin": "https://evil.example", "X-Ledger-Client-IP": "198.51.100.79"})
+		if res.Code != http.StatusForbidden {
+			t.Fatalf("cross-origin request %d = %d", i+1, res.Code)
+		}
+	}
+	res := request(t, server, http.MethodPost, "/admin/api/login", `{}`, map[string]string{"Origin": testPublicURL, "X-Ledger-Client-IP": "198.51.100.79"})
+	if res.Code != http.StatusUnauthorized {
+		t.Fatalf("first same-origin request = %d, want 401; body=%s", res.Code, res.Body.String())
+	}
+}
+
+func TestLoginFailsClosedWhenFailureLimiterIsAtCapacity(t *testing.T) {
+	server := newTestServer(t, "correct horse")
+	for i := 0; i < 10_000; i++ {
+		if !server.failures.Allow(fmt.Sprintf("occupied-%d", i), 4, 15*time.Minute) {
+			t.Fatalf("failed to fill failure limiter at key %d", i)
+		}
+	}
+	res := request(t, server, http.MethodPost, "/admin/api/login", `{"password":"wrong"}`, map[string]string{"Origin": testPublicURL, "X-Ledger-Client-IP": "198.51.100.78"})
+	if res.Code != http.StatusTooManyRequests || res.Header().Get("Retry-After") != "900" {
+		t.Fatalf("capacity failure = %d retry=%q body=%s", res.Code, res.Header().Get("Retry-After"), res.Body.String())
+	}
+}
+
 func TestPublicOriginIsDerivedFromPublicURL(t *testing.T) {
 	for input, want := range map[string]string{
 		"https://ledger.example.com":           "https://ledger.example.com",
 		"https://ledger.example.com/":          "https://ledger.example.com",
+		"https://ledger.example.com:443/base":  "https://ledger.example.com",
+		"http://ledger.example.com:80/base":    "http://ledger.example.com",
 		"https://ledger.example.com:8443/base": "https://ledger.example.com:8443",
 		"HTTPS://Ledger.Example.com/":          "https://ledger.example.com",
 	} {

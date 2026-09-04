@@ -16,6 +16,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -39,6 +40,8 @@ const (
 	defaultEntries = 100
 	maxEntries     = 500
 	maxSearchRunes = 1000
+	defaultClients = 50
+	maxClients     = 100
 )
 
 type Config struct {
@@ -92,7 +95,19 @@ func publicOrigin(publicURL string) string {
 	if err != nil || u.Scheme == "" || u.Host == "" {
 		panic("LEDGER_PUBLIC_URL must be an absolute URL")
 	}
-	return strings.ToLower(u.Scheme) + "://" + strings.ToLower(u.Host)
+	scheme := strings.ToLower(u.Scheme)
+	hostname := strings.ToLower(u.Hostname())
+	port := u.Port()
+	if (scheme == "https" && port == "443") || (scheme == "http" && port == "80") {
+		port = ""
+	}
+	host := hostname
+	if port != "" {
+		host = net.JoinHostPort(hostname, port)
+	} else if strings.Contains(hostname, ":") {
+		host = "[" + hostname + "]"
+	}
+	return scheme + "://" + host
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -162,14 +177,14 @@ func plausibleToken(value string) bool {
 }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Origin") != s.origin {
+		writeError(w, http.StatusForbidden, "origin not allowed")
+		return
+	}
 	ip := oauth.RealIP(r, s.trusted)
 	if !s.requests.Allow("login:"+ip, 20, time.Minute) {
 		w.Header().Set("Retry-After", "60")
 		writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
-		return
-	}
-	if r.Header.Get("Origin") != s.origin {
-		writeError(w, http.StatusForbidden, "origin not allowed")
 		return
 	}
 	var input struct {
@@ -186,7 +201,11 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !oauth.VerifyPassword(s.config.PasswordHash, input.Password) {
-		s.failures.Allow(failureKey, 4, 15*time.Minute)
+		if !s.failures.Allow(failureKey, 4, 15*time.Minute) {
+			w.Header().Set("Retry-After", "900")
+			writeError(w, http.StatusTooManyRequests, "too many failed logins")
+			return
+		}
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
@@ -487,13 +506,39 @@ type clientSummary struct {
 }
 
 func (s *Server) listClients(w http.ResponseWriter, r *http.Request) {
+	limit := defaultClients
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > maxClients {
+			writeError(w, http.StatusBadRequest, "limit must be between 1 and "+strconv.Itoa(maxClients))
+			return
+		}
+		limit = parsed
+	}
+	offset := 0
+	if raw := r.URL.Query().Get("offset"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 {
+			writeError(w, http.StatusBadRequest, "offset must be a non-negative integer")
+			return
+		}
+		offset = parsed
+	}
 	ctx := r.Context()
-	clients, err := s.db.ListClients(ctx)
+	clients, err := s.db.ListClientsPage(ctx, limit+1, offset)
 	if err != nil {
 		s.internalError(w, r, err)
 		return
 	}
-	tokens, err := s.db.ActiveTokenCounts(ctx)
+	hasMore := len(clients) > limit
+	if hasMore {
+		clients = clients[:limit]
+	}
+	ids := make([]string, len(clients))
+	for i, client := range clients {
+		ids[i] = client.ClientID
+	}
+	tokens, err := s.db.ActiveTokenCountsForClients(ctx, ids)
 	if err != nil {
 		s.internalError(w, r, err)
 		return
@@ -502,7 +547,11 @@ func (s *Server) listClients(w http.ResponseWriter, r *http.Request) {
 	for i, client := range clients {
 		summaries[i] = clientSummary{OAuthClient: client, ActiveAccessTokens: tokens[client.ClientID]}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"clients": summaries})
+	response := map[string]any{"clients": summaries}
+	if hasMore {
+		response["next_offset"] = offset + len(clients)
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) revokeClient(w http.ResponseWriter, r *http.Request) {

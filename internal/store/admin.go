@@ -139,3 +139,25 @@ func (db *DB) ActiveTokenCounts(ctx context.Context) (map[string]int, error) {
 	}
 	return out, rows.Err()
 }
+
+// ActiveTokenCountsForClients bounds the aggregation to one operator-console page.
+func (db *DB) ActiveTokenCountsForClients(ctx context.Context, clientIDs []string) (map[string]int, error) {
+	out := map[string]int{}
+	if len(clientIDs) == 0 {
+		return out, nil
+	}
+	rows, err := db.Pool.Query(ctx, `SELECT client_id,count(*) FROM oauth_token WHERE kind='access' AND NOT revoked AND expires_at>now() AND client_id=ANY($1) GROUP BY client_id`, clientIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var count int
+		if err := rows.Scan(&id, &count); err != nil {
+			return nil, err
+		}
+		out[id] = count
+	}
+	return out, rows.Err()
+}
