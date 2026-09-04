@@ -35,7 +35,7 @@ describe('overview', () => {
     })
     renderApp()
     expect(await screen.findByText(/no projects yet/i)).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /create a project/i })).toHaveAttribute('href', '/admin/projects/new')
+    expect(screen.getByRole('link', { name: /create a project/i })).toHaveAttribute('href', '/admin/projects/_new')
     expect(screen.getByText(/no memory activity yet/i)).toBeInTheDocument()
   })
 

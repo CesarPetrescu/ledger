@@ -2,6 +2,7 @@ import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { atlas, authenticatedSession, beacon, mockApi, renderApp, searchResponse } from './helpers'
+import { navigate } from '../router'
 
 describe('search', () => {
   it('runs a query with filters and renders ranked results with provenance', async () => {
@@ -66,5 +67,31 @@ describe('search', () => {
     await user.click(screen.getByRole('button', { name: /^search$/i }))
     expect(calls.filter((call) => call.method === 'POST')).toHaveLength(0)
     expect(screen.getByText(/type a query/i)).toBeInTheDocument()
+  })
+
+  it('synchronizes the search draft when history navigation changes the query', async () => {
+    mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/projects': { body: { projects: [atlas, beacon] } },
+      'POST /admin/api/search': [{ body: searchResponse }, { body: { hits: [], degraded: [] } }, { body: searchResponse }],
+    })
+    renderApp('/admin/search?q=postgres&project=atlas&kind=decision')
+    expect(await screen.findByRole('list', { name: /results/i })).toBeInTheDocument()
+
+    const user = userEvent.setup()
+    const input = screen.getByLabelText(/search memory/i)
+    await user.clear(input)
+    await user.type(input, 'beacon')
+    await user.selectOptions(screen.getByLabelText(/^project$/i), 'beacon')
+    await user.selectOptions(screen.getByLabelText(/^kind$/i), 'note')
+    await user.click(screen.getByRole('button', { name: /^search$/i }))
+    expect(await screen.findByText(/no results for “beacon”/i)).toBeInTheDocument()
+
+    navigate('/search?q=postgres&project=atlas&kind=decision')
+
+    expect(await screen.findByRole('list', { name: /results/i })).toBeInTheDocument()
+    expect(screen.getByLabelText(/search memory/i)).toHaveValue('postgres')
+    expect(screen.getByLabelText(/^project$/i)).toHaveValue('atlas')
+    expect(screen.getByLabelText(/^kind$/i)).toHaveValue('decision')
   })
 })

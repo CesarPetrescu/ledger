@@ -45,7 +45,7 @@ export function useResource<T>(load: () => Promise<T>, key = ''): Resource<T> {
     return () => {
       active = false
     }
-  }, [request])
+  }, [request, key])
 
   const current = settled.request === request
   const sameKey = settled.request.slice(0, settled.request.lastIndexOf('#')) === key

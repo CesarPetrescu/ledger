@@ -62,6 +62,7 @@ describe('project browser', () => {
     await waitFor(() => expect(within(timeline).getAllByRole('listitem')).toHaveLength(3))
     expect(within(timeline).getAllByRole('listitem')[0]).toHaveTextContent('Write the runbook')
     expect(within(composer).getByLabelText(/body/i)).toHaveValue('')
+    expect(within(screen.getByRole('list', { name: /projects/i })).getByRole('link', { name: /atlas/i }).querySelector('time')).toHaveAttribute('datetime', '2026-09-04T08:00:00Z')
   })
 
   it('creates a project through the form and shows server validation errors', async () => {
@@ -74,7 +75,7 @@ describe('project browser', () => {
       ],
       'GET /admin/api/projects/orbit': { body: { project: { ...beacon, slug: 'orbit', name: 'Orbit', tier: 'maintain', hours_wk: 4 }, entries: [] } },
     })
-    renderApp('/admin/projects/new')
+    renderApp('/admin/projects/_new')
     const user = userEvent.setup()
     const form = await screen.findByRole('form', { name: /new project/i })
     await user.type(within(form).getByLabelText(/^slug/i), 'orbit')
@@ -94,11 +95,12 @@ describe('project browser', () => {
   })
 
   it('edits an existing project in place', async () => {
+    const savedAtlas = Object.fromEntries(Object.entries({ ...atlas, goal: 'Ship v2' }).filter(([key]) => key !== 'last_entry_at'))
     const { calls } = mockApi({
       'GET /admin/api/session': authenticatedSession,
       'GET /admin/api/projects': { body: { projects: [atlas] } },
       'GET /admin/api/projects/atlas': { body: atlasDetail },
-      'PUT /admin/api/projects/atlas': { body: { ...atlas, goal: 'Ship v2' } },
+      'PUT /admin/api/projects/atlas': { body: savedAtlas },
     })
     renderApp('/admin/projects/atlas')
     await screen.findByRole('heading', { name: 'Atlas', level: 1 })
@@ -117,6 +119,19 @@ describe('project browser', () => {
     expect(body).not.toHaveProperty('slug')
     expect(body).not.toHaveProperty('updated_at')
     expect(body).not.toHaveProperty('last_entry_at')
+    expect(within(screen.getByRole('list', { name: /projects/i })).getByRole('link', { name: /atlas/i }).querySelector('time')).toHaveAttribute('datetime', atlas.last_entry_at)
+  })
+
+  it('opens a project whose slug is new instead of the create form', async () => {
+    const newProject = { ...atlas, slug: 'new', name: 'New Project' }
+    mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/projects': { body: { projects: [newProject] } },
+      'GET /admin/api/projects/new': { body: { project: newProject, entries: [] } },
+    })
+    renderApp('/admin/projects/new')
+    expect(await screen.findByRole('heading', { name: 'New Project', level: 1 })).toBeInTheDocument()
+    expect(screen.queryByRole('form', { name: /new project/i })).not.toBeInTheDocument()
   })
 
   it('shows a not-found state for unknown projects', async () => {

@@ -202,7 +202,7 @@ const META_FIELDS: { key: keyof Project; label: string }[] = [
   { key: 'stack', label: 'Stack' },
 ]
 
-function ProjectDetail({ slug, onSaved }: { slug: string; onSaved: (project: Project) => void }) {
+function ProjectDetail({ slug, onSaved, onEntryAppended }: { slug: string; onSaved: (project: Project) => void; onEntryAppended: (entry: Entry) => void }) {
   const detail = useResource(() => api.getProject(slug), `project:${slug}`)
   const [editing, setEditing] = useState(false)
   const toast = useToast()
@@ -260,7 +260,13 @@ function ProjectDetail({ slug, onSaved }: { slug: string; onSaved: (project: Pro
           ))}
         </ul>
       )}
-      <Composer slug={project.slug} onAppended={(entry) => detail.update((current) => ({ ...current, entries: [entry, ...current.entries] }))} />
+      <Composer
+        slug={project.slug}
+        onAppended={(entry) => {
+          detail.update((current) => ({ ...current, entries: [entry, ...current.entries] }))
+          onEntryAppended(entry)
+        }}
+      />
       <section aria-labelledby="timeline-title" className="timeline-section">
         <h2 id="timeline-title" className="panel-title">
           Timeline <span className="count">{entries.length}</span>
@@ -299,7 +305,14 @@ export function ProjectsPage({ slug }: { slug?: string | undefined }) {
     return (list.data ?? []).filter((project) => (tier === 'all' || project.tier === tier) && (needle === '' || project.name.toLowerCase().includes(needle) || project.slug.includes(needle)))
   }, [list.data, filter, tier])
 
-  const upsertInList = (saved: Project) => list.update((projects) => [saved, ...projects.filter((project) => project.slug !== saved.slug)].sort((a, b) => a.slug.localeCompare(b.slug)))
+  const upsertInList = (saved: Project) =>
+    list.update((projects) => {
+      const existing = projects.find((project) => project.slug === saved.slug)
+      const merged = existing && saved.last_entry_at === undefined && existing.last_entry_at !== undefined ? { ...saved, last_entry_at: existing.last_entry_at } : saved
+      return [merged, ...projects.filter((project) => project.slug !== saved.slug)].sort((a, b) => a.slug.localeCompare(b.slug))
+    })
+  const updateLastEntry = (entry: Entry) =>
+    list.update((projects) => projects.map((project) => (project.slug === entry.slug ? { ...project, last_entry_at: entry.created_at } : project)))
   const mode = slug ? 'detail' : 'list'
 
   return (
@@ -307,7 +320,7 @@ export function ProjectsPage({ slug }: { slug?: string | undefined }) {
       <section className="pane pane-list" aria-label="Project list">
         <header className="page-head">
           <h1>Projects</h1>
-          <Link to="/projects/new" className="btn btn-primary">
+          <Link to="/projects/_new" className="btn btn-primary">
             <Icon name="plus" /> New project
           </Link>
         </header>
@@ -346,7 +359,7 @@ export function ProjectsPage({ slug }: { slug?: string | undefined }) {
         )}
       </section>
       <section className="pane pane-detail" aria-label="Project inspector">
-        {slug === 'new' ? (
+        {slug === '_new' ? (
           <>
             <Link to="/projects" className="back-link">
               <Icon name="back" /> Projects
@@ -361,7 +374,7 @@ export function ProjectsPage({ slug }: { slug?: string | undefined }) {
             />
           </>
         ) : slug ? (
-          <ProjectDetail key={slug} slug={slug} onSaved={upsertInList} />
+          <ProjectDetail key={slug} slug={slug} onSaved={upsertInList} onEntryAppended={updateLastEntry} />
         ) : (
           <EmptyState>
             <p>Select a project to inspect its record and timeline.</p>

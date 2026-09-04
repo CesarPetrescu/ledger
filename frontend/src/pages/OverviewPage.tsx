@@ -83,7 +83,7 @@ export function OverviewPage() {
           {grouped.length === 0 ? (
             <EmptyState>
               <p>No projects yet.</p>
-              <Link className="btn btn-primary" to="/projects/new">
+              <Link className="btn btn-primary" to="/projects/_new">
                 Create a project
               </Link>
             </EmptyState>

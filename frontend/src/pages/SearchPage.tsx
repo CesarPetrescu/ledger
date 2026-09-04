@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { api, ENTRY_KINDS, type SearchRequest } from '../api'
+import { api, ENTRY_KINDS, type Project, type SearchRequest } from '../api'
 import { ErrorState, KindBadge, Loading, Timestamp } from '../components/ui'
 import { useResource } from '../hooks/useResource'
 import { Link, navigate, useLocation } from '../router'
@@ -47,15 +47,10 @@ function Results({ request }: { request: SearchRequest }) {
   )
 }
 
-export function SearchPage() {
-  const { query } = useLocation()
-  const q = query.get('q') ?? ''
-  const project = query.get('project') ?? ''
-  const kind = query.get('kind') ?? ''
+function SearchContent({ q, project, kind, projects }: { q: string; project: string; kind: string; projects: Project[] }) {
   const [draft, setDraft] = useState({ q, project, kind })
   const [hint, setHint] = useState(false)
   const [nonce, setNonce] = useState(0)
-  const projects = useResource(() => api.listProjects(), 'projects')
 
   const submit = (event: FormEvent) => {
     event.preventDefault()
@@ -92,7 +87,7 @@ export function SearchPage() {
             Project
             <select value={draft.project} onChange={(event) => setDraft({ ...draft, project: event.target.value })}>
               <option value="">All projects</option>
-              {(projects.data ?? []).map((item) => (
+              {projects.map((item) => (
                 <option key={item.slug} value={item.slug}>
                   {item.name}
                 </option>
@@ -117,4 +112,14 @@ export function SearchPage() {
       {request && <Results key={`${JSON.stringify(request)}#${nonce}`} request={request} />}
     </>
   )
+}
+
+export function SearchPage() {
+  const { query } = useLocation()
+  const q = query.get('q') ?? ''
+  const project = query.get('project') ?? ''
+  const kind = query.get('kind') ?? ''
+  const projects = useResource(() => api.listProjects(), 'projects')
+  const locationKey = JSON.stringify([q, project, kind])
+  return <SearchContent key={locationKey} q={q} project={project} kind={kind} projects={projects.data ?? []} />
 }
