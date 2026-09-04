@@ -34,7 +34,12 @@ export function useResource<T>(load: () => Promise<T>, key = ''): Resource<T> {
         if (active) setSettled({ request, data })
       },
       (error: unknown) => {
-        if (active) setSettled((previous) => ({ request, data: previous.data, error: describeError(error) }))
+        if (active)
+          setSettled((previous) => ({
+            request,
+            data: previous.request.slice(0, previous.request.lastIndexOf('#')) === key ? previous.data : undefined,
+            error: describeError(error),
+          }))
       },
     )
     return () => {

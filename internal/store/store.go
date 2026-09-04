@@ -45,9 +45,9 @@ func (db *DB) Migrate(ctx context.Context) error {
 	}
 	for _, file := range files {
 		name := file.Name()
-		version, err := strconv.Atoi(name[:4])
-		if err != nil || len(name) < 5 || name[4] != '_' {
-			return fmt.Errorf("migration %s: name must start with a four digit version", name)
+		version, err := parseMigrationName(name)
+		if err != nil {
+			return err
 		}
 		var applied bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM schema_migration WHERE version=$1)`, version).Scan(&applied); err != nil {
@@ -68,4 +68,15 @@ func (db *DB) Migrate(ctx context.Context) error {
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+func parseMigrationName(name string) (int, error) {
+	if len(name) < 5 || name[4] != '_' {
+		return 0, fmt.Errorf("migration %s: name must start with a four digit version", name)
+	}
+	version, err := strconv.Atoi(name[:4])
+	if err != nil {
+		return 0, fmt.Errorf("migration %s: name must start with a four digit version", name)
+	}
+	return version, nil
 }

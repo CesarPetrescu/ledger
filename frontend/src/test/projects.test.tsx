@@ -112,7 +112,11 @@ describe('project browser', () => {
     expect(await screen.findByRole('status')).toHaveTextContent(/project saved/i)
     const meta = screen.getByRole('list', { name: /project metadata/i })
     expect(within(meta).getByText('Goal').nextElementSibling).toHaveTextContent('Ship v2')
-    expect(calls.find((call) => call.method === 'PUT')?.body).toMatchObject({ goal: 'Ship v2', name: 'Atlas' })
+    const body = calls.find((call) => call.method === 'PUT')?.body
+    expect(body).toMatchObject({ goal: 'Ship v2', name: 'Atlas' })
+    expect(body).not.toHaveProperty('slug')
+    expect(body).not.toHaveProperty('updated_at')
+    expect(body).not.toHaveProperty('last_entry_at')
   })
 
   it('shows a not-found state for unknown projects', async () => {

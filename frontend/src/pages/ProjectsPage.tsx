@@ -17,9 +17,24 @@ interface ProjectFormProps {
 
 const EMPTY: ProjectInput = { name: '', tier: 'focus', hours_wk: 0, type: '', description: '', goal: '', deadline: '', needs_me: '', automate: '', stack: '' }
 
+function editableProject(project: Project): ProjectInput {
+  return {
+    name: project.name,
+    tier: project.tier,
+    hours_wk: project.hours_wk,
+    type: project.type,
+    description: project.description,
+    goal: project.goal,
+    deadline: project.deadline,
+    needs_me: project.needs_me,
+    automate: project.automate,
+    stack: project.stack,
+  }
+}
+
 function ProjectForm({ mode, project, onSaved, onCancel }: ProjectFormProps) {
   const [slug, setSlug] = useState(project?.slug ?? '')
-  const [input, setInput] = useState<ProjectInput>(project ? { ...project } : EMPTY)
+  const [input, setInput] = useState<ProjectInput>(project ? editableProject(project) : EMPTY)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const set = <K extends keyof ProjectInput>(key: K, value: ProjectInput[K]) => setInput((current) => ({ ...current, [key]: value }))
