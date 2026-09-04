@@ -47,3 +47,39 @@ func TestInitialMigrationContract(t *testing.T) {
 		}
 	}
 }
+
+func TestAdminSessionMigrationStoresHashesOnly(t *testing.T) {
+	body, err := Files.ReadFile("0002_admin_session.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToLower(string(body))
+	for _, required := range []string{
+		"create table admin_session",
+		"hash bytea primary key check (octet_length(hash) = 32)",
+		"csrf_token text not null",
+		"created_at timestamptz not null default now()",
+		"expires_at timestamptz not null",
+		"last_seen_at timestamptz not null default now()",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Errorf("admin session migration missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{"session_id", "password", "token bytea", "secret"} {
+		if strings.Contains(sql, forbidden) {
+			t.Errorf("admin session migration stores raw credential column %q", forbidden)
+		}
+	}
+	entries, err := Files.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	if len(names) != 2 || names[0] != "0001_init.sql" || names[1] != "0002_admin_session.sql" {
+		t.Fatalf("migration files = %v, want strictly numbered sequence", names)
+	}
+}

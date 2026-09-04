@@ -5,11 +5,9 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
-	"strings"
 
 	"github.com/cesarpetrescu/ledger/internal/config"
 	"github.com/cesarpetrescu/ledger/internal/oauth"
@@ -23,15 +21,7 @@ func main() {
 	switch os.Args[1] {
 	case "hash-password":
 		fmt.Fprint(os.Stderr, "Password: ")
-		password, err := io.ReadAll(io.LimitReader(os.Stdin, 4097))
-		if err != nil || len(password) > 4096 {
-			log.Fatal("could not read password")
-		}
-		plain := strings.TrimSuffix(strings.TrimSuffix(string(password), "\n"), "\r")
-		if plain == "" {
-			log.Fatal("password must not be empty")
-		}
-		hash, err := oauth.HashPassword(plain)
+		hash, err := oauth.HashPasswordFromReader(os.Stdin)
 		if err != nil {
 			log.Fatal(err)
 		}

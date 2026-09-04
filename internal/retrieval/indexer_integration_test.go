@@ -16,31 +16,8 @@ import (
 	"time"
 
 	"github.com/cesarpetrescu/ledger/internal/store"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
+	"github.com/cesarpetrescu/ledger/internal/testdb"
 )
-
-func indexDB(t *testing.T) (*store.DB, context.Context) {
-	t.Helper()
-	ctx := context.Background()
-	c, err := postgres.Run(ctx, "pgvector/pgvector:pg16", postgres.WithDatabase("ledger"), postgres.WithUsername("ledger"), postgres.WithPassword("ledger"), postgres.BasicWaitStrategies())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = c.Terminate(ctx) })
-	dsn, err := c.ConnectionString(ctx, "sslmode=disable")
-	if err != nil {
-		t.Fatal(err)
-	}
-	db, err := store.Open(ctx, dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(db.Close)
-	if err := db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-	return db, ctx
-}
 
 func fakeInfer(t *testing.T) (*httptest.Server, *atomic.Int64) {
 	t.Helper()
@@ -64,7 +41,7 @@ func fakeInfer(t *testing.T) (*httptest.Server, *atomic.Int64) {
 }
 
 func TestEntryDirtyRebuildIsIdempotentAndProjectEditIsIsolated(t *testing.T) {
-	db, ctx := indexDB(t)
+	db, ctx := testdb.Open(t)
 	infer, embedRequests := fakeInfer(t)
 	defer infer.Close()
 	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus", HoursWK: 8}); err != nil {
@@ -127,7 +104,7 @@ func TestEntryDirtyRebuildIsIdempotentAndProjectEditIsIsolated(t *testing.T) {
 }
 
 func TestConcurrentWorkersProcessEachDirtyRefExactlyOnce(t *testing.T) {
-	db, parent := indexDB(t)
+	db, parent := testdb.Open(t)
 	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
 	defer cancel()
 	const refs = 6
@@ -214,7 +191,7 @@ func TestConcurrentWorkersProcessEachDirtyRefExactlyOnce(t *testing.T) {
 }
 
 func TestIndexerRunReconnectsAfterListenerConnectionLoss(t *testing.T) {
-	db, parent := indexDB(t)
+	db, parent := testdb.Open(t)
 	infer, _ := fakeInfer(t)
 	defer infer.Close()
 	worker := NewIndexer(db, NewInferClient(infer.URL, "qwen3-embedding", "qwen3-reranker", 4096, ""))
@@ -260,7 +237,7 @@ func TestIndexerRunReconnectsAfterListenerConnectionLoss(t *testing.T) {
 }
 
 func TestEmbeddingFailureCommitsFTSAndKeepsDirty(t *testing.T) {
-	db, ctx := indexDB(t)
+	db, ctx := testdb.Open(t)
 	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus", HoursWK: 8}); err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +280,7 @@ func TestEmbeddingFailureCommitsFTSAndKeepsDirty(t *testing.T) {
 }
 
 func TestEmbeddingFailuresDoNotStarveSiblingDirtyRefs(t *testing.T) {
-	db, ctx := indexDB(t)
+	db, ctx := testdb.Open(t)
 	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
 		t.Fatal(err)
 	}

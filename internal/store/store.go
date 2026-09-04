@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"fmt"
+	"io/fs"
+	"strconv"
 
 	"github.com/cesarpetrescu/ledger/migrations"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -24,6 +26,7 @@ func Open(ctx context.Context, dsn string) (*DB, error) {
 
 func (db *DB) Close() { db.Pool.Close() }
 
+// Migrate applies every embedded NNNN_name.sql file in numeric order exactly once.
 func (db *DB) Migrate(ctx context.Context) error {
 	tx, err := db.Pool.Begin(ctx)
 	if err != nil {
@@ -36,19 +39,31 @@ func (db *DB) Migrate(ctx context.Context) error {
 	if _, err := tx.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migration (version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
 		return err
 	}
-	var applied bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM schema_migration WHERE version=$1)`, 1).Scan(&applied); err != nil {
+	files, err := fs.ReadDir(migrations.Files, ".")
+	if err != nil {
 		return err
 	}
-	if !applied {
-		sql, err := migrations.Files.ReadFile("0001_init.sql")
+	for _, file := range files {
+		name := file.Name()
+		version, err := strconv.Atoi(name[:4])
+		if err != nil || len(name) < 5 || name[4] != '_' {
+			return fmt.Errorf("migration %s: name must start with a four digit version", name)
+		}
+		var applied bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM schema_migration WHERE version=$1)`, version).Scan(&applied); err != nil {
+			return err
+		}
+		if applied {
+			continue
+		}
+		sql, err := migrations.Files.ReadFile(name)
 		if err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, string(sql)); err != nil {
-			return fmt.Errorf("migration 1: %w", err)
+			return fmt.Errorf("migration %d: %w", version, err)
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO schema_migration(version) VALUES ($1)`, 1); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO schema_migration(version) VALUES ($1)`, version); err != nil {
 			return err
 		}
 	}

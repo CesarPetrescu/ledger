@@ -18,34 +18,11 @@ import (
 	"time"
 
 	"github.com/cesarpetrescu/ledger/internal/store"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
+	"github.com/cesarpetrescu/ledger/internal/testdb"
 )
 
-func oauthDB(t *testing.T) (*store.DB, context.Context) {
-	t.Helper()
-	ctx := context.Background()
-	c, err := postgres.Run(ctx, "pgvector/pgvector:pg16", postgres.WithDatabase("ledger"), postgres.WithUsername("ledger"), postgres.WithPassword("ledger"), postgres.BasicWaitStrategies())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = c.Terminate(ctx) })
-	dsn, err := c.ConnectionString(ctx, "sslmode=disable")
-	if err != nil {
-		t.Fatal(err)
-	}
-	db, err := store.Open(ctx, dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(db.Close)
-	if err := db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-	return db, ctx
-}
-
 func TestAuthorizationCodeAndRefreshRotationRevokeFamilyOnReuse(t *testing.T) {
-	db, ctx := oauthDB(t)
+	db, ctx := testdb.Open(t)
 	client, err := db.PutClient(ctx, store.OAuthClient{ClientID: "test-client", Kind: "dcr", Name: "Test", RedirectURIs: []string{"http://127.0.0.1:8123/callback"}})
 	if err != nil {
 		t.Fatal(err)
@@ -94,7 +71,7 @@ func TestAuthorizationCodeAndRefreshRotationRevokeFamilyOnReuse(t *testing.T) {
 }
 
 func TestConcurrentRefreshReplayRevokesNewFamilyCredentials(t *testing.T) {
-	db, ctx := oauthDB(t)
+	db, ctx := testdb.Open(t)
 	const clientID = "concurrent-replay-client"
 	const redirectURI = "http://127.0.0.1/callback"
 	if _, err := db.PutClient(ctx, store.OAuthClient{ClientID: clientID, Kind: "dcr", Name: "Concurrent replay", RedirectURIs: []string{redirectURI}}); err != nil {
@@ -161,7 +138,7 @@ func TestConcurrentRefreshReplayRevokesNewFamilyCredentials(t *testing.T) {
 }
 
 func TestGCPreservesAuthorizationCodeReplayTombstoneWhileFamilyIsLive(t *testing.T) {
-	db, ctx := oauthDB(t)
+	db, ctx := testdb.Open(t)
 	client, err := db.PutClient(ctx, store.OAuthClient{ClientID: "gc-code-client", Kind: "dcr", Name: "GC code", RedirectURIs: []string{"http://127.0.0.1/callback"}})
 	if err != nil {
 		t.Fatal(err)
@@ -200,7 +177,7 @@ func TestGCPreservesAuthorizationCodeReplayTombstoneWhileFamilyIsLive(t *testing
 }
 
 func TestGCPreservesRotatedRefreshReplayTombstoneWhileFamilyIsLive(t *testing.T) {
-	db, ctx := oauthDB(t)
+	db, ctx := testdb.Open(t)
 	client, err := db.PutClient(ctx, store.OAuthClient{ClientID: "gc-refresh-client", Kind: "dcr", Name: "GC refresh", RedirectURIs: []string{"http://127.0.0.1/callback"}})
 	if err != nil {
 		t.Fatal(err)
@@ -259,7 +236,7 @@ func exchange(t *testing.T, server http.Handler, form url.Values, status int) to
 }
 
 func TestDCRRFC7591Response(t *testing.T) {
-	db, ctx := oauthDB(t)
+	db, ctx := testdb.Open(t)
 	password, _ := HashPassword("secret")
 	server := NewServer(Config{PublicURL: "https://ledger.example.com", PasswordHash: password}, db)
 	body := `{"redirect_uris":["http://127.0.0.1:8123/callback"],"client_name":"DCR Test"}`
@@ -293,7 +270,7 @@ func TestDCRRFC7591Response(t *testing.T) {
 }
 
 func TestCIMDFetchValidation(t *testing.T) {
-	db, ctx := oauthDB(t)
+	db, ctx := testdb.Open(t)
 	var metadataURL string
 	var redirectFollowed atomic.Bool
 	metadata := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -364,7 +341,7 @@ func TestCIMDFetchValidation(t *testing.T) {
 }
 
 func TestPasswordRateLimitSeparatesProxyClientsAndRejectsDirectSpoofing(t *testing.T) {
-	db, ctx := oauthDB(t)
+	db, ctx := testdb.Open(t)
 	client, err := db.PutClient(ctx, store.OAuthClient{ClientID: "rate-client", Kind: "dcr", Name: "Rate", RedirectURIs: []string{"http://127.0.0.1/callback"}})
 	if err != nil {
 		t.Fatal(err)

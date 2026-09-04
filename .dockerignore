@@ -16,6 +16,8 @@ dist
 /ledger-auth
 /ledger-mcp
 /ledger-index
+/ledger-admin
+frontend
 coverage.*
 *.out
 *.test

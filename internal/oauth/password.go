@@ -4,7 +4,9 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
+	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"golang.org/x/crypto/argon2"
@@ -24,6 +26,19 @@ func HashPassword(password string) (string, error) {
 	}
 	hash := argon2.IDKey([]byte(password), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
 	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s", argon2.Version, argonMemory, argonTime, argonThreads, base64.RawStdEncoding.EncodeToString(salt), base64.RawStdEncoding.EncodeToString(hash)), nil
+}
+
+// HashPasswordFromReader reads one password line of at most 4096 bytes and returns its PHC hash.
+func HashPasswordFromReader(r io.Reader) (string, error) {
+	password, err := io.ReadAll(io.LimitReader(r, 4097))
+	if err != nil || len(password) > 4096 {
+		return "", errors.New("could not read password")
+	}
+	plain := strings.TrimSuffix(strings.TrimSuffix(string(password), "\n"), "\r")
+	if plain == "" {
+		return "", errors.New("password must not be empty")
+	}
+	return HashPassword(plain)
 }
 
 func VerifyPassword(phc, password string) bool {

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type Project struct {
@@ -106,3 +107,15 @@ func (db *DB) AppendEntry(ctx context.Context, slug, kind, body, source, clientI
 }
 
 func IsNotFound(err error) bool { return errors.Is(err, pgx.ErrNoRows) }
+
+func IsForeignKeyViolation(err error) bool { return pgErrorCode(err) == "23503" }
+
+func IsCheckViolation(err error) bool { return pgErrorCode(err) == "23514" }
+
+func pgErrorCode(err error) string {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code
+	}
+	return ""
+}

@@ -34,6 +34,7 @@ Ledger is intended to run behind an HTTPS reverse proxy. Operators are responsib
 - restricting the trusted-proxy CIDR to the actual upstream proxy;
 - preventing direct exposure of PostgreSQL and `ledger-index`;
 - protecting the approval password and rotating it after suspected disclosure;
+- protecting the separate admin password (`LEDGER_ADMIN_PASSWORD_HASH`), serving the console only over HTTPS, and running `ledger-admin revoke-sessions` to invalidate every admin session after rotation or suspected disclosure;
 - revoking OAuth clients after device or credential loss;
 - applying supported Go, container-base, PostgreSQL, and dependency updates;
 - encrypting and access-controlling backups.

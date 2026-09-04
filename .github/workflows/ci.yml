@@ -11,7 +11,7 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
@@ -28,9 +28,56 @@ jobs:
         run: go test -race -count=1 ./...
       - name: Integration tests
         run: go test -tags=integration -count=1 ./...
+      - name: Integration race tests
+        run: go test -tags=integration -race -count=1 ./...
       - name: Vet
         run: go vet ./...
       - name: Vulnerability scan
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
           govulncheck ./...
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install from lockfile
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Tests
+        run: npm test
+      - name: Production build
+        run: npm run build
+      - name: Audit
+        run: npm audit --audit-level=high
+
+  containers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Validate Compose with placeholder values
+        env:
+          LEDGER_PUBLIC_URL: https://ledger.example.com
+          LEDGER_POSTGRES_PASSWORD: placeholder
+          LEDGER_PASSWORD_HASH: $argon2id$v=19$m=65536,t=3,p=2$placeholder$placeholder
+          LEDGER_ADMIN_PASSWORD_HASH: $argon2id$v=19$m=65536,t=3,p=2$placeholder$placeholder
+          LEDGER_TRUSTED_PROXY_CIDR: 203.0.113.0/24
+          LEDGER_INFER_URL: http://inference.example.com/v1
+        run: docker compose config --quiet
+      - name: Build admin image
+        run: docker build --build-arg CMD=ledger-admin -t ledger-admin:ci .
+      - name: Build frontend image
+        run: docker build -f frontend/Dockerfile -t ledger-frontend:ci frontend
