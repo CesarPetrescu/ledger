@@ -79,7 +79,7 @@ func TestAdminSessionMigrationStoresHashesOnly(t *testing.T) {
 	for _, entry := range entries {
 		names = append(names, entry.Name())
 	}
-	if len(names) != 3 || names[0] != "0001_init.sql" || names[1] != "0002_admin_session.sql" || names[2] != "0003_admin_events.sql" {
+	if len(names) != 4 || names[0] != "0001_init.sql" || names[1] != "0002_admin_session.sql" || names[2] != "0003_admin_events.sql" || names[3] != "0004_calendar.sql" {
 		t.Fatalf("migration files = %v, want strictly numbered sequence", names)
 	}
 }
@@ -94,5 +94,21 @@ func TestAdminEventsMigrationCoversEveryLiveSurface(t *testing.T) {
 		if !strings.Contains(sql, required) {
 			t.Errorf("admin events migration missing %q", required)
 		}
+	}
+}
+
+func TestCalendarMigrationStoresEncryptedCredential(t *testing.T) {
+	body, err := Files.ReadFile("0004_calendar.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToLower(string(body))
+	for _, required := range []string{"create table calendar_account", "password_ciphertext bytea", "selected_calendars text[]", "notify_admin_event('calendar')"} {
+		if !strings.Contains(sql, required) {
+			t.Errorf("calendar migration missing %q", required)
+		}
+	}
+	if strings.Contains(sql, "password text") {
+		t.Error("calendar migration must not store a plaintext password")
 	}
 }

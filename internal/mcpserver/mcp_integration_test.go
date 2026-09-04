@@ -134,6 +134,37 @@ func TestWriteOnlyTokenCannotRead(t *testing.T) {
 	}
 }
 
+func TestCalendarScopesAreIndependent(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	addAccess(t, db, ctx, "ledger-only", []string{"ledger:read", "ledger:write"})
+	addAccess(t, db, ctx, "calendar-read", []string{"calendar:read"})
+	addAccess(t, db, ctx, "calendar-write", []string{"calendar:write"})
+	server := httptest.NewServer(HTTPHandler(NewServer(db, "http://unused"), db, "https://ledger.example.com"))
+	defer server.Close()
+
+	call := func(token, tool string, arguments map[string]any) string {
+		t.Helper()
+		result, err := connectMCP(t, server.URL+"/mcp", token, "scope-test").CallTool(ctx, &mcp.CallToolParams{Name: tool, Arguments: arguments})
+		if err != nil || result == nil || !result.IsError || len(result.Content) != 1 {
+			t.Fatalf("%s with %s = %#v, %v", tool, token, result, err)
+		}
+		return result.Content[0].(*mcp.TextContent).Text
+	}
+	if got := call("ledger-only", "list_calendars", map[string]any{}); !strings.Contains(got, "insufficient_scope") {
+		t.Fatalf("ledger token calendar read = %s", got)
+	}
+	if got := call("calendar-read", "list_calendars", map[string]any{}); !strings.Contains(got, "calendar_not_connected") {
+		t.Fatalf("calendar read = %s", got)
+	}
+	event := map[string]any{"calendar_id": "work", "title": "Plan", "start": "2026-09-05T09:00:00Z", "end": "2026-09-05T10:00:00Z", "all_day": false}
+	if got := call("calendar-read", "create_calendar_event", event); !strings.Contains(got, "insufficient_scope") {
+		t.Fatalf("calendar read mutation = %s", got)
+	}
+	if got := call("calendar-write", "create_calendar_event", event); !strings.Contains(got, "calendar_not_connected") {
+		t.Fatalf("calendar write = %s", got)
+	}
+}
+
 func TestMCPContextHeaderValidation(t *testing.T) {
 	db, ctx := testdb.Open(t)
 	addAccess(t, db, ctx, "bounded-token", []string{"ledger:read", "ledger:write"})

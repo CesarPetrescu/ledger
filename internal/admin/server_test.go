@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -67,6 +68,17 @@ func TestEveryEndpointExceptLoginDeniesUnauthenticatedRequests(t *testing.T) {
 		{http.MethodPut, "/admin/api/projects/atlas", `{"name":"Atlas","tier":"focus"}`},
 		{http.MethodPost, "/admin/api/projects/atlas/entries", `{"kind":"note","body":"x"}`},
 		{http.MethodPost, "/admin/api/search", `{"q":"x"}`},
+		{http.MethodGet, "/admin/api/calendar/connection", ""},
+		{http.MethodPost, "/admin/api/calendar/connect", `{"server_url":"https://cloud.example.com"}`},
+		{http.MethodPost, "/admin/api/calendar/connect/flow/poll", ""},
+		{http.MethodDelete, "/admin/api/calendar/connection", ""},
+		{http.MethodGet, "/admin/api/calendar/calendars", ""},
+		{http.MethodPut, "/admin/api/calendar/calendars", `{"ids":[]}`},
+		{http.MethodGet, "/admin/api/calendar/events?start=2026-09-01T00:00:00Z&end=2026-10-01T00:00:00Z", ""},
+		{http.MethodPost, "/admin/api/calendar/events", `{}`},
+		{http.MethodGet, "/admin/api/calendar/events/event", ""},
+		{http.MethodPut, "/admin/api/calendar/events/event", `{}`},
+		{http.MethodDelete, "/admin/api/calendar/events/event", `{}`},
 		{http.MethodGet, "/admin/api/oauth/clients", ""},
 		{http.MethodPost, "/admin/api/oauth/revoke", `{"client_id":"x"}`},
 		{http.MethodGet, "/admin/api/events", ""},
@@ -88,6 +100,24 @@ func TestEveryEndpointExceptLoginDeniesUnauthenticatedRequests(t *testing.T) {
 			if cookie.Name == sessionCookie && cookie.Value != "" {
 				t.Errorf("%s %s issued a session cookie without authentication", route.method, route.path)
 			}
+		}
+	}
+}
+
+func TestCalendarErrorsSeparateInputFromUpstreamFailures(t *testing.T) {
+	server := &Server{}
+	for message, want := range map[string]int{
+		"Nextcloud URL must use HTTPS":      http.StatusBadRequest,
+		"login flow expired; start again":   http.StatusBadRequest,
+		"connect to Nextcloud: unavailable": http.StatusBadGateway,
+	} {
+		res := httptest.NewRecorder()
+		server.calendarError(res, httptest.NewRequest(http.MethodPost, "/admin/api/calendar/connect", nil), errors.New(message))
+		if res.Code != want {
+			t.Errorf("%q = %d, want %d", message, res.Code, want)
+		}
+		if want == http.StatusBadGateway && strings.Contains(res.Body.String(), "connect to Nextcloud") {
+			t.Error("upstream failure detail leaked")
 		}
 	}
 }

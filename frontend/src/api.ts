@@ -110,6 +110,44 @@ export interface ClientPage {
   next_offset?: number
 }
 
+export interface CalendarConnection {
+  connected: boolean
+  server_url?: string
+  username?: string
+  selected_calendars: number
+  connected_at?: string
+}
+
+export interface CalendarSource {
+  id: string
+  name: string
+  description?: string
+  selected: boolean
+}
+
+export interface CalendarEvent {
+  id: string
+  calendar_id: string
+  calendar_name: string
+  title: string
+  start: string
+  end: string
+  all_day: boolean
+  location?: string
+  description?: string
+  etag: string
+  recurring: boolean
+}
+
+export interface CalendarEventInput {
+  title: string
+  start: string
+  end: string
+  all_day: boolean
+  location?: string
+  description?: string
+}
+
 export interface Session {
   csrf_token: string
   expires_at: string
@@ -146,7 +184,7 @@ export function onUnauthorized(listener: () => void): () => void {
   return () => unauthorizedListeners.delete(listener)
 }
 
-async function request<T>(method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown): Promise<T> {
+async function request<T>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' }
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json'
@@ -192,6 +230,18 @@ export const api = {
   search: (input: SearchRequest) => request<SearchResponse>('POST', '/search', input),
   listClients: (offset = 0) => request<ClientPage>('GET', `/oauth/clients?limit=50&offset=${offset}`),
   revokeClient: (clientId: string) => request<{ revoked: number }>('POST', '/oauth/revoke', { client_id: clientId }),
+  getCalendarConnection: () => request<CalendarConnection>('GET', '/calendar/connection'),
+  startCalendarLogin: (serverUrl: string) => request<{ id: string; login_url: string }>('POST', '/calendar/connect', { server_url: serverUrl }),
+  pollCalendarLogin: (id: string) => request<CalendarConnection & { pending?: boolean }>('POST', `/calendar/connect/${encodeURIComponent(id)}/poll`),
+  disconnectCalendar: () => request<void>('DELETE', '/calendar/connection'),
+  listCalendars: () => request<{ calendars: CalendarSource[] }>('GET', '/calendar/calendars').then((response) => response.calendars),
+  selectCalendars: (ids: string[]) => request<{ selected: number }>('PUT', '/calendar/calendars', { ids }),
+  listCalendarEvents: (start: string, end: string, calendarId = '') =>
+    request<{ events: CalendarEvent[] }>('GET', `/calendar/events?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}${calendarId ? `&calendar=${encodeURIComponent(calendarId)}` : ''}`).then((response) => response.events),
+  getCalendarEvent: (id: string) => request<CalendarEvent>('GET', `/calendar/events/${encodeURIComponent(id)}`),
+  createCalendarEvent: (calendarId: string, input: CalendarEventInput) => request<CalendarEvent>('POST', '/calendar/events', { calendar_id: calendarId, ...input }),
+  updateCalendarEvent: (id: string, etag: string, input: CalendarEventInput) => request<CalendarEvent>('PUT', `/calendar/events/${encodeURIComponent(id)}`, { etag, ...input }),
+  deleteCalendarEvent: (id: string, etag: string) => request<void>('DELETE', `/calendar/events/${encodeURIComponent(id)}`, { etag }),
 }
 
 export function describeError(error: unknown): string {

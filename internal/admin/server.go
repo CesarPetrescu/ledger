@@ -26,6 +26,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	calendarapi "github.com/cesarpetrescu/ledger/internal/calendar"
 	"github.com/cesarpetrescu/ledger/internal/oauth"
 	"github.com/cesarpetrescu/ledger/internal/retrieval"
 	"github.com/cesarpetrescu/ledger/internal/store"
@@ -49,6 +50,7 @@ type Config struct {
 	PasswordHash      string
 	InternalProxyCIDR string
 	IndexURL          string
+	Calendar          *calendarapi.Service
 }
 
 type Server struct {
@@ -61,6 +63,7 @@ type Server struct {
 	requests *oauth.RateLimiter
 	failures *oauth.RateLimiter
 	events   *eventStream
+	calendar *calendarapi.Service
 }
 
 type sessionKey struct{}
@@ -69,7 +72,7 @@ func NewServer(config Config, db *store.DB) *Server {
 	if !strings.HasPrefix(config.PasswordHash, "$argon2id$") {
 		panic("LEDGER_ADMIN_PASSWORD_HASH must be an Argon2id PHC string")
 	}
-	s := &Server{config: config, origin: publicOrigin(config.PublicURL), db: db, index: retrieval.NewClient(config.IndexURL), mux: http.NewServeMux(), requests: oauth.NewRateLimiter(), failures: oauth.NewRateLimiter(), events: newEventStream(db)}
+	s := &Server{config: config, origin: publicOrigin(config.PublicURL), db: db, index: retrieval.NewClient(config.IndexURL), mux: http.NewServeMux(), requests: oauth.NewRateLimiter(), failures: oauth.NewRateLimiter(), events: newEventStream(db), calendar: config.Calendar}
 	if config.InternalProxyCIDR != "" {
 		prefix, err := netip.ParsePrefix(config.InternalProxyCIDR)
 		if err != nil {
@@ -85,6 +88,17 @@ func NewServer(config Config, db *store.DB) *Server {
 	s.mux.HandleFunc("PUT /admin/api/projects/{slug}", s.putProject)
 	s.mux.HandleFunc("POST /admin/api/projects/{slug}/entries", s.appendEntry)
 	s.mux.HandleFunc("POST /admin/api/search", s.search)
+	s.mux.HandleFunc("GET /admin/api/calendar/connection", s.calendarConnection)
+	s.mux.HandleFunc("POST /admin/api/calendar/connect", s.startCalendarLogin)
+	s.mux.HandleFunc("POST /admin/api/calendar/connect/{id}/poll", s.pollCalendarLogin)
+	s.mux.HandleFunc("DELETE /admin/api/calendar/connection", s.disconnectCalendar)
+	s.mux.HandleFunc("GET /admin/api/calendar/calendars", s.listCalendars)
+	s.mux.HandleFunc("PUT /admin/api/calendar/calendars", s.selectCalendars)
+	s.mux.HandleFunc("GET /admin/api/calendar/events", s.listCalendarEvents)
+	s.mux.HandleFunc("POST /admin/api/calendar/events", s.createCalendarEvent)
+	s.mux.HandleFunc("GET /admin/api/calendar/events/{id}", s.getCalendarEvent)
+	s.mux.HandleFunc("PUT /admin/api/calendar/events/{id}", s.updateCalendarEvent)
+	s.mux.HandleFunc("DELETE /admin/api/calendar/events/{id}", s.deleteCalendarEvent)
 	s.mux.HandleFunc("GET /admin/api/oauth/clients", s.listClients)
 	s.mux.HandleFunc("POST /admin/api/oauth/revoke", s.revokeClient)
 	s.mux.HandleFunc("GET /admin/api/events", func(w http.ResponseWriter, r *http.Request) { s.events.serve(s.origin, w, r) })
@@ -93,6 +107,13 @@ func NewServer(config Config, db *store.DB) *Server {
 
 // RunEvents streams committed database changes to connected operator consoles.
 func (s *Server) RunEvents(ctx context.Context) error { return s.events.run(ctx) }
+
+func (s *Server) RunCalendarSync(ctx context.Context) error {
+	if s.calendar == nil {
+		return nil
+	}
+	return s.calendar.RunSyncWatch(ctx)
+}
 
 // publicOrigin reduces LEDGER_PUBLIC_URL to the exact browser Origin value.
 func publicOrigin(publicURL string) string {
@@ -426,6 +447,206 @@ func entryResponses(entries []store.Entry) []map[string]any {
 	return out
 }
 
+func (s *Server) calendarConnection(w http.ResponseWriter, r *http.Request) {
+	if !s.requireCalendar(w) {
+		return
+	}
+	connection, err := s.calendar.Connection(r.Context())
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, connection)
+}
+
+func (s *Server) startCalendarLogin(w http.ResponseWriter, r *http.Request) {
+	if !s.requireCalendar(w) {
+		return
+	}
+	var input struct {
+		ServerURL string `json:"server_url"`
+	}
+	if err := decodeJSON(w, r, &input, maxBodyBytes); err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	flow, err := s.calendar.StartLogin(r.Context(), input.ServerURL)
+	if err != nil {
+		s.calendarError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, flow)
+}
+
+func (s *Server) pollCalendarLogin(w http.ResponseWriter, r *http.Request) {
+	if !s.requireCalendar(w) {
+		return
+	}
+	connection, err := s.calendar.PollLogin(r.Context(), r.PathValue("id"))
+	if errors.Is(err, calendarapi.ErrPending) {
+		writeJSON(w, http.StatusAccepted, map[string]bool{"pending": true})
+		return
+	}
+	if err != nil {
+		s.calendarError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, connection)
+}
+
+func (s *Server) disconnectCalendar(w http.ResponseWriter, r *http.Request) {
+	if !s.requireCalendar(w) {
+		return
+	}
+	if err := s.calendar.Disconnect(r.Context()); err != nil {
+		s.calendarError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) listCalendars(w http.ResponseWriter, r *http.Request) {
+	if !s.requireCalendar(w) {
+		return
+	}
+	calendars, err := s.calendar.Calendars(r.Context())
+	if err != nil {
+		s.calendarError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"calendars": calendars})
+}
+
+func (s *Server) selectCalendars(w http.ResponseWriter, r *http.Request) {
+	if !s.requireCalendar(w) {
+		return
+	}
+	var input struct {
+		IDs []string `json:"ids"`
+	}
+	if err := decodeJSON(w, r, &input, maxBodyBytes); err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if err := s.calendar.SelectCalendars(r.Context(), input.IDs); err != nil {
+		s.calendarError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"selected": len(input.IDs)})
+}
+
+func (s *Server) listCalendarEvents(w http.ResponseWriter, r *http.Request) {
+	if !s.requireCalendar(w) {
+		return
+	}
+	start, startErr := time.Parse(time.RFC3339, r.URL.Query().Get("start"))
+	end, endErr := time.Parse(time.RFC3339, r.URL.Query().Get("end"))
+	if startErr != nil || endErr != nil {
+		writeError(w, http.StatusBadRequest, "start and end must be RFC 3339 timestamps")
+		return
+	}
+	events, err := s.calendar.ListEvents(r.Context(), start, end, r.URL.Query().Get("calendar"))
+	if err != nil {
+		s.calendarError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"events": events})
+}
+
+func (s *Server) getCalendarEvent(w http.ResponseWriter, r *http.Request) {
+	if !s.requireCalendar(w) {
+		return
+	}
+	event, err := s.calendar.GetEvent(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.calendarError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, event)
+}
+
+func (s *Server) createCalendarEvent(w http.ResponseWriter, r *http.Request) {
+	if !s.requireCalendar(w) {
+		return
+	}
+	var input struct {
+		CalendarID string `json:"calendar_id"`
+		calendarapi.EventInput
+	}
+	if err := decodeJSON(w, r, &input, maxBodyBytes); err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	event, err := s.calendar.CreateEvent(r.Context(), input.CalendarID, input.EventInput)
+	if err != nil {
+		s.calendarError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, event)
+}
+
+func (s *Server) updateCalendarEvent(w http.ResponseWriter, r *http.Request) {
+	if !s.requireCalendar(w) {
+		return
+	}
+	var input struct {
+		ETag string `json:"etag"`
+		calendarapi.EventInput
+	}
+	if err := decodeJSON(w, r, &input, maxBodyBytes); err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	event, err := s.calendar.UpdateEvent(r.Context(), r.PathValue("id"), input.ETag, input.EventInput)
+	if err != nil {
+		s.calendarError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, event)
+}
+
+func (s *Server) deleteCalendarEvent(w http.ResponseWriter, r *http.Request) {
+	if !s.requireCalendar(w) {
+		return
+	}
+	var input struct {
+		ETag string `json:"etag"`
+	}
+	if err := decodeJSON(w, r, &input, maxBodyBytes); err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if err := s.calendar.DeleteEvent(r.Context(), r.PathValue("id"), input.ETag); err != nil {
+		s.calendarError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) requireCalendar(w http.ResponseWriter) bool {
+	if s.calendar == nil {
+		writeError(w, http.StatusServiceUnavailable, "calendar integration unavailable")
+		return false
+	}
+	return true
+}
+
+func (s *Server) calendarError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, calendarapi.ErrNotConnected):
+		writeError(w, http.StatusConflict, "connect Nextcloud first")
+	case errors.Is(err, calendarapi.ErrConflict):
+		writeError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, calendarapi.ErrNotFound):
+		writeError(w, http.StatusNotFound, err.Error())
+	case strings.Contains(err.Error(), "required"), strings.Contains(err.Error(), "invalid"), strings.Contains(err.Error(), "unknown"), strings.Contains(err.Error(), "selected"), strings.Contains(err.Error(), "must"), strings.Contains(err.Error(), "expired"):
+		writeError(w, http.StatusBadRequest, err.Error())
+	default:
+		log.Printf("admin: calendar %s %s: %v", r.Method, r.URL.Path, err)
+		writeError(w, http.StatusBadGateway, "Nextcloud calendar is unavailable")
+	}
+}
+
 // clientIdentifier attributes admin writes to a session without exposing session material.
 func clientIdentifier(session store.AdminSession) string {
 	sum := sha256.Sum256([]byte("entry-attribution:" + session.ID))
@@ -474,8 +695,8 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if input.Kind != "" && !slices.Contains(store.EntryKinds, input.Kind) && input.Kind != "project" {
-		writeError(w, http.StatusBadRequest, "kind must be project or one of "+strings.Join(store.EntryKinds, ", "))
+	if input.Kind != "" && !slices.Contains(store.EntryKinds, input.Kind) && input.Kind != "project" && input.Kind != "entry" {
+		writeError(w, http.StatusBadRequest, "kind must be project, entry, or one of "+strings.Join(store.EntryKinds, ", "))
 		return
 	}
 	// ponytail: filters are applied after retrieval over the top 30 index hits; push them into ledger-index if recall matters.
@@ -532,7 +753,11 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 			updated := project.UpdatedAt
 			hit.CreatedAt = &updated
 		}
-		if (input.Project != "" && hit.ProjectSlug != input.Project) || (input.Kind != "" && hit.Kind != input.Kind) {
+		kindMismatch := input.Kind != "" && hit.Kind != input.Kind
+		if input.Kind == "entry" {
+			kindMismatch = hit.Kind == "project"
+		}
+		if (input.Project != "" && hit.ProjectSlug != input.Project) || kindMismatch {
 			continue
 		}
 		hits = append(hits, hit)

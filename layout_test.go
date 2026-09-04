@@ -204,7 +204,7 @@ func TestOnlyTheEdgeProxyPublishesAHostPort(t *testing.T) {
 		}
 	}
 	admin := services["ledger-admin"]
-	for _, required := range []string{"LEDGER_ADMIN_PASSWORD_HASH", "LEDGER_INTERNAL_PROXY_CIDR", "LEDGER_INDEX_URL", "LEDGER_DATABASE_URL", "LEDGER_PUBLIC_URL"} {
+	for _, required := range []string{"LEDGER_ADMIN_PASSWORD_HASH", "LEDGER_CALENDAR_ENCRYPTION_KEY", "LEDGER_INTERNAL_PROXY_CIDR", "LEDGER_INDEX_URL", "LEDGER_DATABASE_URL", "LEDGER_PUBLIC_URL"} {
 		if _, ok := admin.Environment[required]; !ok {
 			t.Errorf("ledger-admin lacks %s", required)
 		}
@@ -214,6 +214,14 @@ func TestOnlyTheEdgeProxyPublishesAHostPort(t *testing.T) {
 	}
 	if value := fmt.Sprint(admin.Environment["LEDGER_ADMIN_PASSWORD_HASH"]); !strings.Contains(value, ":?") {
 		t.Errorf("LEDGER_ADMIN_PASSWORD_HASH is not required: %s", value)
+	}
+	if _, ok := services["ledger-mcp"].Environment["LEDGER_CALENDAR_ENCRYPTION_KEY"]; !ok {
+		t.Error("ledger-mcp lacks LEDGER_CALENDAR_ENCRYPTION_KEY")
+	}
+	for _, name := range []string{"ledger-auth", "ledger-index"} {
+		if _, ok := services[name].Environment["LEDGER_CALENDAR_ENCRYPTION_KEY"]; ok {
+			t.Errorf("%s receives the calendar encryption key", name)
+		}
 	}
 	frontend := services["ledger-frontend"]
 	if len(frontend.Environment) != 0 {
@@ -389,6 +397,9 @@ func TestBuildToolingCoversAdminAndFrontend(t *testing.T) {
 	}
 	if !strings.Contains(string(env), "LEDGER_ADMIN_PASSWORD_HASH='<argon2id-phc-hash>'") {
 		t.Error(".env.example lacks the admin password hash placeholder")
+	}
+	if !strings.Contains(string(env), "LEDGER_CALENDAR_ENCRYPTION_KEY=<random-32-byte-or-longer-secret>") {
+		t.Error(".env.example lacks the calendar encryption key placeholder")
 	}
 }
 

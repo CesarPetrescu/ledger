@@ -9,8 +9,9 @@ import { useLiveUpdates } from '../live'
 const NAV: { to: string; label: string; icon: IconName; match: (path: string) => boolean }[] = [
   { to: '/', label: 'Overview', icon: 'home', match: (path) => path === '/' },
   { to: '/projects', label: 'Projects', icon: 'projects', match: (path) => path.startsWith('/projects') },
+  { to: '/calendar', label: 'Calendar', icon: 'calendar', match: (path) => path === '/calendar' },
   { to: '/search', label: 'Search', icon: 'search', match: (path) => path === '/search' },
-  { to: '/clients', label: 'Clients', icon: 'clients', match: (path) => path === '/clients' },
+  { to: '/clients', label: 'Agents', icon: 'clients', match: (path) => path === '/clients' },
 ]
 
 function isTypingTarget(target: EventTarget | null): boolean {
@@ -52,7 +53,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
   }
 
   return (
-    <div className="shell">
+    <div className={path === '/search' ? 'shell shell-search' : 'shell'}>
       <a className="skip-link" href="#main">
         Skip to content
       </a>

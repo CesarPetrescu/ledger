@@ -7,6 +7,7 @@ import { LoginPage } from './pages/LoginPage'
 import { OverviewPage } from './pages/OverviewPage'
 import { ProjectsPage } from './pages/ProjectsPage'
 import { SearchPage } from './pages/SearchPage'
+import { CalendarPage } from './pages/CalendarPage'
 
 function resolve(path: string): { title: string; page: React.ReactNode } {
   if (path === '/') return { title: 'Overview', page: <OverviewPage /> }
@@ -14,6 +15,7 @@ function resolve(path: string): { title: string; page: React.ReactNode } {
   const project = /^\/projects\/([^/]+)$/.exec(path)
   if (project?.[1]) return { title: 'Projects', page: <ProjectsPage slug={decodeURIComponent(project[1])} /> }
   if (path === '/search') return { title: 'Search', page: <SearchPage /> }
+  if (path === '/calendar') return { title: 'Calendar', page: <CalendarPage /> }
   if (path === '/clients') return { title: 'OAuth clients', page: <ClientsPage /> }
   return {
     title: 'Not found',

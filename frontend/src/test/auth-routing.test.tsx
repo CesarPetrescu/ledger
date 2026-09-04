@@ -14,10 +14,10 @@ describe('authenticated shell and routing', () => {
     renderApp('/admin/clients')
     expect(await screen.findByRole('heading', { name: /oauth clients/i })).toBeInTheDocument()
     const nav = screen.getByRole('navigation', { name: /primary/i })
-    for (const label of ['Overview', 'Projects', 'Search', 'Clients']) {
+    for (const label of ['Overview', 'Projects', 'Search', 'Calendar', 'Agents']) {
       expect(within(nav).getByRole('link', { name: label })).toBeInTheDocument()
     }
-    expect(within(nav).getByRole('link', { name: 'Clients' })).toHaveAttribute('aria-current', 'page')
+    expect(within(nav).getByRole('link', { name: 'Agents' })).toHaveAttribute('aria-current', 'page')
     const user = userEvent.setup()
     await user.click(within(nav).getByRole('link', { name: 'Overview' }))
     expect(await screen.findByRole('heading', { name: /^overview$/i })).toBeInTheDocument()

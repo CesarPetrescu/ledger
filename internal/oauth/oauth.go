@@ -5,14 +5,19 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 )
 
 const (
-	ScopeRead  = "ledger:read"
-	ScopeWrite = "ledger:write"
+	ScopeRead          = "ledger:read"
+	ScopeWrite         = "ledger:write"
+	ScopeCalendarRead  = "calendar:read"
+	ScopeCalendarWrite = "calendar:write"
 )
+
+var SupportedScopes = []string{ScopeRead, ScopeWrite, ScopeCalendarRead, ScopeCalendarWrite}
 
 func PKCEChallenge(verifier string) string {
 	sum := sha256.Sum256([]byte(verifier))
@@ -80,7 +85,7 @@ func ParseScopes(raw string) ([]string, bool) {
 	}
 	seen := map[string]bool{}
 	for _, scope := range strings.Fields(raw) {
-		if scope != ScopeRead && scope != ScopeWrite {
+		if !slices.Contains(SupportedScopes, scope) {
 			return nil, false
 		}
 		seen[scope] = true

@@ -14,14 +14,14 @@ import (
 func TestAuthorizeTemplateIsResponsiveAndExplainsPermissions(t *testing.T) {
 	var body bytes.Buffer
 	err := authorizeTemplate.Execute(&body, map[string]any{
-		"Name": "Desk app", "Read": true, "Write": true,
+		"Name": "Desk app", "Read": true, "Write": true, "CalendarRead": true, "CalendarWrite": true,
 		"Fields": map[string]string{"client_id": "client-1"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	html := body.String()
-	for _, want := range []string{"name=\"viewport\"", "Allow Desk app to use Ledger?", "Read project memory", "Add and update memory", "Allow access", "formnovalidate"} {
+	for _, want := range []string{"name=\"viewport\"", "Allow Desk app to use Ledger?", "Read project memory", "Add and update memory", "Read selected calendars", "Create, update, and delete events", "Allow access", "formnovalidate"} {
 		if !strings.Contains(html, want) {
 			t.Errorf("authorization page missing %q", want)
 		}
@@ -56,7 +56,7 @@ func TestOAuthMetadataIsExactAndCacheable(t *testing.T) {
 		want := map[string]any{
 			"resource":                 "https://ledger.example.com/mcp",
 			"authorization_servers":    []any{"https://ledger.example.com"},
-			"scopes_supported":         []any{"ledger:read", "ledger:write"},
+			"scopes_supported":         []any{"ledger:read", "ledger:write", "calendar:read", "calendar:write"},
 			"bearer_methods_supported": []any{"header"},
 		}
 		if !reflect.DeepEqual(got, want) {
@@ -77,7 +77,7 @@ func TestOAuthMetadataIsExactAndCacheable(t *testing.T) {
 		"grant_types_supported":                          []any{"authorization_code", "refresh_token"},
 		"code_challenge_methods_supported":               []any{"S256"},
 		"token_endpoint_auth_methods_supported":          []any{"none"},
-		"scopes_supported":                               []any{"ledger:read", "ledger:write"},
+		"scopes_supported":                               []any{"ledger:read", "ledger:write", "calendar:read", "calendar:write"},
 		"client_id_metadata_document_supported":          true,
 		"authorization_response_iss_parameter_supported": true,
 	}

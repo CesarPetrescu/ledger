@@ -30,7 +30,10 @@ func TestToolsListIsExactAndAnnotated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]bool{"list_projects": true, "get_project": true, "search": true, "upsert_project": false, "append_entry": false}
+	want := map[string]bool{
+		"list_projects": true, "get_project": true, "search": true, "upsert_project": false, "append_entry": false,
+		"list_calendars": true, "list_calendar_events": true, "create_calendar_event": false, "update_calendar_event": false, "delete_calendar_event": false,
+	}
 	if len(result.Tools) != len(want) {
 		t.Fatalf("got %d tools", len(result.Tools))
 	}
@@ -39,7 +42,14 @@ func TestToolsListIsExactAndAnnotated(t *testing.T) {
 		if !ok || tool.Annotations == nil || tool.Annotations.ReadOnlyHint != readOnly {
 			t.Errorf("tool %q annotations = %#v", tool.Name, tool.Annotations)
 		}
-		if !strings.HasSuffix(tool.Description, DescriptionSuffix) {
+		suffix := DescriptionSuffix
+		if strings.Contains(tool.Name, "calendar") {
+			suffix = CalendarDescriptionSuffix
+			if tool.Annotations.OpenWorldHint == nil || !*tool.Annotations.OpenWorldHint {
+				t.Errorf("calendar tool %q must declare open-world access", tool.Name)
+			}
+		}
+		if !strings.HasSuffix(tool.Description, suffix) {
 			t.Errorf("tool %q description missing required suffix", tool.Name)
 		}
 	}
@@ -55,7 +65,7 @@ func TestProtectedResourceMetadataIsPublicButMCPIsNot(t *testing.T) {
 	var document struct {
 		Scopes []string `json:"scopes_supported"`
 	}
-	if err := json.Unmarshal(metadata.Body.Bytes(), &document); err != nil || len(document.Scopes) != 2 || document.Scopes[0] != "ledger:read" || document.Scopes[1] != "ledger:write" {
+	if err := json.Unmarshal(metadata.Body.Bytes(), &document); err != nil || len(document.Scopes) != 4 || document.Scopes[0] != "ledger:read" || document.Scopes[1] != "ledger:write" || document.Scopes[2] != "calendar:read" || document.Scopes[3] != "calendar:write" {
 		t.Fatalf("metadata scopes = %v, %v", document.Scopes, err)
 	}
 	unauthenticated := httptest.NewRecorder()
