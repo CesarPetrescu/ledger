@@ -277,6 +277,7 @@ func TestCIMDFetchValidation(t *testing.T) {
 		clientID := metadataURL + r.URL.Path
 		redirect := "https://app.example/callback"
 		authMethod := "none"
+		var authMethods []string
 		switch r.URL.Path {
 		case "/redirect":
 			http.Redirect(w, r, metadataURL+"/redirect-target", http.StatusFound)
@@ -303,16 +304,23 @@ func TestCIMDFetchValidation(t *testing.T) {
 			}
 		case "/auth":
 			authMethod = "client_secret_post"
+		case "/chatgpt":
+			authMethod = "private_key_jwt"
+			authMethods = []string{"none", "private_key_jwt"}
 		case "/absent":
 			_ = json.NewEncoder(w).Encode(map[string]any{"client_id": clientID, "client_name": "CIMD Test", "redirect_uris": []string{redirect}})
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"client_id": clientID, "client_name": "CIMD Test", "redirect_uris": []string{redirect}, "token_endpoint_auth_method": authMethod})
+		document := map[string]any{"client_id": clientID, "client_name": "CIMD Test", "redirect_uris": []string{redirect}, "token_endpoint_auth_method": authMethod}
+		if authMethods != nil {
+			document["token_endpoint_auth_methods_supported"] = authMethods
+		}
+		_ = json.NewEncoder(w).Encode(document)
 	}))
 	defer metadata.Close()
 	metadataURL = metadata.URL
 	server := NewServer(Config{PublicURL: "https://ledger.example.com", HTTPClient: metadata.Client()}, db)
-	for _, path := range []string{"/none", "/absent", "/ceiling"} {
+	for _, path := range []string{"/none", "/absent", "/ceiling", "/chatgpt"} {
 		client, err := server.resolveClient(ctx, metadataURL+path)
 		if err != nil || client.Kind != "cimd" {
 			t.Errorf("valid CIMD %s = %#v, %v", path, client, err)
