@@ -311,6 +311,24 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func supportsTokenAuthNone(preferred string, supported []string) bool {
+	if supported == nil {
+		return preferred == "" || preferred == "none"
+	}
+
+	supportsNone := false
+	preferredSupported := preferred == ""
+	for _, method := range supported {
+		if method == "none" {
+			supportsNone = true
+		}
+		if method == preferred {
+			preferredSupported = true
+		}
+	}
+	return supportsNone && preferredSupported
+}
+
 func (s *Server) resolveClient(ctx context.Context, id string) (store.OAuthClient, error) {
 	client, err := s.db.GetClient(ctx, id)
 	if err == nil {
@@ -348,12 +366,13 @@ func (s *Server) resolveClient(ctx context.Context, id string) (store.OAuthClien
 		return store.OAuthClient{}, fmt.Errorf("CIMD document too large")
 	}
 	var document struct {
-		ClientID        string   `json:"client_id"`
-		RedirectURIs    []string `json:"redirect_uris"`
-		ClientName      string   `json:"client_name"`
-		TokenAuthMethod string   `json:"token_endpoint_auth_method"`
+		ClientID         string   `json:"client_id"`
+		RedirectURIs     []string `json:"redirect_uris"`
+		ClientName       string   `json:"client_name"`
+		TokenAuthMethod  string   `json:"token_endpoint_auth_method"`
+		TokenAuthMethods []string `json:"token_endpoint_auth_methods_supported"`
 	}
-	if err := json.Unmarshal(body, &document); err != nil || document.ClientID != id || len(document.RedirectURIs) == 0 || document.TokenAuthMethod != "" && document.TokenAuthMethod != "none" {
+	if err := json.Unmarshal(body, &document); err != nil || document.ClientID != id || len(document.RedirectURIs) == 0 || !supportsTokenAuthNone(document.TokenAuthMethod, document.TokenAuthMethods) {
 		return store.OAuthClient{}, fmt.Errorf("invalid CIMD metadata")
 	}
 	for _, redirect := range document.RedirectURIs {
