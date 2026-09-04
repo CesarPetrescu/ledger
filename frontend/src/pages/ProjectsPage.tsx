@@ -285,7 +285,7 @@ function ProjectDetail({ slug, onSaved, onEntryAppended }: { slug: string; onSav
       <Composer
         slug={project.slug}
         onAppended={(entry) => {
-          detail.update((current) => ({ ...current, entries: [entry, ...current.entries] }))
+          detail.update((current) => ({ ...current, entries: [entry, ...current.entries.filter((existing) => existing.id !== entry.id)] }))
           onEntryAppended(entry)
         }}
       />
