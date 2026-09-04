@@ -425,6 +425,9 @@ func TestDocumentationContract(t *testing.T) {
 		"LEDGER_STACK_ADMIN_PASSWORD",
 		"LEDGER_TEST_DATABASE_URL",
 		"ledger-frontend",
+		"--exclude-table-data=chunk",
+		"--exclude-table-data=chunk_dirty",
+		"`calendar_account`",
 	} {
 		if !strings.Contains(readme, required) {
 			t.Errorf("README missing %q", required)
@@ -439,7 +442,7 @@ func TestDocumentationContract(t *testing.T) {
 			t.Errorf("SECURITY.md missing %q", required)
 		}
 	}
-	for _, obsolete := range []string{"request `read`", "and/or `write`", "`client`, `code`, and `token`", "docker compose run --rm index"} {
+	for _, obsolete := range []string{"request `read`", "and/or `write`", "`client`, `code`, and `token`", "docker compose run --rm index", "--exclude-table=chunk", "`calendar_connection`", "`calendar_selection`"} {
 		if strings.Contains(readme, obsolete) {
 			t.Errorf("README retains obsolete contract %q", obsolete)
 		}
