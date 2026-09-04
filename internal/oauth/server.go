@@ -312,15 +312,21 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 }
 
 func supportsTokenAuthNone(preferred string, supported []string) bool {
-	if len(supported) == 0 {
+	if supported == nil {
 		return preferred == "" || preferred == "none"
 	}
+
+	supportsNone := false
+	preferredSupported := preferred == ""
 	for _, method := range supported {
 		if method == "none" {
-			return true
+			supportsNone = true
+		}
+		if method == preferred {
+			preferredSupported = true
 		}
 	}
-	return false
+	return supportsNone && preferredSupported
 }
 
 func (s *Server) resolveClient(ctx context.Context, id string) (store.OAuthClient, error) {

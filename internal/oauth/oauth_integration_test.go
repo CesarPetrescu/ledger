@@ -304,6 +304,14 @@ func TestCIMDFetchValidation(t *testing.T) {
 			}
 		case "/auth":
 			authMethod = "client_secret_post"
+		case "/auth-list":
+			authMethod = "private_key_jwt"
+			authMethods = []string{"private_key_jwt"}
+		case "/empty-auth-list":
+			authMethods = []string{}
+		case "/inconsistent-auth":
+			authMethod = "private_key_jwt"
+			authMethods = []string{"none"}
 		case "/chatgpt":
 			authMethod = "private_key_jwt"
 			authMethods = []string{"none", "private_key_jwt"}
@@ -326,7 +334,7 @@ func TestCIMDFetchValidation(t *testing.T) {
 			t.Errorf("valid CIMD %s = %#v, %v", path, client, err)
 		}
 	}
-	for _, path := range []string{"/redirect", "/mismatch", "/unsafe", "/large", "/auth"} {
+	for _, path := range []string{"/redirect", "/mismatch", "/unsafe", "/large", "/auth", "/auth-list", "/empty-auth-list", "/inconsistent-auth"} {
 		if _, err := server.resolveClient(ctx, metadataURL+path); err == nil {
 			t.Errorf("invalid CIMD %s accepted", path)
 		}
