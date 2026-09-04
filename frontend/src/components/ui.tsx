@@ -1,11 +1,15 @@
 import type { ComponentType, ReactNode } from 'react'
 import {
+  IconAdjustmentsHorizontal,
   IconAlertTriangle,
   IconArrowLeft,
+  IconArrowRight,
   IconBook2,
+  IconCalendarEvent,
   IconEye,
   IconEyeOff,
   IconFolder,
+  IconExternalLink,
   IconHome,
   IconKey,
   IconLogout,
@@ -15,11 +19,12 @@ import {
   IconSearch,
   IconWifi,
   IconWifiOff,
+  IconTrash,
   IconX,
   type IconProps,
 } from '@tabler/icons-react'
 
-export type IconName = 'eye' | 'eye-off' | 'menu' | 'close' | 'search' | 'logout' | 'plus' | 'alert' | 'back' | 'refresh' | 'book' | 'home' | 'projects' | 'clients' | 'live' | 'offline'
+export type IconName = 'eye' | 'eye-off' | 'menu' | 'close' | 'search' | 'arrow' | 'filter' | 'logout' | 'plus' | 'alert' | 'back' | 'refresh' | 'book' | 'home' | 'projects' | 'calendar' | 'clients' | 'external' | 'trash' | 'live' | 'offline'
 
 const icons: Record<IconName, ComponentType<IconProps>> = {
   eye: IconEye,
@@ -27,6 +32,8 @@ const icons: Record<IconName, ComponentType<IconProps>> = {
   menu: IconMenu2,
   close: IconX,
   search: IconSearch,
+  arrow: IconArrowRight,
+  filter: IconAdjustmentsHorizontal,
   logout: IconLogout,
   plus: IconPlus,
   alert: IconAlertTriangle,
@@ -35,7 +42,10 @@ const icons: Record<IconName, ComponentType<IconProps>> = {
   book: IconBook2,
   home: IconHome,
   projects: IconFolder,
+  calendar: IconCalendarEvent,
   clients: IconKey,
+  external: IconExternalLink,
+  trash: IconTrash,
   live: IconWifi,
   offline: IconWifiOff,
 }

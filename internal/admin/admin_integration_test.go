@@ -515,6 +515,10 @@ func TestSearchAddsProvenanceFiltersAndDegradesGracefully(t *testing.T) {
 	if err := json.Unmarshal(filtered.Body.Bytes(), &result); err != nil || len(result.Hits) != 1 || result.Hits[0].Kind != "note" || requested.Limit != 30 {
 		t.Fatalf("filtered search = %s (index limit %d)", filtered.Body.String(), requested.Limit)
 	}
+	entriesOnly := request(t, server, http.MethodPost, "/admin/api/search", `{"q":"postgres","limit":3,"kind":"entry"}`, authed(s, true))
+	if err := json.Unmarshal(entriesOnly.Body.Bytes(), &result); err != nil || len(result.Hits) != 2 || result.Hits[0].Kind == "project" || result.Hits[1].Kind == "project" || requested.Limit != 30 {
+		t.Fatalf("entry search = %s (index limit %d)", entriesOnly.Body.String(), requested.Limit)
+	}
 	index.Close()
 	down := request(t, server, http.MethodPost, "/admin/api/search", `{"q":"postgres"}`, authed(s, true))
 	if down.Code != http.StatusServiceUnavailable || !strings.Contains(down.Body.String(), "search unavailable") || strings.Contains(down.Body.String(), "127.0.0.1") {

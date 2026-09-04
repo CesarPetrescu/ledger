@@ -48,7 +48,7 @@ func TestRedirectMatcherAndScopes(t *testing.T) {
 			t.Errorf("non-port redirect difference accepted: %s", candidate)
 		}
 	}
-	if got, ok := ParseScopes("ledger:write ledger:read ledger:write"); !ok || len(got) != 2 || got[0] != "ledger:read" || got[1] != "ledger:write" {
+	if got, ok := ParseScopes("calendar:write ledger:write calendar:read ledger:read ledger:write"); !ok || len(got) != 4 || got[0] != "calendar:read" || got[1] != "calendar:write" || got[2] != "ledger:read" || got[3] != "ledger:write" {
 		t.Fatalf("scope parsing = %v, %v", got, ok)
 	}
 	if got, ok := ParseScopes(""); !ok || len(got) != 1 || got[0] != "ledger:read" {

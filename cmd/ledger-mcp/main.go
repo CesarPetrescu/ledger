@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 
+	calendarapi "github.com/cesarpetrescu/ledger/internal/calendar"
 	"github.com/cesarpetrescu/ledger/internal/config"
 	"github.com/cesarpetrescu/ledger/internal/mcpserver"
 	"github.com/cesarpetrescu/ledger/internal/store"
@@ -23,7 +24,11 @@ func main() {
 	switch os.Args[1] {
 	case "serve":
 		publicURL := config.Required("LEDGER_PUBLIC_URL")
-		server := mcpserver.NewServer(db, config.Required("LEDGER_INDEX_URL"))
+		calendar, err := calendarapi.NewService(db, config.Required("LEDGER_DATABASE_URL"), nil)
+		if err != nil {
+			log.Fatal(err)
+		}
+		server := mcpserver.NewServer(db, config.Required("LEDGER_INDEX_URL"), calendar)
 		if err := config.Serve(":8081", mcpserver.HTTPHandler(server, db, publicURL)); err != nil && err != http.ErrServerClosed {
 			log.Fatal(err)
 		}

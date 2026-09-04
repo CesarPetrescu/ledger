@@ -274,7 +274,7 @@ func TestDCRRFC7591Response(t *testing.T) {
 		"token_endpoint_auth_method": "none",
 		"grant_types":                []any{"authorization_code", "refresh_token"},
 		"response_types":             []any{"code"},
-		"scope":                      "ledger:read ledger:write",
+		"scope":                      "ledger:read ledger:write calendar:read calendar:write",
 	}
 	if got["client_id"] == "" || got["client_id_issued_at"] == nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("registration response = %#v, want %#v", got, want)
