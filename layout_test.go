@@ -239,6 +239,7 @@ func TestEdgeProxyRoutesAdminSameOriginAndKeepsInternalRoutesPrivate(t *testing.
 	for _, required := range []string{
 		"location = / { return 302 /admin/; }",
 		"location = /admin { return 302 /admin/; }",
+		"absolute_redirect off;",
 		"location ^~ /admin/api",
 		"proxy_pass http://ledger-admin:8084",
 		"location ^~ /admin/",
