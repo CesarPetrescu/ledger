@@ -183,13 +183,17 @@ func (s *Server) validateAuthorization(ctx context.Context, request authorizatio
 	return client, scopes, ""
 }
 
-var authorizeTemplate = template.Must(template.New("authorize").Parse(`<!doctype html><html><head><meta charset="utf-8"><title>Authorize Ledger</title></head><body><main><h1>Authorize {{.Name}}</h1><p>Requested scopes: {{.Scope}}</p><form method="post" action="/oauth/authorize">{{range $k,$v := .Fields}}<input type="hidden" name="{{$k}}" value="{{$v}}">{{end}}<label>Password <input required type="password" name="password" autocomplete="current-password"></label><button name="action" value="approve">Approve</button><button name="action" value="deny" formnovalidate>Deny</button></form></main></body></html>`))
-var errorTemplate = template.Must(template.New("error").Parse(`<!doctype html><html><body><h1>Authorization error</h1><p>{{.}}</p></body></html>`))
+const authorizationStyles = `<style>
+:root{color-scheme:light;font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#172033;background:#f7f6f2;font-synthesis:none}*{box-sizing:border-box}body{margin:0;min-height:100vh}.page{width:min(100% - 32px,540px);margin:0 auto;padding:48px 0}.brand{margin-bottom:40px;font-size:22px;font-weight:750;letter-spacing:-.03em}.card{padding:32px;border:1px solid #deddd7;border-radius:18px;background:#fff;box-shadow:0 18px 50px rgba(23,32,51,.08)}.eyebrow{margin:0 0 8px;color:#1769e0;font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase}h1{margin:0;font-size:28px;line-height:1.2;letter-spacing:-.035em}p{color:#657086;line-height:1.6}.client{margin:24px 0;padding:16px 0;border-block:1px solid #ecebe7}.client strong,.client span{display:block}.client span{margin-top:2px;color:#7a8497;font-size:13px}.permissions{margin:0 0 24px;padding:0;list-style:none}.permissions li{padding:12px 0;border-bottom:1px solid #ecebe7}.permissions strong,.permissions span{display:block}.permissions span{margin-top:3px;color:#657086;font-size:13px;line-height:1.45}form{display:grid;gap:14px}label{display:grid;gap:7px;color:#3d485d;font-size:13px;font-weight:650}input{width:100%;min-height:48px;padding:0 14px;border:1px solid #c9cbd0;border-radius:10px;background:#fff;color:#172033;font:inherit}input:focus{outline:3px solid rgba(23,105,224,.18);border-color:#1769e0}.actions{display:flex;justify-content:flex-end;gap:10px;margin-top:8px}button{min-height:46px;padding:0 18px;border:1px solid #c9cbd0;border-radius:10px;background:#fff;color:#293449;font:inherit;font-weight:700;cursor:pointer}button:hover{background:#f5f5f2}.primary{border-color:#1769e0;background:#1769e0;color:#fff}.primary:hover{background:#125abb}.privacy{margin:18px 0 0;font-size:12px;text-align:center}.error-card p{margin-bottom:0}@media(max-width:520px){.page{padding:24px 0}.brand{margin-bottom:24px}.card{padding:24px 20px;border-radius:15px}.actions{display:grid}.actions button{width:100%}h1{font-size:24px}}
+</style>`
+
+var authorizeTemplate = template.Must(template.New("authorize").Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Authorize · Ledger</title>` + authorizationStyles + `</head><body><main class="page"><div class="brand">Ledger</div><section class="card" aria-labelledby="authorize-title"><p class="eyebrow">Access request</p><h1 id="authorize-title">Allow {{if .Name}}{{.Name}}{{else}}this app{{end}} to use Ledger?</h1><p>Review what this client will be able to do in your private project memory.</p><div class="client"><strong>{{if .Name}}{{.Name}}{{else}}Unnamed MCP client{{end}}</strong><span>Requested by an MCP client</span></div><ul class="permissions" aria-label="Requested permissions">{{if .Read}}<li><strong>Read project memory</strong><span>View project records and search historical entries.</span></li>{{end}}{{if .Write}}<li><strong>Add and update memory</strong><span>Update project summaries and append permanent timeline entries.</span></li>{{end}}</ul><form method="post" action="/oauth/authorize">{{range $k,$v := .Fields}}<input type="hidden" name="{{$k}}" value="{{$v}}">{{end}}<label for="approval-password">Approval password<input id="approval-password" required type="password" name="password" autocomplete="current-password" autofocus></label><div class="actions"><button name="action" value="deny" formnovalidate>Deny</button><button class="primary" name="action" value="approve">Allow access</button></div></form><p class="privacy">Ledger never shares your password with the requesting client.</p></section></main></body></html>`))
+var errorTemplate = template.Must(template.New("error").Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Authorization error · Ledger</title>` + authorizationStyles + `</head><body><main class="page"><div class="brand">Ledger</div><section class="card error-card"><p class="eyebrow">Could not continue</p><h1>Authorization error</h1><p>{{.}}</p></section></main></body></html>`))
 
 func (s *Server) authorizeGet(w http.ResponseWriter, r *http.Request) {
 	if !s.requests.Allow("authorize:"+RealIP(r, s.trusted), 20, time.Minute) {
 		w.Header().Set("Retry-After", "60")
-		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+		localErrorStatus(w, http.StatusTooManyRequests, "Too many authorization attempts. Try again in a minute.")
 		return
 	}
 	request := authRequest(r.URL.Query())
@@ -203,30 +207,20 @@ func (s *Server) authorizeGet(w http.ResponseWriter, r *http.Request) {
 		"code_challenge": request.Challenge, "code_challenge_method": request.ChallengeMethod, "scope": strings.Join(scopes, " "),
 		"resource": request.Resource, "state": request.State,
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = authorizeTemplate.Execute(w, map[string]any{"Name": client.Name, "Scope": strings.Join(scopes, " "), "Fields": fields})
+	authorizationPageHeaders(w)
+	_ = authorizeTemplate.Execute(w, map[string]any{"Name": client.Name, "Read": HasScope(scopes, ScopeRead), "Write": HasScope(scopes, ScopeWrite), "Fields": fields})
 }
 
 func (s *Server) authorizePost(w http.ResponseWriter, r *http.Request) {
 	ip := RealIP(r, s.trusted)
 	if !s.requests.Allow("authorize:"+ip, 20, time.Minute) {
 		w.Header().Set("Retry-After", "60")
-		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+		localErrorStatus(w, http.StatusTooManyRequests, "Too many authorization attempts. Try again in a minute.")
 		return
 	}
 	_ = r.ParseForm()
 	request := authRequest(r.PostForm)
 	client, scopes, problem := s.validateAuthorization(r.Context(), request)
-	passwordOK := VerifyPassword(s.config.PasswordHash, r.PostForm.Get("password"))
-	if !passwordOK {
-		if !s.failures.Allow("password:"+ip, 4, 15*time.Minute) {
-			w.Header().Set("Retry-After", "900")
-			http.Error(w, "too many failed passwords", http.StatusTooManyRequests)
-			return
-		}
-		http.Error(w, "invalid password", http.StatusUnauthorized)
-		return
-	}
 	if problem != "" {
 		localError(w, problem)
 		return
@@ -239,9 +233,18 @@ func (s *Server) authorizePost(w http.ResponseWriter, r *http.Request) {
 		localError(w, "invalid action")
 		return
 	}
+	if !VerifyPassword(s.config.PasswordHash, r.PostForm.Get("password")) {
+		if !s.failures.Allow("password:"+ip, 4, 15*time.Minute) {
+			w.Header().Set("Retry-After", "900")
+			localErrorStatus(w, http.StatusTooManyRequests, "Too many failed password attempts. Try again later.")
+			return
+		}
+		localErrorStatus(w, http.StatusUnauthorized, "That approval password was not accepted. Return to the client and try again.")
+		return
+	}
 	code, err := randomOpaque()
 	if err != nil || s.db.CreateCode(r.Context(), code, client.ClientID, request.RedirectURI, request.Challenge, scopes) != nil {
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		localErrorStatus(w, http.StatusInternalServerError, "Ledger could not complete this authorization. Please try again.")
 		return
 	}
 	redirectAuthorization(w, r, request.RedirectURI, map[string]string{"code": code, "state": request.State, "iss": s.config.PublicURL})
@@ -260,9 +263,21 @@ func redirectAuthorization(w http.ResponseWriter, r *http.Request, destination s
 }
 
 func localError(w http.ResponseWriter, message string) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusBadRequest)
+	localErrorStatus(w, http.StatusBadRequest, message)
+}
+
+func localErrorStatus(w http.ResponseWriter, status int, message string) {
+	authorizationPageHeaders(w)
+	w.WriteHeader(status)
 	_ = errorTemplate.Execute(w, message)
+}
+
+func authorizationPageHeaders(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 }
 
 func (s *Server) token(w http.ResponseWriter, r *http.Request) {

@@ -15,7 +15,7 @@ func TestMigrationsEmptyAndIdempotent(t *testing.T) {
 		t.Fatalf("second migration: %v", err)
 	}
 	var versions []int
-	if err := db.Pool.QueryRow(ctx, `SELECT array_agg(version ORDER BY version) FROM schema_migration`).Scan(&versions); err != nil || !reflect.DeepEqual(versions, []int{1, 2}) {
+	if err := db.Pool.QueryRow(ctx, `SELECT array_agg(version ORDER BY version) FROM schema_migration`).Scan(&versions); err != nil || !reflect.DeepEqual(versions, []int{1, 2, 3}) {
 		t.Fatalf("applied migrations = %v, %v", versions, err)
 	}
 	var exists bool

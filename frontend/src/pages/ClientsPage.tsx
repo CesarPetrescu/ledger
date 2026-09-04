@@ -10,7 +10,7 @@ const PAGE_SIZE = 50
 
 export function ClientsPage() {
   const [offset, setOffset] = useState(0)
-  const page = useResource(() => api.listClients(offset), `clients:${offset}`)
+  const page = useResource(() => api.listClients(offset), `clients:${offset}`, 'oauth_client oauth_token')
   const [target, setTarget] = useState<Client | null>(null)
   const [busy, setBusy] = useState(false)
   const toast = useToast()

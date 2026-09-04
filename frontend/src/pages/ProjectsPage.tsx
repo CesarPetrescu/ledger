@@ -203,7 +203,7 @@ const META_FIELDS: { key: keyof Project; label: string }[] = [
 ]
 
 function ProjectDetail({ slug, onSaved, onEntryAppended }: { slug: string; onSaved: (project: Project) => void; onEntryAppended: (entry: Entry) => void }) {
-  const detail = useResource(() => api.getProject(slug), `project:${slug}`)
+  const detail = useResource(() => api.getProject(slug), `project:${slug}`, 'project entry')
   const [editing, setEditing] = useState(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [olderError, setOlderError] = useState('')
@@ -327,7 +327,7 @@ function ProjectDetail({ slug, onSaved, onEntryAppended }: { slug: string; onSav
 }
 
 export function ProjectsPage({ slug }: { slug?: string | undefined }) {
-  const list = useResource(() => api.listProjects(), 'projects')
+  const list = useResource(() => api.listProjects(), 'projects', 'project entry')
   const [filter, setFilter] = useState('')
   const [tier, setTier] = useState('all')
   const toast = useToast()

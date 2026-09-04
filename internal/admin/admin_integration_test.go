@@ -3,6 +3,7 @@
 package admin
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/cesarpetrescu/ledger/internal/oauth"
 	"github.com/cesarpetrescu/ledger/internal/store"
 	"github.com/cesarpetrescu/ledger/internal/testdb"
+	"github.com/coder/websocket"
 )
 
 type session struct {
@@ -57,6 +59,46 @@ func authed(s session, mutating bool) map[string]string {
 		headers["X-CSRF-Token"] = s.csrf
 	}
 	return headers
+}
+
+func TestCommittedChangesReachAuthenticatedWebSockets(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
+	_, session := login(t, server, "correct horse", "")
+	listenerCtx, stopListener := context.WithCancel(ctx)
+	defer stopListener()
+	go func() { _ = server.RunEvents(listenerCtx) }()
+
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/admin/api/events"
+	connection, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{HTTPHeader: http.Header{"Origin": {testPublicURL}, "Cookie": {session.cookie}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.CloseNow()
+
+	writesDone := make(chan struct{})
+	defer close(writesDone)
+	go func() {
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-writesDone:
+				return
+			case <-ticker.C:
+				_, _ = db.UpsertProject(ctx, store.Project{Slug: "live-test", Name: "Live test", Tier: "focus"})
+			}
+		}
+	}()
+
+	readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	_, payload, err := connection.Read(readCtx)
+	if err != nil || !strings.Contains(string(payload), `"entity" : "project"`) && !strings.Contains(string(payload), `"entity":"project"`) {
+		t.Fatalf("live event = %q, %v", payload, err)
+	}
 }
 
 func TestLoginIssuesHardenedCookieAndSessionLifecycle(t *testing.T) {

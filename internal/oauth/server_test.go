@@ -1,13 +1,46 @@
 package oauth
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"reflect"
+	"strings"
 	"testing"
 )
+
+func TestAuthorizeTemplateIsResponsiveAndExplainsPermissions(t *testing.T) {
+	var body bytes.Buffer
+	err := authorizeTemplate.Execute(&body, map[string]any{
+		"Name": "Desk app", "Read": true, "Write": true,
+		"Fields": map[string]string{"client_id": "client-1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := body.String()
+	for _, want := range []string{"name=\"viewport\"", "Allow Desk app to use Ledger?", "Read project memory", "Add and update memory", "Allow access", "formnovalidate"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("authorization page missing %q", want)
+		}
+	}
+}
+
+func TestAuthorizationErrorsUseTheResponsivePage(t *testing.T) {
+	res := httptest.NewRecorder()
+	localErrorStatus(res, http.StatusUnauthorized, "Password not accepted")
+
+	if res.Code != http.StatusUnauthorized || res.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("status/cache = %d, %q", res.Code, res.Header().Get("Cache-Control"))
+	}
+	for _, want := range []string{"name=\"viewport\"", "Authorization error", "Password not accepted"} {
+		if !strings.Contains(res.Body.String(), want) {
+			t.Errorf("authorization error page missing %q", want)
+		}
+	}
+}
 
 func TestOAuthMetadataIsExactAndCacheable(t *testing.T) {
 	server := NewServer(Config{PublicURL: "https://ledger.example.com"}, nil)

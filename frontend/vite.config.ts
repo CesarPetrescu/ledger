@@ -14,7 +14,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/admin/api': 'http://127.0.0.1:8084',
+      '/admin/api': { target: 'http://127.0.0.1:8084', ws: true },
     },
   },
   test: {

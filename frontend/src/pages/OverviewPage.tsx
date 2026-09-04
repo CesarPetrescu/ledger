@@ -1,7 +1,7 @@
 import { api, TIERS, type Project } from '../api'
 import { useResource } from '../hooks/useResource'
 import { Link } from '../router'
-import { EmptyState, ErrorState, KindBadge, Loading, StaleNotice, Timestamp } from '../components/ui'
+import { EmptyState, ErrorState, Icon, KindBadge, Loading, StaleNotice, Timestamp } from '../components/ui'
 
 const TIER_LABEL: Record<string, string> = { focus: 'Focus', maintain: 'Maintain', park: 'Park' }
 
@@ -44,7 +44,7 @@ function TierTable({ tier, projects }: { tier: string; projects: Project[] }) {
 }
 
 export function OverviewPage() {
-  const overview = useResource(api.getOverview, 'overview')
+  const overview = useResource(api.getOverview, 'overview', 'project entry oauth_client oauth_token')
   if (overview.loading) return <Loading label="Loading overview…" />
   if (!overview.data) return <ErrorState message="Couldn't load the overview." onRetry={overview.reload} />
   const { counts, projects, recent_entries: recent } = overview.data
@@ -53,7 +53,13 @@ export function OverviewPage() {
   return (
     <>
       <header className="page-head">
-        <h1>Overview</h1>
+        <div>
+          <p className="eyebrow">Your project memory</p>
+          <h1>Overview</h1>
+        </div>
+        <Link className="btn btn-primary" to="/projects/_new">
+          <Icon name="plus" /> Add project
+        </Link>
         <ul className="counts" aria-label="Counts">
           <li>
             <span>Projects</span>
@@ -79,7 +85,8 @@ export function OverviewPage() {
       </header>
       {overview.stale && <StaleNotice message="Showing the last loaded overview; refresh failed." onRetry={overview.reload} />}
       <div className="overview-grid">
-        <div className="overview-projects">
+        <section className="overview-projects" aria-labelledby="active-projects-title">
+          <h2 id="active-projects-title" className="section-title">Active projects</h2>
           {grouped.length === 0 ? (
             <EmptyState>
               <p>No projects yet.</p>
@@ -90,11 +97,31 @@ export function OverviewPage() {
           ) : (
             grouped.map((group) => <TierTable key={group.tier} tier={group.tier} projects={group.projects} />)
           )}
-        </div>
-        <section aria-labelledby="recent-title" className="panel">
-          <h2 id="recent-title" className="panel-title">
-            Recent activity
+        </section>
+        <section aria-labelledby="attention-title" className="attention-panel">
+          <h2 id="attention-title" className="section-title">
+            Needs attention
           </h2>
+          {projects.filter((project) => project.needs_me || project.deadline).length === 0 ? (
+            <p className="muted">Nothing is waiting on you.</p>
+          ) : (
+            <ul className="attention-list">
+              {projects.filter((project) => project.needs_me || project.deadline).slice(0, 5).map((project) => (
+                <li key={project.slug}>
+                  <Link to={`/projects/${project.slug}`}>{project.name}</Link>
+                  <p>{project.needs_me || project.goal || 'Review this project.'}</p>
+                  {project.deadline && <span className="muted small">Due {project.deadline}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
+      <section aria-labelledby="recent-title" className="recent-section">
+        <div className="section-head">
+          <h2 id="recent-title" className="section-title">Recent activity</h2>
+          <Link to="/search">Search all memory</Link>
+        </div>
           {recent.length === 0 ? (
             <p className="muted">No memory activity yet.</p>
           ) : (
@@ -112,8 +139,7 @@ export function OverviewPage() {
               ))}
             </ol>
           )}
-        </section>
-      </div>
+      </section>
     </>
   )
 }

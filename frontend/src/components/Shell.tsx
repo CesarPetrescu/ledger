@@ -3,13 +3,14 @@ import { describeError } from '../api'
 import { useAuth } from '../auth'
 import { Link, navigate, useLocation } from '../router'
 import { useToast } from './Toast'
-import { Icon, formatRelative } from './ui'
+import { Icon, formatRelative, type IconName } from './ui'
+import { useLiveUpdates } from '../live'
 
-const NAV = [
-  { to: '/', label: 'Overview', match: (path: string) => path === '/' },
-  { to: '/projects', label: 'Projects', match: (path: string) => path.startsWith('/projects') },
-  { to: '/search', label: 'Search', match: (path: string) => path === '/search' },
-  { to: '/clients', label: 'Clients', match: (path: string) => path === '/clients' },
+const NAV: { to: string; label: string; icon: IconName; match: (path: string) => boolean }[] = [
+  { to: '/', label: 'Overview', icon: 'home', match: (path) => path === '/' },
+  { to: '/projects', label: 'Projects', icon: 'projects', match: (path) => path.startsWith('/projects') },
+  { to: '/search', label: 'Search', icon: 'search', match: (path) => path === '/search' },
+  { to: '/clients', label: 'Clients', icon: 'clients', match: (path) => path === '/clients' },
 ]
 
 function isTypingTarget(target: EventTarget | null): boolean {
@@ -20,9 +21,9 @@ function isTypingTarget(target: EventTarget | null): boolean {
 export function Shell({ title, children }: { title: string; children: ReactNode }) {
   const { state, signOut } = useAuth()
   const { path } = useLocation()
-  const [navOpen, setNavOpen] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
   const toast = useToast()
+  const live = useLiveUpdates()
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -51,15 +52,16 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
   }
 
   return (
-    <div className="shell" data-nav-open={navOpen || undefined}>
+    <div className="shell">
       <a className="skip-link" href="#main">
         Skip to content
       </a>
       <header className="topbar">
-        <button type="button" className="icon-button nav-toggle" aria-label={navOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={navOpen} aria-controls="sidebar" onClick={() => setNavOpen((open) => !open)}>
-          <Icon name={navOpen ? 'close' : 'menu'} />
-        </button>
         <p className="topbar-title">{title}</p>
+        <p className="live-status" data-status={live} aria-live="polite">
+          <Icon name={live === 'live' ? 'live' : 'offline'} />
+          <span>{live === 'live' ? 'Live' : live === 'connecting' ? 'Connecting' : 'Offline'}</span>
+        </p>
         <button type="button" className="search-trigger" onClick={() => navigate('/search')}>
           <Icon name="search" />
           <span>Search</span>
@@ -68,17 +70,22 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
       </header>
       <aside id="sidebar" className="sidebar">
         <div className="brand">
+          <span className="brand-mark"><Icon name="book" /></span>
           <span className="wordmark">Ledger</span>
-          <span className="brand-sub">admin</span>
         </div>
         <nav aria-label="Primary" className="primary-nav">
           {NAV.map((item) => (
-            <Link key={item.to} to={item.to} aria-current={item.match(path) ? 'page' : undefined} onClick={() => setNavOpen(false)}>
+            <Link key={item.to} to={item.to} aria-current={item.match(path) ? 'page' : undefined}>
+              <Icon name={item.icon} />
               {item.label}
             </Link>
           ))}
         </nav>
         <div className="sidebar-foot">
+          <p className="live-status sidebar-live" data-status={live}>
+            <Icon name={live === 'live' ? 'live' : 'offline'} />
+            <span>{live === 'live' ? 'Live updates on' : live === 'connecting' ? 'Connecting…' : 'Updates offline'}</span>
+          </p>
           {expires && (
             <p className="muted small">
               Session ends <time dateTime={expires}>{formatRelative(expires)}</time>
@@ -89,7 +96,6 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
           </button>
         </div>
       </aside>
-      {navOpen && <button type="button" className="backdrop" aria-label="Close navigation" onClick={() => setNavOpen(false)} />}
       <main id="main" className="content" tabIndex={-1}>
         {children}
       </main>

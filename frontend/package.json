@@ -12,6 +12,7 @@
     "verify": "npm run lint && npm run typecheck && npm run test && npm run build"
   },
   "dependencies": {
+    "@tabler/icons-react": "^3.46.0",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
