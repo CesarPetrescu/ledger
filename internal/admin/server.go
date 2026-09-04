@@ -269,7 +269,13 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"counts": counts, "projects": projects, "recent_entries": recent})
+	recentResponse := make([]map[string]any, 0, len(recent))
+	for _, entry := range recent {
+		item := entryResponse(entry.Entry)
+		item["project_name"] = entry.ProjectName
+		recentResponse = append(recentResponse, item)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"counts": counts, "projects": projects, "recent_entries": recentResponse})
 }
 
 func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
@@ -301,8 +307,21 @@ func (s *Server) getProject(w http.ResponseWriter, r *http.Request) {
 		}
 		entries = parsed
 	}
-	result, err := s.db.GetProject(r.Context(), slug, entries)
+	var before *int64
+	if raw := r.URL.Query().Get("before"); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || parsed < 1 {
+			writeError(w, http.StatusBadRequest, "before must be a positive entry ID")
+			return
+		}
+		before = &parsed
+	}
+	result, nextBefore, err := s.db.GetProjectPage(r.Context(), slug, entries, before)
 	if err != nil {
+		if store.IsInvalidEntryCursor(err) {
+			writeError(w, http.StatusBadRequest, "before is not an entry in this project")
+			return
+		}
 		if store.IsNotFound(err) {
 			writeError(w, http.StatusNotFound, "project not found")
 			return
@@ -310,7 +329,11 @@ func (s *Server) getProject(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	payload := map[string]any{"project": result.Project, "entries": entryResponses(result.Entries)}
+	if nextBefore != nil {
+		payload["next_before"] = strconv.FormatInt(*nextBefore, 10)
+	}
+	writeJSON(w, http.StatusOK, payload)
 }
 
 type projectInput struct {
@@ -380,7 +403,22 @@ func (s *Server) appendEntry(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	writeJSON(w, http.StatusCreated, entry)
+	writeJSON(w, http.StatusCreated, entryResponse(entry))
+}
+
+func entryResponse(entry store.Entry) map[string]any {
+	return map[string]any{
+		"id": strconv.FormatInt(entry.ID, 10), "slug": entry.Slug, "kind": entry.Kind, "body": entry.Body,
+		"source": entry.Source, "client_id": entry.ClientID, "created_at": entry.CreatedAt,
+	}
+}
+
+func entryResponses(entries []store.Entry) []map[string]any {
+	out := make([]map[string]any, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, entryResponse(entry))
+	}
+	return out
 }
 
 // clientIdentifier attributes admin writes to a session without exposing session material.
@@ -396,7 +434,7 @@ type searchHit struct {
 	Snippet     string     `json:"snippet"`
 	ProjectSlug string     `json:"project_slug"`
 	ProjectName string     `json:"project_name"`
-	EntryID     *int64     `json:"entry_id,omitempty"`
+	EntryID     string     `json:"entry_id,omitempty"`
 	CreatedAt   *time.Time `json:"created_at,omitempty"`
 	Source      string     `json:"source,omitempty"`
 	ClientID    string     `json:"client_id,omitempty"`
@@ -475,7 +513,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		if raw, ok := strings.CutPrefix(ranked.Ref, "entry:"); ok {
 			if id, err := strconv.ParseInt(raw, 10, 64); err == nil {
 				if entry, found := entries[id]; found {
-					hit.EntryID = &entry.ID
+					hit.EntryID = strconv.FormatInt(entry.ID, 10)
 					hit.CreatedAt = &entry.CreatedAt
 					hit.Source = entry.Source
 					hit.ClientID = entry.ClientID

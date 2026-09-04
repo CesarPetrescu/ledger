@@ -37,7 +37,7 @@ export interface ProjectInput {
 }
 
 export interface Entry {
-  id: number
+  id: string
   slug: string
   kind: EntryKind
   body: string
@@ -67,6 +67,7 @@ export interface Overview {
 export interface ProjectDetail {
   project: Project
   entries: Entry[]
+  next_before?: string
 }
 
 export interface SearchHit {
@@ -76,7 +77,7 @@ export interface SearchHit {
   snippet: string
   project_slug: string
   project_name: string
-  entry_id?: number
+  entry_id?: string
   created_at?: string
   source?: string
   client_id?: string
@@ -184,7 +185,8 @@ export const api = {
   logout: () => request<void>('POST', '/logout'),
   getOverview: () => request<Overview>('GET', '/overview'),
   listProjects: (tier?: Tier) => request<{ projects: Project[] }>('GET', tier ? `/projects?tier=${encodeURIComponent(tier)}` : '/projects').then((r) => r.projects),
-  getProject: (slug: string) => request<ProjectDetail>('GET', `/projects/${encodeURIComponent(slug)}?entries=200`),
+  getProject: (slug: string, before?: string) =>
+    request<ProjectDetail>('GET', `/projects/${encodeURIComponent(slug)}?entries=200${before === undefined ? '' : `&before=${encodeURIComponent(before)}`}`),
   saveProject: (slug: string, input: ProjectInput) => request<Project>('PUT', `/projects/${encodeURIComponent(slug)}`, input),
   appendEntry: (slug: string, kind: string, body: string) => request<Entry>('POST', `/projects/${encodeURIComponent(slug)}/entries`, { kind, body }),
   search: (input: SearchRequest) => request<SearchResponse>('POST', '/search', input),

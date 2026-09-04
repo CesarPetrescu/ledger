@@ -81,7 +81,7 @@ export const beacon: Project = {
 }
 
 export const decisionEntry: Entry = {
-  id: 41,
+  id: '41',
   slug: 'atlas',
   kind: 'decision',
   body: 'Use PostgreSQL <b>everywhere</b>.',
@@ -91,7 +91,7 @@ export const decisionEntry: Entry = {
 }
 
 export const noteEntry: Entry = {
-  id: 40,
+  id: '40',
   slug: 'atlas',
   kind: 'note',
   body: 'Kickoff done.',
@@ -143,7 +143,7 @@ export const searchResponse: SearchResponse = {
       snippet: 'Use PostgreSQL everywhere.',
       project_slug: 'atlas',
       project_name: 'Atlas',
-      entry_id: 41,
+      entry_id: '41',
       created_at: '2026-09-03T12:00:00Z',
       source: 'agent-one',
       client_id: 'client-1',

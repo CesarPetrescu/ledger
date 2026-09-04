@@ -205,7 +205,29 @@ const META_FIELDS: { key: keyof Project; label: string }[] = [
 function ProjectDetail({ slug, onSaved, onEntryAppended }: { slug: string; onSaved: (project: Project) => void; onEntryAppended: (entry: Entry) => void }) {
   const detail = useResource(() => api.getProject(slug), `project:${slug}`)
   const [editing, setEditing] = useState(false)
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  const [olderError, setOlderError] = useState('')
   const toast = useToast()
+
+  const loadOlder = async () => {
+    const before = detail.data?.next_before
+    if (before === undefined || loadingOlder) return
+    setLoadingOlder(true)
+    setOlderError('')
+    try {
+      const page = await api.getProject(slug, before)
+      detail.update((current) => {
+        const updated: typeof current = { ...current, entries: [...current.entries, ...page.entries] }
+        if (page.next_before === undefined) delete updated.next_before
+        else updated.next_before = page.next_before
+        return updated
+      })
+    } catch (failure) {
+      setOlderError(failure instanceof Error ? failure.message : 'Could not load older entries.')
+    } finally {
+      setLoadingOlder(false)
+    }
+  }
 
   if (detail.loading) return <Loading label="Loading project…" />
   if (!detail.data) {
@@ -269,7 +291,7 @@ function ProjectDetail({ slug, onSaved, onEntryAppended }: { slug: string; onSav
       />
       <section aria-labelledby="timeline-title" className="timeline-section">
         <h2 id="timeline-title" className="panel-title">
-          Timeline <span className="count">{entries.length}</span>
+          Timeline <span className="count">{entries.length} loaded</span>
         </h2>
         {entries.length === 0 ? (
           <p className="muted">No entries yet.</p>
@@ -288,6 +310,16 @@ function ProjectDetail({ slug, onSaved, onEntryAppended }: { slug: string; onSav
               </li>
             ))}
           </ol>
+        )}
+        {detail.data.next_before !== undefined && (
+          <button type="button" className="btn" disabled={loadingOlder} onClick={() => void loadOlder()}>
+            {loadingOlder ? 'Loading…' : 'Load older entries'}
+          </button>
+        )}
+        {olderError && (
+          <p className="field-error" role="alert">
+            {olderError}
+          </p>
         )}
       </section>
     </article>

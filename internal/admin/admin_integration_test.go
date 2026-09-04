@@ -215,7 +215,12 @@ func TestProjectsEntriesOverviewAndClientsThroughTheAPI(t *testing.T) {
 	if appended.Code != http.StatusCreated {
 		t.Fatalf("append = %d %s", appended.Code, appended.Body.String())
 	}
-	var entry store.Entry
+	var entry struct {
+		ID       string `json:"id"`
+		Kind     string `json:"kind"`
+		Source   string `json:"source"`
+		ClientID string `json:"client_id"`
+	}
 	if err := json.Unmarshal(appended.Body.Bytes(), &entry); err != nil || entry.Kind != "decision" || entry.Source != "ledger-admin" || !strings.HasPrefix(entry.ClientID, "admin-session-") || len(entry.ClientID) != len("admin-session-")+12 {
 		t.Fatalf("appended entry = %s, %v", appended.Body.String(), err)
 	}
@@ -230,7 +235,12 @@ func TestProjectsEntriesOverviewAndClientsThroughTheAPI(t *testing.T) {
 	}
 
 	detail := request(t, server, http.MethodGet, "/admin/api/projects/atlas?entries=5", "", authed(s, false))
-	var withEntries store.ProjectWithEntries
+	var withEntries struct {
+		Project store.Project `json:"project"`
+		Entries []struct {
+			ID string `json:"id"`
+		} `json:"entries"`
+	}
 	if err := json.Unmarshal(detail.Body.Bytes(), &withEntries); err != nil || detail.Code != http.StatusOK || len(withEntries.Entries) != 1 || withEntries.Project.Name != "Atlas" {
 		t.Fatalf("detail = %d %s", detail.Code, detail.Body.String())
 	}
@@ -259,14 +269,17 @@ func TestProjectsEntriesOverviewAndClientsThroughTheAPI(t *testing.T) {
 	}
 	overview := request(t, server, http.MethodGet, "/admin/api/overview", "", authed(s, false))
 	var summary struct {
-		Counts   store.AdminCounts        `json:"counts"`
-		Projects []store.Project          `json:"projects"`
-		Recent   []store.EntryWithProject `json:"recent_entries"`
+		Counts   store.AdminCounts `json:"counts"`
+		Projects []store.Project   `json:"projects"`
+		Recent   []struct {
+			ID          string `json:"id"`
+			ProjectName string `json:"project_name"`
+		} `json:"recent_entries"`
 	}
 	if err := json.Unmarshal(overview.Body.Bytes(), &summary); err != nil || overview.Code != http.StatusOK {
 		t.Fatalf("overview = %d %s", overview.Code, overview.Body.String())
 	}
-	if want := (store.AdminCounts{Projects: 2, Entries: 1, Clients: 1, ActiveTokens: 1, ActiveSessions: 1}); summary.Counts != want || len(summary.Projects) != 2 || len(summary.Recent) != 1 || summary.Recent[0].ProjectName != "Atlas" {
+	if want := (store.AdminCounts{Projects: 2, Entries: 1, Clients: 1, ActiveTokens: 1, ActiveSessions: 1}); summary.Counts != want || len(summary.Projects) != 2 || len(summary.Recent) != 1 || summary.Recent[0].ID == "" || summary.Recent[0].ProjectName != "Atlas" {
 		t.Fatalf("overview = %s", overview.Body.String())
 	}
 
@@ -324,6 +337,60 @@ func TestClientListIsBoundedAndPaginated(t *testing.T) {
 	for _, path := range []string{"/admin/api/oauth/clients?limit=101", "/admin/api/oauth/clients?limit=0", "/admin/api/oauth/clients?offset=-1"} {
 		if res := request(t, server, http.MethodGet, path, "", authed(s, false)); res.Code != http.StatusBadRequest {
 			t.Errorf("invalid pagination %s = %d", path, res.Code)
+		}
+	}
+}
+
+func TestProjectTimelineIsCursorPaginated(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
+	_, s := login(t, server, "correct horse", "")
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, `SELECT setval(pg_get_serial_sequence('entry','id'), 9007199254740992)`); err != nil {
+		t.Fatal(err)
+	}
+	entries := make([]store.Entry, 3)
+	for i := range entries {
+		entry, err := db.AppendEntry(ctx, "atlas", "note", "entry "+strconv.Itoa(i+1), "agent", "client-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		entries[i] = entry
+	}
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "beacon", Name: "Beacon", Tier: "park"}); err != nil {
+		t.Fatal(err)
+	}
+	foreign, err := db.AppendEntry(ctx, "beacon", "note", "foreign cursor", "agent", "client-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var first struct {
+		Entries []struct {
+			ID string `json:"id"`
+		} `json:"entries"`
+		NextBefore *string `json:"next_before"`
+	}
+	res := request(t, server, http.MethodGet, "/admin/api/projects/atlas?entries=2", "", authed(s, false))
+	if err := json.Unmarshal(res.Body.Bytes(), &first); err != nil || res.Code != http.StatusOK || len(first.Entries) != 2 || first.Entries[0].ID != strconv.FormatInt(entries[2].ID, 10) || first.Entries[1].ID != strconv.FormatInt(entries[1].ID, 10) || first.NextBefore == nil || *first.NextBefore != strconv.FormatInt(entries[1].ID, 10) {
+		t.Fatalf("first timeline page = %d %s", res.Code, res.Body.String())
+	}
+
+	var second struct {
+		Entries []struct {
+			ID string `json:"id"`
+		} `json:"entries"`
+		NextBefore *string `json:"next_before"`
+	}
+	res = request(t, server, http.MethodGet, "/admin/api/projects/atlas?entries=2&before="+*first.NextBefore, "", authed(s, false))
+	if err := json.Unmarshal(res.Body.Bytes(), &second); err != nil || res.Code != http.StatusOK || len(second.Entries) != 1 || second.Entries[0].ID != strconv.FormatInt(entries[0].ID, 10) || second.NextBefore != nil {
+		t.Fatalf("second timeline page = %d %s", res.Code, res.Body.String())
+	}
+	for _, before := range []string{"0", "1", strconv.FormatInt(foreign.ID, 10)} {
+		if res := request(t, server, http.MethodGet, "/admin/api/projects/atlas?before="+before, "", authed(s, false)); res.Code != http.StatusBadRequest {
+			t.Errorf("invalid timeline cursor %s = %d %s", before, res.Code, res.Body.String())
 		}
 	}
 }

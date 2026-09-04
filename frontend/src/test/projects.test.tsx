@@ -45,7 +45,7 @@ describe('project browser', () => {
       'GET /admin/api/session': authenticatedSession,
       'GET /admin/api/projects': { body: { projects: [atlas] } },
       'GET /admin/api/projects/atlas': { body: atlasDetail },
-      'POST /admin/api/projects/atlas/entries': { status: 201, body: { id: 42, slug: 'atlas', kind: 'todo', body: 'Write the runbook', source: 'ledger-admin', client_id: 'admin-session-0123456789ab', created_at: '2026-09-04T08:00:00Z' } },
+      'POST /admin/api/projects/atlas/entries': { status: 201, body: { id: '42', slug: 'atlas', kind: 'todo', body: 'Write the runbook', source: 'ledger-admin', client_id: 'admin-session-0123456789ab', created_at: '2026-09-04T08:00:00Z' } },
     })
     renderApp('/admin/projects/atlas')
     await screen.findByRole('heading', { name: 'Atlas', level: 1 })
@@ -63,6 +63,33 @@ describe('project browser', () => {
     expect(within(timeline).getAllByRole('listitem')[0]).toHaveTextContent('Write the runbook')
     expect(within(composer).getByLabelText(/body/i)).toHaveValue('')
     expect(within(screen.getByRole('list', { name: /projects/i })).getByRole('link', { name: /atlas/i }).querySelector('time')).toHaveAttribute('datetime', '2026-09-04T08:00:00Z')
+  })
+
+  it('loads older timeline entries without hiding append-only history', async () => {
+    const newest = atlasDetail.entries[0]!
+    const middle = atlasDetail.entries[1]!
+    const older = { ...middle, id: '39', body: 'Oldest retained decision.' }
+    const cursor = '9007199254740993'
+    const { calls } = mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/projects': { body: { projects: [atlas] } },
+      'GET /admin/api/projects/atlas': [
+        { body: { project: atlas, entries: [newest], next_before: cursor } },
+        { body: { project: atlas, entries: [middle, older] } },
+      ],
+    })
+    renderApp('/admin/projects/atlas')
+    const timeline = await screen.findByRole('region', { name: /timeline/i })
+    expect(within(timeline).getAllByRole('listitem')).toHaveLength(1)
+
+    await userEvent.setup().click(within(timeline).getByRole('button', { name: /load older entries/i }))
+
+    await waitFor(() => expect(within(timeline).getAllByRole('listitem')).toHaveLength(3))
+    expect(within(timeline).getByText('Oldest retained decision.')).toBeInTheDocument()
+    expect(within(timeline).queryByRole('button', { name: /load older entries/i })).not.toBeInTheDocument()
+    const pageCall = calls.filter((call) => call.path === '/admin/api/projects/atlas').at(-1)
+    expect(pageCall?.url.searchParams.get('entries')).toBe('200')
+    expect(pageCall?.url.searchParams.get('before')).toBe(cursor)
   })
 
   it('creates a project through the form and shows server validation errors', async () => {

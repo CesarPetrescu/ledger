@@ -40,6 +40,8 @@ type ProjectWithEntries struct {
 	Entries []Entry `json:"entries"`
 }
 
+var ErrInvalidEntryCursor = errors.New("invalid entry cursor")
+
 const projectColumns = `p.slug,p.name,p.tier,p.hours_wk,p.type,p.description,p.goal,p.deadline,p.needs_me,p.automate,p.stack,p.updated_at`
 
 func scanProject(row pgx.Row) (Project, error) {
@@ -79,24 +81,50 @@ WHERE ($1='' OR p.tier=$1) GROUP BY p.slug ORDER BY p.slug`, tier)
 }
 
 func (db *DB) GetProject(ctx context.Context, slug string, entryLimit int) (ProjectWithEntries, error) {
+	result, _, err := db.GetProjectPage(ctx, slug, entryLimit, nil)
+	return result, err
+}
+
+func (db *DB) GetProjectPage(ctx context.Context, slug string, entryLimit int, before *int64) (ProjectWithEntries, *int64, error) {
 	p, err := scanProject(db.Pool.QueryRow(ctx, `SELECT `+projectColumns+` FROM project p WHERE slug=$1`, slug))
 	if err != nil {
-		return ProjectWithEntries{}, err
+		return ProjectWithEntries{}, nil, err
 	}
-	rows, err := db.Pool.Query(ctx, `SELECT id,slug,kind,body,source,client_id,created_at FROM entry WHERE slug=$1 ORDER BY created_at DESC,id DESC LIMIT $2`, slug, entryLimit)
+	var cursorTime *time.Time
+	if before != nil {
+		var value time.Time
+		if err := db.Pool.QueryRow(ctx, `SELECT created_at FROM entry WHERE slug=$1 AND id=$2`, slug, *before).Scan(&value); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ProjectWithEntries{}, nil, ErrInvalidEntryCursor
+			}
+			return ProjectWithEntries{}, nil, err
+		}
+		cursorTime = &value
+	}
+	rows, err := db.Pool.Query(ctx, `SELECT id,slug,kind,body,source,client_id,created_at FROM entry
+		WHERE slug=$1 AND ($3::timestamptz IS NULL OR (created_at,id) < ($3,$4::bigint))
+		ORDER BY created_at DESC,id DESC LIMIT $2`, slug, entryLimit+1, cursorTime, before)
 	if err != nil {
-		return ProjectWithEntries{}, err
+		return ProjectWithEntries{}, nil, err
 	}
 	defer rows.Close()
 	result := ProjectWithEntries{Project: p, Entries: []Entry{}}
 	for rows.Next() {
 		var e Entry
 		if err := rows.Scan(&e.ID, &e.Slug, &e.Kind, &e.Body, &e.Source, &e.ClientID, &e.CreatedAt); err != nil {
-			return ProjectWithEntries{}, err
+			return ProjectWithEntries{}, nil, err
 		}
 		result.Entries = append(result.Entries, e)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return ProjectWithEntries{}, nil, err
+	}
+	if len(result.Entries) <= entryLimit {
+		return result, nil, nil
+	}
+	result.Entries = result.Entries[:entryLimit]
+	next := result.Entries[len(result.Entries)-1].ID
+	return result, &next, nil
 }
 
 func (db *DB) AppendEntry(ctx context.Context, slug, kind, body, source, clientID string) (Entry, error) {
@@ -107,6 +135,8 @@ func (db *DB) AppendEntry(ctx context.Context, slug, kind, body, source, clientI
 }
 
 func IsNotFound(err error) bool { return errors.Is(err, pgx.ErrNoRows) }
+
+func IsInvalidEntryCursor(err error) bool { return errors.Is(err, ErrInvalidEntryCursor) }
 
 func IsForeignKeyViolation(err error) bool { return pgErrorCode(err) == "23503" }
 
