@@ -28,7 +28,7 @@ type identity struct {
 type identityKey struct{}
 
 func NewServer(db *store.DB, indexURL string, services ...*calendarapi.Service) *mcp.Server {
-	server := mcp.NewServer(&mcp.Implementation{Name: "ledger", Version: "6"}, nil)
+	server := mcp.NewServer(&mcp.Implementation{Name: "ledger", Version: "7"}, nil)
 	client := retrieval.NewClient(indexURL)
 	var calendar *calendarapi.Service
 	if len(services) > 0 {
@@ -161,6 +161,8 @@ func NewServer(db *store.DB, indexURL string, services ...*calendarapi.Service) 
 			entry, err := db.AppendEntry(ctx, input.Slug, input.Kind, input.Body, info.Name, id.ClientID)
 			return nil, map[string]any{"id": entry.ID, "created_at": entry.CreatedAt}, err
 		})
+
+	addHandoffTools(server, db)
 
 	mcp.AddTool(server, &mcp.Tool{Name: "list_calendars", Description: "List the Nextcloud calendars explicitly selected by the owner. " + CalendarDescriptionSuffix, Annotations: calendarRead},
 		func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
@@ -327,7 +329,7 @@ func promptField(value string) string {
 func boolPointer(value bool) *bool { return &value }
 
 func HTTPHandler(server *mcp.Server, db *store.DB, publicURL string) http.Handler {
-	transport := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{Stateless: true})
+	transport := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{Stateless: true, MaxRequestBodyBytes: 36 << 20})
 	protected := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, ok := bearerToken(r.Header)
 		if !ok {

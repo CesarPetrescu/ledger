@@ -73,3 +73,29 @@ func TestValidateContextHeaderMatchesMCPRules(t *testing.T) {
 		t.Error("slug with space accepted")
 	}
 }
+
+func TestValidateHandoffFieldsAndMessageBounds(t *testing.T) {
+	if err := ValidateHandoff("Release handoff", "What changed", "ledger backend"); err != nil {
+		t.Fatalf("valid handoff rejected: %v", err)
+	}
+	if err := ValidateHandoffMessage(strings.Repeat("Ș", 100000), "Claude", "ready"); err != nil {
+		t.Fatalf("valid handoff message rejected: %v", err)
+	}
+	for name, err := range map[string]error{
+		"empty title":        ValidateHandoff("", "", ""),
+		"multiline title":    ValidateHandoff("bad\ntitle", "", ""),
+		"long description":   ValidateHandoff("Title", strings.Repeat("d", 2001), ""),
+		"long scope":         ValidateHandoff("Title", "", strings.Repeat("s", 501)),
+		"empty body":         ValidateHandoffMessage("", "", "ready"),
+		"long body":          ValidateHandoffMessage(strings.Repeat("x", 100001), "", "ready"),
+		"multiline target":   ValidateHandoffMessage("body", "Claude\nCodex", "ready"),
+		"unknown work state": ValidateHandoffMessage("body", "", "waiting"),
+	} {
+		if err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+	if _, err := normalizeMediaType("application/" + strings.Repeat("x", 244)); err == nil {
+		t.Error("media type longer than its database field accepted")
+	}
+}

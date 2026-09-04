@@ -5,6 +5,7 @@ package mcpserver
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -106,6 +107,89 @@ func TestAuthenticatedMCPWriteScopeAndClientInfoSource(t *testing.T) {
 	}
 	if source != "test-client" || clientID != "client" {
 		t.Fatalf("entry identity = source %q client %q", source, clientID)
+	}
+}
+
+func TestMCPHandoffFlowRoutesClaimsAndReadsFiles(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	addAccess(t, db, ctx, "handoff-token", []string{"ledger:read", "ledger:write"})
+	server := httptest.NewServer(HTTPHandler(NewServer(db, "http://unused"), db, "https://ledger.example.com"))
+	defer server.Close()
+	session := connectMCP(t, server.URL+"/mcp", "handoff-token", "Codex CLI")
+
+	created, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "create_handoff", Arguments: map[string]any{
+		"title": "Transfer implementation", "description": "Continue safely", "scope": "ledger backend", "body": "Read the attached note.", "target": "Claude", "draft": true,
+	}})
+	if err != nil || created.IsError {
+		t.Fatalf("create_handoff = %#v, %v", created, err)
+	}
+	raw, _ := json.Marshal(created.StructuredContent)
+	var detail struct {
+		Handoff struct {
+			ID string `json:"id"`
+		} `json:"handoff"`
+		Messages []struct {
+			ID string `json:"id"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(raw, &detail); err != nil || detail.Handoff.ID == "" || len(detail.Messages) != 1 {
+		t.Fatalf("create_handoff output = %s, %v", raw, err)
+	}
+	messageID := detail.Messages[0].ID
+
+	attached, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "attach_handoff_file", Arguments: map[string]any{
+		"message_id": messageID, "filename": "handoff.txt", "media_type": "text/plain", "content_base64": base64.StdEncoding.EncodeToString([]byte("file context")),
+	}})
+	if err != nil || attached.IsError {
+		t.Fatalf("attach_handoff_file = %#v, %v", attached, err)
+	}
+	fileRaw, _ := json.Marshal(attached.StructuredContent)
+	var file struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(fileRaw, &file); err != nil || file.ID == "" {
+		t.Fatalf("file output = %s, %v", fileRaw, err)
+	}
+	for _, action := range []string{"publish", "claim"} {
+		result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "update_handoff_message", Arguments: map[string]any{"message_id": messageID, "action": action}})
+		if err != nil || result.IsError {
+			t.Fatalf("%s = %#v, %v", action, result, err)
+		}
+	}
+	got, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "get_handoff", Arguments: map[string]any{"id": detail.Handoff.ID}})
+	gotJSON, _ := json.Marshal(got.StructuredContent)
+	if err != nil || got.IsError || !strings.Contains(string(gotJSON), `"client_id":"client"`) || !strings.Contains(string(gotJSON), `"claimed_client_id":"client"`) || !strings.Contains(string(gotJSON), `"status_updated_client_id":"client"`) {
+		t.Fatalf("handoff attribution = %s, %v", gotJSON, err)
+	}
+	read, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "read_handoff_file", Arguments: map[string]any{"file_id": file.ID}})
+	if err != nil || read.IsError || len(read.Content) != 1 {
+		t.Fatalf("read_handoff_file = %#v, %v", read, err)
+	}
+	resource, ok := read.Content[0].(*mcp.EmbeddedResource)
+	if !ok || resource.Resource.MIMEType != "text/plain" || string(resource.Resource.Blob) != "file context" {
+		t.Fatalf("embedded file = %#v", read.Content[0])
+	}
+	list, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "list_handoffs", Arguments: map[string]any{}})
+	if err != nil || list.IsError {
+		t.Fatalf("list_handoffs = %#v, %v", list, err)
+	}
+	listRaw, _ := json.Marshal(list.StructuredContent)
+	if !strings.Contains(string(listRaw), "Transfer implementation") {
+		t.Fatalf("claimed handoff not routed to claimant: %s", listRaw)
+	}
+	for name, arguments := range map[string]map[string]any{
+		"invalid status": {"status": "working"},
+		"long query":     {"q": strings.Repeat("q", 1001)},
+		"newline target": {"target": "Claude\nCodex"},
+	} {
+		result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "list_handoffs", Arguments: arguments})
+		if err != nil || result == nil || !result.IsError {
+			t.Errorf("%s = %#v, %v", name, result, err)
+		}
+	}
+	var source string
+	if err := db.Pool.QueryRow(ctx, `SELECT source FROM handoff_message WHERE id=$1`, messageID).Scan(&source); err != nil || source != "Codex CLI" {
+		t.Fatalf("message source = %q, %v", source, err)
 	}
 }
 

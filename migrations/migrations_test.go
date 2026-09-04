@@ -79,7 +79,7 @@ func TestAdminSessionMigrationStoresHashesOnly(t *testing.T) {
 	for _, entry := range entries {
 		names = append(names, entry.Name())
 	}
-	if len(names) != 4 || names[0] != "0001_init.sql" || names[1] != "0002_admin_session.sql" || names[2] != "0003_admin_events.sql" || names[3] != "0004_calendar.sql" {
+	if len(names) != 5 || names[0] != "0001_init.sql" || names[1] != "0002_admin_session.sql" || names[2] != "0003_admin_events.sql" || names[3] != "0004_calendar.sql" || names[4] != "0005_handoffs.sql" {
 		t.Fatalf("migration files = %v, want strictly numbered sequence", names)
 	}
 }
@@ -110,5 +110,27 @@ func TestCalendarMigrationStoresEncryptedCredential(t *testing.T) {
 	}
 	if strings.Contains(sql, "password text") {
 		t.Error("calendar migration must not store a plaintext password")
+	}
+}
+
+func TestHandoffMigrationEnforcesMessagesAndFiles(t *testing.T) {
+	body, err := Files.ReadFile("0005_handoffs.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToLower(string(body))
+	for _, required := range []string{
+		"create table handoff",
+		"create table handoff_message",
+		"create table handoff_file",
+		"work_state text not null",
+		"octet_length(data) = size_bytes",
+		"notify_admin_event('handoff')",
+		"notify_admin_event('handoff_message')",
+		"notify_admin_event('handoff_file')",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Errorf("handoff migration missing %q", required)
+		}
 	}
 }

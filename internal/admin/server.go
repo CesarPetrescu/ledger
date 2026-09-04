@@ -43,6 +43,7 @@ const (
 	maxSearchRunes = 1000
 	defaultClients = 50
 	maxClients     = 100
+	maxHandoffJSON = 1 << 20
 )
 
 type Config struct {
@@ -87,6 +88,17 @@ func NewServer(config Config, db *store.DB) *Server {
 	s.mux.HandleFunc("GET /admin/api/projects/{slug}", s.getProject)
 	s.mux.HandleFunc("PUT /admin/api/projects/{slug}", s.putProject)
 	s.mux.HandleFunc("POST /admin/api/projects/{slug}/entries", s.appendEntry)
+	s.mux.HandleFunc("GET /admin/api/projects/{slug}/files", s.listProjectFiles)
+	s.mux.HandleFunc("GET /admin/api/handoffs", s.listHandoffs)
+	s.mux.HandleFunc("POST /admin/api/handoffs", s.createHandoff)
+	s.mux.HandleFunc("GET /admin/api/handoffs/{id}", s.getHandoff)
+	s.mux.HandleFunc("PUT /admin/api/handoffs/{id}", s.putHandoff)
+	s.mux.HandleFunc("GET /admin/api/handoffs/{id}/export", s.exportHandoff)
+	s.mux.HandleFunc("POST /admin/api/handoffs/{id}/messages", s.appendHandoffMessage)
+	s.mux.HandleFunc("POST /admin/api/handoff-messages/{id}/actions", s.updateHandoffMessage)
+	s.mux.HandleFunc("POST /admin/api/handoff-messages/{id}/files", s.uploadHandoffFile)
+	s.mux.HandleFunc("GET /admin/api/handoff-files/{id}", s.downloadHandoffFile)
+	s.mux.HandleFunc("DELETE /admin/api/handoff-files/{id}", s.deleteHandoffFile)
 	s.mux.HandleFunc("POST /admin/api/search", s.search)
 	s.mux.HandleFunc("GET /admin/api/calendar/connection", s.calendarConnection)
 	s.mux.HandleFunc("POST /admin/api/calendar/connect", s.startCalendarLogin)

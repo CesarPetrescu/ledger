@@ -188,4 +188,47 @@ describe('project browser', () => {
     renderApp('/admin/projects/ghost')
     expect(await screen.findByRole('alert')).toHaveTextContent(/project not found/i)
   })
+
+  it('shows linked handoffs and their files without duplicating project history', async () => {
+    const handoff = {
+      id: '7', project_slug: 'atlas', project_name: 'Atlas', title: 'Continue Atlas', description: 'Release context', scope: 'Release', source: 'Codex',
+      created_at: '2026-09-04T08:00:00Z', updated_at: '2026-09-04T09:00:00Z', draft_count: 0, ready_count: 1, in_progress_count: 0, blocked_count: 0, done_count: 0,
+    }
+    mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/projects': { body: { projects: [atlas] } },
+      'GET /admin/api/projects/atlas': { body: atlasDetail },
+      'GET /admin/api/handoffs': { body: { handoffs: [handoff] } },
+      'GET /admin/api/projects/atlas/files': { body: { files: [{ id: '15', message_id: '11', handoff_id: '7', handoff_title: 'Continue Atlas', filename: 'checks.txt', media_type: 'text/plain', size_bytes: 42, sha256: 'abc', created_at: '2026-09-04T09:00:00Z' }] } },
+    })
+    renderApp('/admin/projects/atlas/handoffs')
+    const linked = await screen.findByRole('region', { name: /project handoffs/i })
+    expect(within(linked).getByRole('link', { name: /continue atlas/i })).toHaveAttribute('href', '/admin/handoffs/7')
+    await userEvent.setup().click(screen.getByRole('link', { name: /^files$/i }))
+    const files = await screen.findByRole('region', { name: /project files/i })
+    expect(within(files).getByRole('link', { name: /checks.txt/i })).toHaveAttribute('href', '/admin/api/handoff-files/15')
+    expect(screen.queryByText('checks.txt', { selector: '.timeline *' })).not.toBeInTheDocument()
+  })
+
+  it('loads every page of project handoffs', async () => {
+    const handoff = {
+      id: '7', project_slug: 'atlas', project_name: 'Atlas', title: 'Continue Atlas', description: 'Release context', scope: 'Release', source: 'Codex',
+      created_at: '2026-09-04T08:00:00Z', updated_at: '2026-09-04T09:00:00Z', draft_count: 0, ready_count: 1, in_progress_count: 0, blocked_count: 0, done_count: 0,
+    }
+    const older = { ...handoff, id: '6', title: 'Older Atlas handoff' }
+    const { calls } = mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/projects': { body: { projects: [atlas] } },
+      'GET /admin/api/projects/atlas': { body: atlasDetail },
+      'GET /admin/api/handoffs': [
+        { body: { handoffs: [handoff], next_before: 'project-cursor' } },
+        { body: { handoffs: [older] } },
+      ],
+    })
+    renderApp('/admin/projects/atlas/handoffs')
+    const linked = await screen.findByRole('region', { name: /project handoffs/i })
+    await userEvent.setup().click(within(linked).getByRole('button', { name: /load more handoffs/i }))
+    expect(await within(linked).findByRole('link', { name: /older atlas handoff/i })).toBeInTheDocument()
+    expect(calls.filter((call) => call.path === '/admin/api/handoffs').at(-1)?.url.searchParams.get('before')).toBe('project-cursor')
+  })
 })

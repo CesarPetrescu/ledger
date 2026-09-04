@@ -202,7 +202,50 @@ const META_FIELDS: { key: keyof Project; label: string }[] = [
   { key: 'stack', label: 'Stack' },
 ]
 
-function ProjectDetail({ slug, onSaved, onEntryAppended }: { slug: string; onSaved: (project: Project) => void; onEntryAppended: (entry: Entry) => void }) {
+type ProjectView = 'overview' | 'handoffs' | 'files'
+
+function ProjectHandoffs({ slug }: { slug: string }) {
+  const handoffs = useResource(() => api.listHandoffs({ project: slug, archive: 'all' }), `project-handoffs:${slug}`, 'handoff handoff_message')
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [error, setError] = useState('')
+  const loadMore = async () => {
+    if (!handoffs.data?.next_before || loadingMore) return
+    setLoadingMore(true)
+    setError('')
+    try {
+      const page = await api.listHandoffs({ project: slug, archive: 'all', before: handoffs.data.next_before })
+      handoffs.update((current) => ({ handoffs: [...current.handoffs, ...page.handoffs], ...(page.next_before ? { next_before: page.next_before } : {}) }))
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Could not load more handoffs.')
+    } finally {
+      setLoadingMore(false)
+    }
+  }
+  if (handoffs.loading) return <Loading label="Loading handoffs…" />
+  if (!handoffs.data) return <ErrorState message="Couldn't load project handoffs." onRetry={handoffs.reload} />
+  return (
+    <section aria-label="Project handoffs" className="project-related">
+      <div className="section-head"><h2 className="section-title">Handoffs</h2><Link className="btn btn-primary" to={`/handoffs/new?project=${encodeURIComponent(slug)}`}><Icon name="plus" /> New handoff</Link></div>
+      {handoffs.data.handoffs.length === 0 ? <p className="muted">No handoffs are linked to this project.</p> : <ul>{handoffs.data.handoffs.map((handoff) => <li key={handoff.id}><Link to={`/handoffs/${handoff.id}`}><strong>{handoff.title}</strong><span>{handoff.description}</span><span className="muted small">Updated <Timestamp iso={handoff.updated_at} /></span></Link></li>)}</ul>}
+      {handoffs.data.next_before && <button type="button" className="btn" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? 'Loading…' : 'Load more handoffs'}</button>}
+      {error && <p className="field-error" role="alert">{error}</p>}
+    </section>
+  )
+}
+
+function ProjectFiles({ slug }: { slug: string }) {
+  const files = useResource(() => api.listProjectFiles(slug), `project-files:${slug}`, 'handoff_file')
+  if (files.loading) return <Loading label="Loading files…" />
+  if (!files.data) return <ErrorState message="Couldn't load project files." onRetry={files.reload} />
+  return (
+    <section aria-label="Project files" className="project-related">
+      <h2 className="section-title">Files from handoffs</h2>
+      {files.data.length === 0 ? <p className="muted">No handoff files are linked to this project.</p> : <ul>{files.data.map((file) => <li key={file.id}><a href={`/admin/api/handoff-files/${file.id}`}><strong>{file.filename}</strong><span>{file.handoff_title}</span><span className="muted small">{file.size_bytes.toLocaleString()} bytes · <Timestamp iso={file.created_at} /></span></a></li>)}</ul>}
+    </section>
+  )
+}
+
+function ProjectDetail({ slug, view, onSaved, onEntryAppended }: { slug: string; view: ProjectView; onSaved: (project: Project) => void; onEntryAppended: (entry: Entry) => void }) {
   const detail = useResource(() => api.getProject(slug), `project:${slug}`, 'project entry')
   const [editing, setEditing] = useState(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
@@ -253,13 +296,19 @@ function ProjectDetail({ slug, onSaved, onEntryAppended }: { slug: string; onSav
             </span>
           </div>
         </div>
-        {!editing && (
+        {!editing && view === 'overview' && (
           <button type="button" className="btn" onClick={() => setEditing(true)}>
             Edit project
           </button>
         )}
       </header>
       {detail.stale && <StaleNotice message="Showing the last loaded version; refresh failed." onRetry={detail.reload} />}
+      <nav className="detail-tabs" aria-label="Project sections">
+        <Link to={`/projects/${slug}`} aria-current={view === 'overview' ? 'page' : undefined}>Overview</Link>
+        <Link to={`/projects/${slug}/handoffs`} aria-current={view === 'handoffs' ? 'page' : undefined}>Handoffs</Link>
+        <Link to={`/projects/${slug}/files`} aria-current={view === 'files' ? 'page' : undefined}>Files</Link>
+      </nav>
+      {view === 'handoffs' ? <ProjectHandoffs slug={slug} /> : view === 'files' ? <ProjectFiles slug={slug} /> : <>
       {editing ? (
         <ProjectForm
           mode="edit"
@@ -322,11 +371,12 @@ function ProjectDetail({ slug, onSaved, onEntryAppended }: { slug: string; onSav
           </p>
         )}
       </section>
+      </>}
     </article>
   )
 }
 
-export function ProjectsPage({ slug }: { slug?: string | undefined }) {
+export function ProjectsPage({ slug, view = 'overview' }: { slug?: string | undefined; view?: ProjectView }) {
   const list = useResource(() => api.listProjects(), 'projects', 'project entry')
   const [filter, setFilter] = useState('')
   const [tier, setTier] = useState('all')
@@ -406,7 +456,7 @@ export function ProjectsPage({ slug }: { slug?: string | undefined }) {
             />
           </>
         ) : slug ? (
-          <ProjectDetail key={slug} slug={slug} onSaved={upsertInList} onEntryAppended={updateLastEntry} />
+          <ProjectDetail key={`${slug}:${view}`} slug={slug} view={view} onSaved={upsertInList} onEntryAppended={updateLastEntry} />
         ) : (
           <EmptyState>
             <p>Select a project to inspect its record and timeline.</p>

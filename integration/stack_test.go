@@ -167,7 +167,7 @@ func TestRealStackAcceptance(t *testing.T) {
 		res.Body.Close()
 		want := map[string]any{
 			"resource": s.publicURL + "/mcp", "authorization_servers": []any{s.publicURL},
-			"scopes_supported": []any{"ledger:read", "ledger:write"}, "bearer_methods_supported": []any{"header"},
+			"scopes_supported": []any{"ledger:read", "ledger:write", "calendar:read", "calendar:write"}, "bearer_methods_supported": []any{"header"},
 		}
 		if res.StatusCode != http.StatusOK || res.Header.Get("Cache-Control") != "max-age=3600" || !reflect.DeepEqual(got, want) {
 			t.Fatalf("metadata %s = %d %#v", path, res.StatusCode, got)
@@ -239,7 +239,7 @@ func TestRealStackAcceptance(t *testing.T) {
 	ctx := context.Background()
 	readSession := connectMCP(t, s.base, readPair.Access, "stack-read")
 	tools, err := readSession.ListTools(ctx, nil)
-	if err != nil || len(tools.Tools) != 5 {
+	if err != nil || len(tools.Tools) != 17 {
 		t.Fatalf("tools = %#v, %v", tools, err)
 	}
 	denied, err := readSession.CallTool(ctx, &mcp.CallToolParams{Name: "append_entry", Arguments: map[string]any{"slug": "acceptance", "kind": "note", "body": "blocked"}})
@@ -276,6 +276,16 @@ func TestRealStackAcceptance(t *testing.T) {
 		"slug": "acceptance", "kind": "decision", "body": "Decizie bilingvă: renovare bucătărie / kitchen renovation păstrează mobilierul.",
 	}}); err != nil || result.IsError {
 		t.Fatalf("append_entry = %#v, %v", result, err)
+	}
+	if result, err := writeSession.CallTool(ctx, &mcp.CallToolParams{Name: "create_handoff", Arguments: map[string]any{
+		"project_slug": "acceptance", "title": "Stack handoff", "description": "End-to-end handoff", "scope": "acceptance", "body": "Continue the stack verification.", "target": "stack-write",
+	}}); err != nil || result.IsError {
+		t.Fatalf("create_handoff = %#v, %v", result, err)
+	}
+	if result, err := writeSession.CallTool(ctx, &mcp.CallToolParams{Name: "list_handoffs", Arguments: map[string]any{}}); err != nil || result.IsError {
+		t.Fatalf("list_handoffs = %#v, %v", result, err)
+	} else if body, _ := json.Marshal(result.StructuredContent); !strings.Contains(string(body), "Stack handoff") {
+		t.Fatalf("list_handoffs omitted created work: %s", body)
 	}
 	for _, query := range []string{"renovare bucatarie", "kitchen renovation"} {
 		found := false
@@ -372,7 +382,7 @@ func TestRealStackAdminConsole(t *testing.T) {
 		t.Fatalf("deep link = %d %q, want SPA fallback", res.StatusCode, res.Header.Get("Content-Type"))
 	}
 
-	for _, path := range []string{"/admin/api/session", "/admin/api/overview", "/admin/api/projects", "/admin/api/oauth/clients"} {
+	for _, path := range []string{"/admin/api/session", "/admin/api/overview", "/admin/api/projects", "/admin/api/handoffs", "/admin/api/oauth/clients"} {
 		res, _ = s.adminRequest(t, http.MethodGet, path, "", map[string]string{"Cookie": "ledger_admin_session=forged"})
 		if res.StatusCode != http.StatusUnauthorized || res.Header.Get("Cache-Control") != "no-store" {
 			t.Fatalf("unauthenticated %s = %d cache=%q", path, res.StatusCode, res.Header.Get("Cache-Control"))
@@ -434,6 +444,14 @@ func TestRealStackAdminConsole(t *testing.T) {
 	res, body = s.adminRequest(t, http.MethodGet, "/admin/api/projects/console-acceptance?entries=5", "", session)
 	if res.StatusCode != http.StatusOK || !strings.Contains(string(body), "admin console verified") {
 		t.Fatalf("project read = %d %s", res.StatusCode, body)
+	}
+	res, body = s.adminRequest(t, http.MethodPost, "/admin/api/handoffs", `{"project_slug":"console-acceptance","title":"Console handoff","description":"Browser API acceptance","scope":"console","body":"Continue from the admin console.","target":"Codex"}`, mutating)
+	if res.StatusCode != http.StatusCreated || !strings.Contains(string(body), `"work_state":"ready"`) {
+		t.Fatalf("handoff create = %d %s", res.StatusCode, body)
+	}
+	res, body = s.adminRequest(t, http.MethodGet, "/admin/api/handoffs?q=console", "", session)
+	if res.StatusCode != http.StatusOK || !strings.Contains(string(body), `"title":"Console handoff"`) {
+		t.Fatalf("handoff list = %d %s", res.StatusCode, body)
 	}
 	res, body = s.adminRequest(t, http.MethodGet, "/admin/api/overview", "", session)
 	var overview struct {
