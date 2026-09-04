@@ -127,8 +127,8 @@ func TestBuildAndAcceptanceTargets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(dockerfile), "FROM golang:1.25.14-alpine AS build") {
-		t.Fatal("Docker builder is not pinned to current patched Go 1.25.14")
+	if !strings.Contains(string(dockerfile), "FROM golang:1.27.1-alpine AS build") {
+		t.Fatal("Docker builder is not pinned to current patched Go 1.27.1")
 	}
 	mod, err := os.ReadFile("go.mod")
 	if err != nil {
@@ -145,6 +145,16 @@ func TestBuildAndAcceptanceTargets(t *testing.T) {
 		!strings.Contains(string(makefile), "test-integration:\n\tgo test -tags=integration -count=1 ./...") ||
 		!strings.Contains(string(makefile), "test-stack:\n\tgo test -tags=stack -count=1 ./...") {
 		t.Fatal("Makefile lacks reproducible, distinct integration and stack targets")
+	}
+}
+
+func TestCIToolchainMatchesDockerBuilder(t *testing.T) {
+	workflow, err := os.ReadFile(".github/workflows/ci.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(workflow), "go-version: 1.27.1") {
+		t.Fatal("CI is not pinned to current patched Go 1.27.1")
 	}
 }
 
