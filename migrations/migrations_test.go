@@ -79,7 +79,20 @@ func TestAdminSessionMigrationStoresHashesOnly(t *testing.T) {
 	for _, entry := range entries {
 		names = append(names, entry.Name())
 	}
-	if len(names) != 2 || names[0] != "0001_init.sql" || names[1] != "0002_admin_session.sql" {
+	if len(names) != 3 || names[0] != "0001_init.sql" || names[1] != "0002_admin_session.sql" || names[2] != "0003_admin_events.sql" {
 		t.Fatalf("migration files = %v, want strictly numbered sequence", names)
+	}
+}
+
+func TestAdminEventsMigrationCoversEveryLiveSurface(t *testing.T) {
+	body, err := Files.ReadFile("0003_admin_events.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToLower(string(body))
+	for _, required := range []string{"ledger_admin_event", "'project'", "'entry'", "'oauth_client'", "'oauth_token'", "'chunk'", "'admin_session'", "after update of kind, redirect_uris, name", "for each statement"} {
+		if !strings.Contains(sql, required) {
+			t.Errorf("admin events migration missing %q", required)
+		}
 	}
 }

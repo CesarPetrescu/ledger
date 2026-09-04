@@ -35,6 +35,21 @@ func TestAuthorizationCodeAndRefreshRotationRevokeFamilyOnReuse(t *testing.T) {
 		"code_challenge": {PKCEChallenge(verifier)}, "code_challenge_method": {"S256"}, "scope": {"ledger:read ledger:write"},
 		"resource": {"https://ledger.example.com/mcp"}, "state": {"state-1"}, "password": {"secret"}, "action": {"approve"},
 	}
+	denied := make(url.Values, len(form))
+	for key, values := range form {
+		denied[key] = append([]string(nil), values...)
+	}
+	denied.Set("action", "deny")
+	denied.Del("password")
+	denied.Set("state", "state-denied")
+	denyReq := httptest.NewRequest(http.MethodPost, "/oauth/authorize", strings.NewReader(denied.Encode()))
+	denyReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	denyRes := httptest.NewRecorder()
+	server.ServeHTTP(denyRes, denyReq)
+	denyLocation, _ := url.Parse(denyRes.Header().Get("Location"))
+	if denyRes.Code != http.StatusFound || denyLocation.Query().Get("error") != "access_denied" || denyLocation.Query().Get("state") != "state-denied" {
+		t.Fatalf("deny without password = %d %s", denyRes.Code, denyRes.Header().Get("Location"))
+	}
 	req := httptest.NewRequest(http.MethodPost, "/oauth/authorize", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	res := httptest.NewRecorder()

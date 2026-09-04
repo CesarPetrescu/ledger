@@ -60,6 +60,7 @@ type Server struct {
 	trusted  *netip.Prefix
 	requests *oauth.RateLimiter
 	failures *oauth.RateLimiter
+	events   *eventStream
 }
 
 type sessionKey struct{}
@@ -68,7 +69,7 @@ func NewServer(config Config, db *store.DB) *Server {
 	if !strings.HasPrefix(config.PasswordHash, "$argon2id$") {
 		panic("LEDGER_ADMIN_PASSWORD_HASH must be an Argon2id PHC string")
 	}
-	s := &Server{config: config, origin: publicOrigin(config.PublicURL), db: db, index: retrieval.NewClient(config.IndexURL), mux: http.NewServeMux(), requests: oauth.NewRateLimiter(), failures: oauth.NewRateLimiter()}
+	s := &Server{config: config, origin: publicOrigin(config.PublicURL), db: db, index: retrieval.NewClient(config.IndexURL), mux: http.NewServeMux(), requests: oauth.NewRateLimiter(), failures: oauth.NewRateLimiter(), events: newEventStream(db)}
 	if config.InternalProxyCIDR != "" {
 		prefix, err := netip.ParsePrefix(config.InternalProxyCIDR)
 		if err != nil {
@@ -86,8 +87,12 @@ func NewServer(config Config, db *store.DB) *Server {
 	s.mux.HandleFunc("POST /admin/api/search", s.search)
 	s.mux.HandleFunc("GET /admin/api/oauth/clients", s.listClients)
 	s.mux.HandleFunc("POST /admin/api/oauth/revoke", s.revokeClient)
+	s.mux.HandleFunc("GET /admin/api/events", func(w http.ResponseWriter, r *http.Request) { s.events.serve(s.origin, w, r) })
 	return s
 }
+
+// RunEvents streams committed database changes to connected operator consoles.
+func (s *Server) RunEvents(ctx context.Context) error { return s.events.run(ctx) }
 
 // publicOrigin reduces LEDGER_PUBLIC_URL to the exact browser Origin value.
 func publicOrigin(publicURL string) string {

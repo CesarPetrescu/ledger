@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
-import { atlas, atlasDetail, authenticatedSession, beacon, mockApi, renderApp } from './helpers'
+import { atlas, atlasDetail, authenticatedSession, beacon, decisionEntry, mockApi, renderApp } from './helpers'
 
 describe('project browser', () => {
   it('lists projects densely, filters by text and tier, and opens the inspector', async () => {
@@ -63,6 +63,24 @@ describe('project browser', () => {
     expect(within(timeline).getAllByRole('listitem')[0]).toHaveTextContent('Write the runbook')
     expect(within(composer).getByLabelText(/body/i)).toHaveValue('')
     expect(within(screen.getByRole('list', { name: /projects/i })).getByRole('link', { name: /atlas/i }).querySelector('time')).toHaveAttribute('datetime', '2026-09-04T08:00:00Z')
+  })
+
+  it('does not duplicate an entry already loaded by a live refresh', async () => {
+    const appended = { ...decisionEntry, id: '42', body: 'Already refreshed.' }
+    mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/projects': { body: { projects: [atlas] } },
+      'GET /admin/api/projects/atlas': { body: { ...atlasDetail, entries: [appended, ...atlasDetail.entries] } },
+      'POST /admin/api/projects/atlas/entries': { status: 201, body: appended },
+    })
+    renderApp('/admin/projects/atlas')
+    const composer = await screen.findByRole('form', { name: /append entry/i })
+    const user = userEvent.setup()
+    await user.type(within(composer).getByLabelText(/body/i), appended.body)
+    await user.click(within(composer).getByRole('button', { name: /^append$/i }))
+
+    const timeline = screen.getByRole('region', { name: /timeline/i })
+    await waitFor(() => expect(within(timeline).getAllByText(appended.body)).toHaveLength(1))
   })
 
   it('loads older timeline entries without hiding append-only history', async () => {

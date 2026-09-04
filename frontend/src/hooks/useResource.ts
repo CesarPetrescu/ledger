@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useEffectEvent, useState } from 'react'
 import { describeError } from '../api'
+import { subscribeLiveChanges } from '../live'
 
 interface Settled<T> {
   request: string
@@ -21,7 +22,7 @@ export interface Resource<T> {
  * Loads `key`-addressed data, keeps the last good value while refreshing, and
  * exposes stale/error/retry state. Responses for superseded requests are ignored.
  */
-export function useResource<T>(load: () => Promise<T>, key = ''): Resource<T> {
+export function useResource<T>(load: () => Promise<T>, key = '', liveEntities = ''): Resource<T> {
   const [attempt, setAttempt] = useState(0)
   const [settled, setSettled] = useState<Settled<T>>({ request: '' })
   const request = `${key}#${attempt}`
@@ -54,6 +55,13 @@ export function useResource<T>(load: () => Promise<T>, key = ''): Resource<T> {
   const update = useCallback((fn: (previous: T) => T) => {
     setSettled((previous) => (previous.data === undefined ? previous : { ...previous, data: fn(previous.data) }))
   }, [])
+
+  useEffect(
+    () => subscribeLiveChanges((entity) => {
+      if (entity === '*' || liveEntities === '' || liveEntities.split(' ').includes(entity)) reload()
+    }),
+    [reload, liveEntities],
+  )
 
   return {
     data,

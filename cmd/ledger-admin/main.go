@@ -34,6 +34,13 @@ func main() {
 			InternalProxyCIDR: config.Required("LEDGER_INTERNAL_PROXY_CIDR"),
 			IndexURL:          config.Required("LEDGER_INDEX_URL"),
 		}, db)
+		eventsCtx, cancelEvents := context.WithCancel(ctx)
+		defer cancelEvents()
+		go func() {
+			if err := handler.RunEvents(eventsCtx); err != nil && eventsCtx.Err() == nil {
+				log.Printf("admin event stream stopped: %v", err)
+			}
+		}()
 		if err := config.Serve(":8084", handler); err != nil && err != http.ErrServerClosed {
 			log.Fatal(err)
 		}

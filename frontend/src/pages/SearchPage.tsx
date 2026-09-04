@@ -12,7 +12,7 @@ const DEGRADED: Record<string, string> = {
 
 function Results({ request }: { request: SearchRequest }) {
   const key = JSON.stringify(request)
-  const results = useResource(() => api.search(request), key)
+  const results = useResource(() => api.search(request), key, 'project entry chunk')
   if (results.loading) return <Loading label="Searching…" />
   if (!results.data) return <ErrorState message="Search is unavailable right now." onRetry={results.reload} />
   const { hits, degraded } = results.data
@@ -119,7 +119,7 @@ export function SearchPage() {
   const q = query.get('q') ?? ''
   const project = query.get('project') ?? ''
   const kind = query.get('kind') ?? ''
-  const projects = useResource(() => api.listProjects(), 'projects')
+  const projects = useResource(() => api.listProjects(), 'projects', 'project')
   const locationKey = JSON.stringify([q, project, kind])
   return <SearchContent key={locationKey} q={q} project={project} kind={kind} projects={projects.data ?? []} />
 }

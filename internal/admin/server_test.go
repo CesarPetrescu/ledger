@@ -69,6 +69,7 @@ func TestEveryEndpointExceptLoginDeniesUnauthenticatedRequests(t *testing.T) {
 		{http.MethodPost, "/admin/api/search", `{"q":"x"}`},
 		{http.MethodGet, "/admin/api/oauth/clients", ""},
 		{http.MethodPost, "/admin/api/oauth/revoke", `{"client_id":"x"}`},
+		{http.MethodGet, "/admin/api/events", ""},
 		{http.MethodGet, "/admin/api/unknown", ""},
 		{http.MethodDelete, "/admin/api/projects/atlas", ""},
 	}
@@ -88,6 +89,24 @@ func TestEveryEndpointExceptLoginDeniesUnauthenticatedRequests(t *testing.T) {
 				t.Errorf("%s %s issued a session cookie without authentication", route.method, route.path)
 			}
 		}
+	}
+}
+
+func TestEventStreamCollapsesPendingInvalidations(t *testing.T) {
+	stream := newEventStream(nil)
+	updates, unsubscribe := stream.subscribe()
+	defer unsubscribe()
+	stream.broadcast()
+	stream.broadcast()
+	select {
+	case <-updates:
+	default:
+		t.Fatal("expected a pending event")
+	}
+	select {
+	case <-updates:
+		t.Fatal("unexpected second pending event")
+	default:
 	}
 }
 

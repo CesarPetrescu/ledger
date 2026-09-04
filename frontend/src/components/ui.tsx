@@ -1,57 +1,48 @@
-import type { ReactNode, SVGProps } from 'react'
+import type { ComponentType, ReactNode } from 'react'
+import {
+  IconAlertTriangle,
+  IconArrowLeft,
+  IconBook2,
+  IconEye,
+  IconEyeOff,
+  IconFolder,
+  IconHome,
+  IconKey,
+  IconLogout,
+  IconMenu2,
+  IconPlus,
+  IconRefresh,
+  IconSearch,
+  IconWifi,
+  IconWifiOff,
+  IconX,
+  type IconProps,
+} from '@tabler/icons-react'
 
-type IconName = 'eye' | 'eye-off' | 'menu' | 'close' | 'search' | 'logout' | 'plus' | 'alert' | 'back' | 'refresh'
+export type IconName = 'eye' | 'eye-off' | 'menu' | 'close' | 'search' | 'logout' | 'plus' | 'alert' | 'back' | 'refresh' | 'book' | 'home' | 'projects' | 'clients' | 'live' | 'offline'
 
-const paths: Record<IconName, ReactNode> = {
-  eye: (
-    <>
-      <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" />
-      <circle cx="12" cy="12" r="3" />
-    </>
-  ),
-  'eye-off': (
-    <>
-      <path d="M3 3l18 18" />
-      <path d="M10.6 5.2A10.6 10.6 0 0 1 12 5c6.5 0 10 7 10 7a17.6 17.6 0 0 1-3.2 4.1M6.6 6.6C3.6 8.6 2 12 2 12s3.5 7 10 7a10 10 0 0 0 4.4-1" />
-      <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
-    </>
-  ),
-  menu: <path d="M4 7h16M4 12h16M4 17h16" />,
-  close: <path d="M6 6l12 12M18 6L6 18" />,
-  search: (
-    <>
-      <circle cx="11" cy="11" r="7" />
-      <path d="m20 20-3.5-3.5" />
-    </>
-  ),
-  logout: (
-    <>
-      <path d="M10 4H5v16h5" />
-      <path d="M14 8l4 4-4 4M18 12H9" />
-    </>
-  ),
-  plus: <path d="M12 5v14M5 12h14" />,
-  alert: (
-    <>
-      <path d="M12 3 2 20h20L12 3Z" />
-      <path d="M12 10v4M12 17h.01" />
-    </>
-  ),
-  back: <path d="M15 5l-7 7 7 7" />,
-  refresh: (
-    <>
-      <path d="M20 12a8 8 0 1 1-2.3-5.7" />
-      <path d="M20 4v5h-5" />
-    </>
-  ),
+const icons: Record<IconName, ComponentType<IconProps>> = {
+  eye: IconEye,
+  'eye-off': IconEyeOff,
+  menu: IconMenu2,
+  close: IconX,
+  search: IconSearch,
+  logout: IconLogout,
+  plus: IconPlus,
+  alert: IconAlertTriangle,
+  back: IconArrowLeft,
+  refresh: IconRefresh,
+  book: IconBook2,
+  home: IconHome,
+  projects: IconFolder,
+  clients: IconKey,
+  live: IconWifi,
+  offline: IconWifiOff,
 }
 
-export function Icon({ name, ...props }: { name: IconName } & SVGProps<SVGSVGElement>) {
-  return (
-    <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" {...props}>
-      {paths[name]}
-    </svg>
-  )
+export function Icon({ name, ...props }: { name: IconName } & IconProps) {
+  const Component = icons[name]
+  return <Component aria-hidden="true" focusable="false" size={18} stroke={1.8} {...props} />
 }
 
 export function TierBadge({ tier }: { tier: string }) {

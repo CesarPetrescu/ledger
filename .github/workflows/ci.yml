@@ -51,7 +51,7 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: Install from lockfile
-        run: npm ci
+        run: npm ci --no-audit
       - name: Lint
         run: npm run lint
       - name: Typecheck
@@ -61,7 +61,12 @@ jobs:
       - name: Production build
         run: npm run build
       - name: Audit
-        run: npm audit --audit-level=high
+        run: |
+          for attempt in 1 2 3; do
+            npm audit --audit-level=high --fetch-retries=0 --fetch-timeout=30000 && exit 0
+            test "$attempt" -eq 3 && exit 1
+            sleep 10
+          done
 
   containers:
     runs-on: ubuntu-latest

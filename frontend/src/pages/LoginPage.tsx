@@ -39,12 +39,18 @@ export function LoginPage({ notice }: { notice?: AuthNotice | undefined }) {
 
   return (
     <main className="login">
-      <form className="login-panel" onSubmit={(event) => void submit(event)} aria-labelledby="login-title">
+      <section className="login-intro" aria-label="About Ledger">
         <div className="brand">
+          <span className="brand-mark"><Icon name="book" /></span>
           <span className="wordmark">Ledger</span>
-          <span className="brand-sub">admin</span>
         </div>
-        <h1 id="login-title">Operator sign-in</h1>
+        <h1>Your projects, decisions, and next moves—kept in one calm place.</h1>
+        <p>Sign in to browse project memory, capture new context, and manage connected MCP clients.</p>
+      </section>
+      <form className="login-panel" onSubmit={(event) => void submit(event)} aria-labelledby="login-title">
+        <p className="eyebrow">Private workspace</p>
+        <h2 id="login-title">Operator sign-in</h2>
+        <p className="muted">Use your admin password to continue.</p>
         {notice && <p className="notice">{NOTICES[notice]}</p>}
         <label htmlFor="password">Password</label>
         <div className="field-row">
