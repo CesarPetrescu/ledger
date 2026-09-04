@@ -1,6 +1,7 @@
 package calendar
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -8,7 +9,7 @@ import (
 )
 
 func TestCalendarBoundaryValidationAndCredentialEncryption(t *testing.T) {
-	service, err := NewService(nil, "postgres://ledger:secret@database/ledger", nil)
+	service, err := NewService(nil, strings.Repeat("k", 32), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,8 +28,14 @@ func TestCalendarBoundaryValidationAndCredentialEncryption(t *testing.T) {
 		t.Fatal("tampered credential decrypted")
 	}
 
-	if got, err := normalizeServerURL("https://Cloud.Example.com:443/nextcloud/"); err != nil || got != "https://cloud.example.com:443/nextcloud" {
+	if got, err := normalizeServerURL("https://Cloud.Example.com:443/nextcloud/"); err != nil || got != "https://cloud.example.com/nextcloud" {
 		t.Fatalf("normalized URL = %q, %v", got, err)
+	}
+	if !sameOrigin("https://cloud.example.com:443", "https://cloud.example.com/login") || sameOrigin("https://cloud.example.com:444", "https://cloud.example.com/login") {
+		t.Fatal("default-port origin comparison failed")
+	}
+	if _, err := NewService(nil, "short", nil); err == nil {
+		t.Fatal("short encryption key accepted")
 	}
 	for _, unsafe := range []string{"http://cloud.example.com", "https://user@cloud.example.com", "https://cloud.example.com?redirect=evil"} {
 		if _, err := normalizeServerURL(unsafe); err == nil {

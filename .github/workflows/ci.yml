@@ -79,6 +79,7 @@ jobs:
           LEDGER_POSTGRES_PASSWORD: placeholder
           LEDGER_PASSWORD_HASH: $argon2id$v=19$m=65536,t=3,p=2$placeholder$placeholder
           LEDGER_ADMIN_PASSWORD_HASH: $argon2id$v=19$m=65536,t=3,p=2$placeholder$placeholder
+          LEDGER_CALENDAR_ENCRYPTION_KEY: placeholder-calendar-key-at-least-32
           LEDGER_TRUSTED_PROXY_CIDR: 203.0.113.0/24
           LEDGER_INFER_URL: http://inference.example.com/v1
         run: docker compose config --quiet

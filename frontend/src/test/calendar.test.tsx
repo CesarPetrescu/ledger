@@ -72,5 +72,27 @@ describe('Nextcloud calendar', () => {
 
     await waitFor(() => expect(screen.queryByRole('region', { name: /agent-visible calendars/i })).not.toBeInTheDocument())
     expect(calls.find((call) => call.path === '/admin/api/calendar/calendars' && call.method === 'PUT')?.body).toEqual({ ids: ['work', 'personal'] })
+
+    await user.click(screen.getByRole('button', { name: /add event/i }))
+    const newEvent = await screen.findByRole('dialog')
+    await user.click(within(newEvent).getByLabelText(/all-day event/i))
+    const starts = within(newEvent).getByLabelText(/starts/i) as HTMLInputElement
+    const ends = within(newEvent).getByLabelText(/ends/i) as HTMLInputElement
+    expect(starts.type).toBe('date')
+    expect(ends.value > starts.value).toBe(true)
+    await user.click(within(newEvent).getByRole('button', { name: /cancel/i }))
+  })
+
+  it('does not offer event creation until a calendar is selected', async () => {
+    mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/calendar/connection': { body: { connected: true, server_url: 'https://cloud.example.com', username: 'alex', selected_calendars: 0 } },
+      'GET /admin/api/calendar/calendars': { body: { calendars: calendars.map((calendar) => ({ ...calendar, selected: false })) } },
+      'GET /admin/api/calendar/events': { body: { events: [] } },
+    })
+    renderApp('/admin/calendar')
+
+    expect(await screen.findByRole('region', { name: /agent-visible calendars/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /add event/i })).not.toBeInTheDocument()
   })
 })

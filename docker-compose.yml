@@ -53,6 +53,7 @@ services:
         CMD: ledger-mcp
     environment:
       <<: *common-env
+      LEDGER_CALENDAR_ENCRYPTION_KEY: ${LEDGER_CALENDAR_ENCRYPTION_KEY:?set LEDGER_CALENDAR_ENCRYPTION_KEY}
       LEDGER_INDEX_URL: http://ledger-index:8083
     depends_on:
       postgres: *postgres-ready
@@ -87,6 +88,7 @@ services:
     environment:
       <<: *service-env
       LEDGER_ADMIN_PASSWORD_HASH: ${LEDGER_ADMIN_PASSWORD_HASH:?set LEDGER_ADMIN_PASSWORD_HASH}
+      LEDGER_CALENDAR_ENCRYPTION_KEY: ${LEDGER_CALENDAR_ENCRYPTION_KEY:?set LEDGER_CALENDAR_ENCRYPTION_KEY}
       LEDGER_INTERNAL_PROXY_CIDR: ${LEDGER_NGINX_INTERNAL_IP:-10.251.250.254}/32
       LEDGER_INDEX_URL: http://ledger-index:8083
     depends_on:

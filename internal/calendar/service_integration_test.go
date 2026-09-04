@@ -175,7 +175,7 @@ func calendarDocument(uid, title, start, end string) string {
 func TestNextcloudLoginDiscoveryAndEventLifecycle(t *testing.T) {
 	db, ctx := testdb.Open(t)
 	fake := newFakeNextcloud(t)
-	service, err := NewService(db, "postgres://ledger:database-secret@database/ledger", fake.server.Client())
+	service, err := NewService(db, strings.Repeat("k", 32), fake.server.Client())
 	if err != nil {
 		t.Fatal(err)
 	}

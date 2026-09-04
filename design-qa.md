@@ -61,6 +61,6 @@ final result: passed
 - State: authenticated, connected Nextcloud account, two selected calendars, populated agenda, and recurring-event editor.
 - Chromium checks: event edit with ETag, calendar allowlist change, all-day control, and modal close all passed; horizontal overflow is `0px`; browser console and page errors are empty.
 - Mobile touch targets measured at 46–56px. The final refinement keeps the calendar selector and Today action on one compact row.
-- Automated verification: 12 frontend test files / 45 tests, lint, typecheck, and production build pass.
+- Automated verification: 12 frontend test files / 46 tests, lint, typecheck, and production build pass.
 
 final result: passed

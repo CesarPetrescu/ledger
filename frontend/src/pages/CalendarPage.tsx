@@ -5,10 +5,11 @@ import { useToast } from '../components/Toast'
 import { EmptyState, ErrorState, Icon, Loading, StaleNotice } from '../components/ui'
 import { useResource } from '../hooks/useResource'
 
-function today(): string {
-  const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+function dateKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
+
+function today(): string { return dateKey(new Date()) }
 
 function localDate(value: string): Date {
   const [year, month, day] = value.split('-').map(Number)
@@ -16,8 +17,13 @@ function localDate(value: string): Date {
 }
 
 function localDateKey(value: string): string {
-  const date = new Date(value)
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+  return dateKey(new Date(value))
+}
+
+function shiftDate(value: string, days: number): string {
+  const date = localDate(value)
+  date.setDate(date.getDate() + days)
+  return dateKey(date)
 }
 
 function localDateTime(value: string): string {
@@ -231,7 +237,12 @@ function EventEditor({ event, calendars, onClose, onSaved }: { event: CalendarEv
           <label className="calendar-check">
             <input type="checkbox" checked={draft.allDay} onChange={(changeEvent) => {
               const allDay = changeEvent.target.checked
-              setDraft((current) => ({ ...current, allDay, start: allDay ? current.start.slice(0, 10) : `${current.start.slice(0, 10)}T09:00`, end: allDay ? current.end.slice(0, 10) : `${current.end.slice(0, 10)}T10:00` }))
+              setDraft((current) => {
+                const startDate = current.start.slice(0, 10)
+                const endDate = current.end.slice(0, 10)
+                if (allDay) return { ...current, allDay, start: startDate, end: endDate > startDate ? endDate : shiftDate(startDate, 1) }
+                return { ...current, allDay, start: `${startDate}T09:00`, end: `${endDate > startDate ? shiftDate(endDate, -1) : startDate}T10:00` }
+              })
             }} />
             All-day event
           </label>
@@ -409,7 +420,7 @@ function CalendarWorkspace({ connection, onDisconnected }: { connection: Calenda
       {selectedCalendars.length > 0 && events.loading && <Loading label="Loading calendar…" />}
       {events.stale && <StaleNotice message="Showing the last loaded calendar; refresh failed." onRetry={events.reload} />}
       {selectedCalendars.length > 0 && !events.loading && !events.data && <ErrorState message="Couldn't load calendar events." onRetry={events.reload} />}
-      {events.data && events.data.length === 0 && <EmptyState><p>No events in this range.</p><button type="button" className="btn btn-primary" onClick={() => setEditing('new')}>Add an event</button></EmptyState>}
+      {selectedCalendars.length > 0 && events.data && events.data.length === 0 && <EmptyState><p>No events in this range.</p><button type="button" className="btn btn-primary" onClick={() => setEditing('new')}>Add an event</button></EmptyState>}
       {grouped.length > 0 && <div className="calendar-agenda">{grouped.map(([date, items]) => <section key={date}><h2><time dateTime={date}>{localDate(date).toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })}</time></h2><ol>{items.map((event) => <EventRow key={`${event.id}:${event.start}`} event={event} onEdit={() => void openEvent(event)} />)}</ol></section>)}</div>}
 
       {editing && <EventEditor key={editing === 'new' ? 'new' : `${editing.id}:${editing.etag}`} event={editing === 'new' ? null : editing} calendars={selectedCalendars} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); events.reload() }} />}

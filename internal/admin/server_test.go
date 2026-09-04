@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -99,6 +100,24 @@ func TestEveryEndpointExceptLoginDeniesUnauthenticatedRequests(t *testing.T) {
 			if cookie.Name == sessionCookie && cookie.Value != "" {
 				t.Errorf("%s %s issued a session cookie without authentication", route.method, route.path)
 			}
+		}
+	}
+}
+
+func TestCalendarErrorsSeparateInputFromUpstreamFailures(t *testing.T) {
+	server := &Server{}
+	for message, want := range map[string]int{
+		"Nextcloud URL must use HTTPS":      http.StatusBadRequest,
+		"login flow expired; start again":   http.StatusBadRequest,
+		"connect to Nextcloud: unavailable": http.StatusBadGateway,
+	} {
+		res := httptest.NewRecorder()
+		server.calendarError(res, httptest.NewRequest(http.MethodPost, "/admin/api/calendar/connect", nil), errors.New(message))
+		if res.Code != want {
+			t.Errorf("%q = %d, want %d", message, res.Code, want)
+		}
+		if want == http.StatusBadGateway && strings.Contains(res.Body.String(), "connect to Nextcloud") {
+			t.Error("upstream failure detail leaked")
 		}
 	}
 }

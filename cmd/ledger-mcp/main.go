@@ -24,7 +24,7 @@ func main() {
 	switch os.Args[1] {
 	case "serve":
 		publicURL := config.Required("LEDGER_PUBLIC_URL")
-		calendar, err := calendarapi.NewService(db, config.Required("LEDGER_DATABASE_URL"), nil)
+		calendar, err := calendarapi.NewService(db, config.Required("LEDGER_CALENDAR_ENCRYPTION_KEY"), nil)
 		if err != nil {
 			log.Fatal(err)
 		}

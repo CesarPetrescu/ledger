@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"path"
@@ -103,16 +104,11 @@ type Service struct {
 	flows map[string]pendingFlow
 }
 
-func NewService(db *store.DB, databaseURL string, client *http.Client) (*Service, error) {
-	dsn, err := url.Parse(databaseURL)
-	if err != nil || dsn.User == nil {
-		return nil, errors.New("database URL must contain credentials")
+func NewService(db *store.DB, encryptionKey string, client *http.Client) (*Service, error) {
+	if len(encryptionKey) < 32 {
+		return nil, errors.New("calendar encryption key must be at least 32 characters")
 	}
-	password, ok := dsn.User.Password()
-	if !ok || password == "" {
-		return nil, errors.New("database URL must contain a password")
-	}
-	key := sha256.Sum256([]byte("ledger-calendar-credential-v1\x00" + password))
+	key := sha256.Sum256([]byte("ledger-calendar-credential-v1\x00" + encryptionKey))
 	block, err := aes.NewCipher(key[:])
 	if err != nil {
 		return nil, err
@@ -245,16 +241,14 @@ func (s *Service) Disconnect(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	password, err := s.open(account.PasswordCiphertext)
-	if err != nil {
-		return err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, account.ServerURL+"/ocs/v2.php/core/apppassword", nil)
-	if err == nil {
-		req.SetBasicAuth(account.Username, password)
-		req.Header.Set("OCS-APIRequest", "true")
-		if resp, requestErr := s.http.Do(req); requestErr == nil {
-			resp.Body.Close()
+	if password, decryptErr := s.open(account.PasswordCiphertext); decryptErr == nil {
+		req, requestErr := http.NewRequestWithContext(ctx, http.MethodDelete, account.ServerURL+"/ocs/v2.php/core/apppassword", nil)
+		if requestErr == nil {
+			req.SetBasicAuth(account.Username, password)
+			req.Header.Set("OCS-APIRequest", "true")
+			if resp, requestErr := s.http.Do(req); requestErr == nil {
+				resp.Body.Close()
+			}
 		}
 	}
 	return s.db.DeleteCalendarAccount(ctx)
@@ -265,6 +259,10 @@ func (s *Service) Calendars(ctx context.Context) ([]Calendar, error) {
 	if err != nil {
 		return nil, err
 	}
+	return s.calendars(ctx, account, client)
+}
+
+func (s *Service) calendars(ctx context.Context, account store.CalendarAccount, client *caldav.Client) ([]Calendar, error) {
 	principal, err := client.FindCurrentUserPrincipal(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("discover Nextcloud principal: %w", err)
@@ -318,7 +316,7 @@ func (s *Service) ListEvents(ctx context.Context, start, end time.Time, calendar
 	if err != nil {
 		return nil, err
 	}
-	calendars, err := s.selected(ctx, account, calendarID)
+	calendars, err := s.selected(ctx, account, client, calendarID)
 	if err != nil {
 		return nil, err
 	}
@@ -356,7 +354,7 @@ func (s *Service) GetEvent(ctx context.Context, id string) (Event, error) {
 	if err != nil {
 		return Event{}, err
 	}
-	item, objectPath, err := s.selectedEvent(ctx, account, id)
+	item, objectPath, err := s.selectedEvent(ctx, account, client, id)
 	if err != nil {
 		return Event{}, err
 	}
@@ -372,11 +370,11 @@ func (s *Service) GetEvent(ctx context.Context, id string) (Event, error) {
 }
 
 func (s *Service) CreateEvent(ctx context.Context, calendarID string, input EventInput) (Event, error) {
-	account, _, err := s.client(ctx)
+	account, client, err := s.client(ctx)
 	if err != nil {
 		return Event{}, err
 	}
-	calendars, err := s.selected(ctx, account, calendarID)
+	calendars, err := s.selected(ctx, account, client, calendarID)
 	if err != nil {
 		return Event{}, err
 	}
@@ -418,7 +416,7 @@ func (s *Service) UpdateEvent(ctx context.Context, id, etag string, input EventI
 	if err != nil {
 		return Event{}, err
 	}
-	_, objectPath, err := s.selectedEvent(ctx, account, id)
+	_, objectPath, err := s.selectedEvent(ctx, account, client, id)
 	if err != nil {
 		return Event{}, err
 	}
@@ -442,11 +440,11 @@ func (s *Service) DeleteEvent(ctx context.Context, id, etag string) error {
 	if !validETag(etag) {
 		return errors.New("etag is required")
 	}
-	account, _, err := s.client(ctx)
+	account, client, err := s.client(ctx)
 	if err != nil {
 		return err
 	}
-	_, objectPath, err := s.selectedEvent(ctx, account, id)
+	_, objectPath, err := s.selectedEvent(ctx, account, client, id)
 	if err != nil {
 		return err
 	}
@@ -515,8 +513,8 @@ func (s *Service) client(ctx context.Context) (store.CalendarAccount, *caldav.Cl
 	return account, client, err
 }
 
-func (s *Service) selected(ctx context.Context, account store.CalendarAccount, calendarID string) ([]Calendar, error) {
-	all, err := s.Calendars(ctx)
+func (s *Service) selected(ctx context.Context, account store.CalendarAccount, client *caldav.Client, calendarID string) ([]Calendar, error) {
+	all, err := s.calendars(ctx, account, client)
 	if err != nil {
 		return nil, err
 	}
@@ -533,12 +531,12 @@ func (s *Service) selected(ctx context.Context, account store.CalendarAccount, c
 	return selected, nil
 }
 
-func (s *Service) selectedEvent(ctx context.Context, account store.CalendarAccount, id string) (Calendar, string, error) {
+func (s *Service) selectedEvent(ctx context.Context, account store.CalendarAccount, client *caldav.Client, id string) (Calendar, string, error) {
 	objectPath, err := decodeID(id)
 	if err != nil {
 		return Calendar{}, "", errors.New("invalid event id")
 	}
-	calendars, err := s.selected(ctx, account, "")
+	calendars, err := s.selected(ctx, account, client, "")
 	if err != nil {
 		return Calendar{}, "", err
 	}
@@ -785,7 +783,17 @@ func normalizeServerURL(raw string) (string, error) {
 		return "", errors.New("Nextcloud URL must use HTTPS")
 	}
 	u.Scheme = strings.ToLower(u.Scheme)
-	u.Host = strings.ToLower(u.Host)
+	port := u.Port()
+	if port == defaultPort(u.Scheme) {
+		port = ""
+	}
+	u.Host = host
+	if strings.Contains(host, ":") {
+		u.Host = "[" + host + "]"
+	}
+	if port != "" {
+		u.Host = net.JoinHostPort(host, port)
+	}
 	u.Path = strings.TrimRight(u.Path, "/")
 	u.RawPath = ""
 	return u.String(), nil
@@ -797,7 +805,24 @@ func sameOrigin(serverURL, candidate string) bool {
 		return false
 	}
 	u, err := url.Parse(candidate)
-	return err == nil && u.User == nil && u.Fragment == "" && strings.EqualFold(server.Scheme, u.Scheme) && strings.EqualFold(server.Host, u.Host)
+	return err == nil && u.User == nil && u.Fragment == "" && strings.EqualFold(server.Scheme, u.Scheme) && strings.EqualFold(server.Hostname(), u.Hostname()) && effectivePort(server) == effectivePort(u)
+}
+
+func effectivePort(u *url.URL) string {
+	if port := u.Port(); port != "" {
+		return port
+	}
+	return defaultPort(strings.ToLower(u.Scheme))
+}
+
+func defaultPort(scheme string) string {
+	if scheme == "https" {
+		return "443"
+	}
+	if scheme == "http" {
+		return "80"
+	}
+	return ""
 }
 
 func encodeID(value string) string { return base64.RawURLEncoding.EncodeToString([]byte(value)) }

@@ -472,7 +472,7 @@ func (s *Server) startCalendarLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	flow, err := s.calendar.StartLogin(r.Context(), input.ServerURL)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
+		s.calendarError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, flow)
@@ -488,7 +488,7 @@ func (s *Server) pollCalendarLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
+		s.calendarError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, connection)
@@ -639,7 +639,7 @@ func (s *Server) calendarError(w http.ResponseWriter, r *http.Request, err error
 		writeError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, calendarapi.ErrNotFound):
 		writeError(w, http.StatusNotFound, err.Error())
-	case strings.Contains(err.Error(), "required"), strings.Contains(err.Error(), "invalid"), strings.Contains(err.Error(), "unknown"), strings.Contains(err.Error(), "selected"), strings.Contains(err.Error(), "must"):
+	case strings.Contains(err.Error(), "required"), strings.Contains(err.Error(), "invalid"), strings.Contains(err.Error(), "unknown"), strings.Contains(err.Error(), "selected"), strings.Contains(err.Error(), "must"), strings.Contains(err.Error(), "expired"):
 		writeError(w, http.StatusBadRequest, err.Error())
 	default:
 		log.Printf("admin: calendar %s %s: %v", r.Method, r.URL.Path, err)

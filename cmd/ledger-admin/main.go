@@ -29,7 +29,7 @@ func main() {
 	case "serve":
 		db := config.OpenDB(ctx)
 		defer db.Close()
-		calendar, err := calendarapi.NewService(db, config.Required("LEDGER_DATABASE_URL"), nil)
+		calendar, err := calendarapi.NewService(db, config.Required("LEDGER_CALENDAR_ENCRYPTION_KEY"), nil)
 		if err != nil {
 			log.Fatal(err)
 		}
