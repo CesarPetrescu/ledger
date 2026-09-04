@@ -27,8 +27,8 @@ describe('live updates', () => {
 
     expect(socket.url).toBe('ws://localhost:3000/admin/api/events')
     socket.onmessage?.({ data: '{"type":"heartbeat"}' } as MessageEvent)
-    socket.onmessage?.({ data: '{"type":"change","entity":"entry"}' } as MessageEvent)
-    expect(changed).toHaveBeenCalledWith('entry')
+    socket.onmessage?.({ data: '{"type":"change","entity":"*"}' } as MessageEvent)
+    expect(changed).toHaveBeenCalledWith('*')
 
     unsubscribe()
     stop()

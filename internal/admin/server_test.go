@@ -96,19 +96,16 @@ func TestEventStreamCollapsesPendingInvalidations(t *testing.T) {
 	stream := newEventStream(nil)
 	updates, unsubscribe := stream.subscribe()
 	defer unsubscribe()
-	stream.broadcast(`{"type":"change","entity":"project"}`)
-	stream.broadcast(`{"type":"change","entity":"entry"}`)
+	stream.broadcast()
+	stream.broadcast()
 	select {
-	case got := <-updates:
-		if got != `{"type":"change","entity":"project"}` {
-			t.Fatalf("event = %s", got)
-		}
+	case <-updates:
 	default:
 		t.Fatal("expected a pending event")
 	}
 	select {
-	case got := <-updates:
-		t.Fatalf("unexpected second pending event: %s", got)
+	case <-updates:
+		t.Fatal("unexpected second pending event")
 	default:
 	}
 }

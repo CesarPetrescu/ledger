@@ -90,7 +90,7 @@ func TestAdminEventsMigrationCoversEveryLiveSurface(t *testing.T) {
 		t.Fatal(err)
 	}
 	sql := strings.ToLower(string(body))
-	for _, required := range []string{"ledger_admin_event", "'project'", "'entry'", "'oauth_client'", "'oauth_token'", "'chunk'", "for each statement"} {
+	for _, required := range []string{"ledger_admin_event", "'project'", "'entry'", "'oauth_client'", "'oauth_token'", "'chunk'", "'admin_session'", "after update of kind, redirect_uris, name", "for each statement"} {
 		if !strings.Contains(sql, required) {
 			t.Errorf("admin events migration missing %q", required)
 		}

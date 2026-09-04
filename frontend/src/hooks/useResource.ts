@@ -58,7 +58,7 @@ export function useResource<T>(load: () => Promise<T>, key = '', liveEntities = 
 
   useEffect(
     () => subscribeLiveChanges((entity) => {
-      if (liveEntities === '' || liveEntities.split(' ').includes(entity)) reload()
+      if (entity === '*' || liveEntities === '' || liveEntities.split(' ').includes(entity)) reload()
     }),
     [reload, liveEntities],
   )

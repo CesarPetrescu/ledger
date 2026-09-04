@@ -96,7 +96,7 @@ func TestCommittedChangesReachAuthenticatedWebSockets(t *testing.T) {
 	readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	_, payload, err := connection.Read(readCtx)
-	if err != nil || !strings.Contains(string(payload), `"entity" : "project"`) && !strings.Contains(string(payload), `"entity":"project"`) {
+	if err != nil || !strings.Contains(string(payload), `"entity":"*"`) {
 		t.Fatalf("live event = %q, %v", payload, err)
 	}
 }

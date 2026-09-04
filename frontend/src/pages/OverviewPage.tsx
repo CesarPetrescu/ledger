@@ -44,7 +44,7 @@ function TierTable({ tier, projects }: { tier: string; projects: Project[] }) {
 }
 
 export function OverviewPage() {
-  const overview = useResource(api.getOverview, 'overview', 'project entry oauth_client oauth_token')
+  const overview = useResource(api.getOverview, 'overview', 'project entry oauth_client oauth_token admin_session')
   if (overview.loading) return <Loading label="Loading overview…" />
   if (!overview.data) return <ErrorState message="Couldn't load the overview." onRetry={overview.reload} />
   const { counts, projects, recent_entries: recent } = overview.data

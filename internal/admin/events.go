@@ -13,19 +13,20 @@ import (
 )
 
 const heartbeatEvent = `{"type":"heartbeat"}`
+const changeEvent = `{"type":"change","entity":"*"}`
 
 type eventStream struct {
 	db          *store.DB
 	mu          sync.Mutex
-	subscribers map[chan string]struct{}
+	subscribers map[chan struct{}]struct{}
 }
 
 func newEventStream(db *store.DB) *eventStream {
-	return &eventStream{db: db, subscribers: map[chan string]struct{}{}}
+	return &eventStream{db: db, subscribers: map[chan struct{}]struct{}{}}
 }
 
-func (s *eventStream) subscribe() (<-chan string, func()) {
-	updates := make(chan string, 1)
+func (s *eventStream) subscribe() (<-chan struct{}, func()) {
+	updates := make(chan struct{}, 1)
 	s.mu.Lock()
 	s.subscribers[updates] = struct{}{}
 	s.mu.Unlock()
@@ -36,14 +37,14 @@ func (s *eventStream) subscribe() (<-chan string, func()) {
 	}
 }
 
-func (s *eventStream) broadcast(payload string) {
+func (s *eventStream) broadcast() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for subscriber := range s.subscribers {
 		select {
-		case subscriber <- payload:
+		case subscriber <- struct{}{}:
 		default:
-			// ponytail: one pending invalidation is enough; add per-entity queues if clients need every event.
+			// ponytail: one generic invalidation covers every mounted resource.
 		}
 	}
 }
@@ -80,11 +81,11 @@ func (s *eventStream) listen(ctx context.Context) error {
 		return err
 	}
 	for {
-		notification, err := conn.Conn().WaitForNotification(ctx)
+		_, err := conn.Conn().WaitForNotification(ctx)
 		if err != nil {
 			return err
 		}
-		s.broadcast(notification.Payload)
+		s.broadcast()
 	}
 }
 
@@ -94,13 +95,13 @@ func (s *eventStream) serve(origin string, w http.ResponseWriter, r *http.Reques
 		return
 	}
 	// Origin is checked above against the configured public URL, including scheme and port.
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: []string{origin}})
 	if err != nil {
 		return
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
-	ctx := conn.CloseRead(context.Background())
+	ctx := conn.CloseRead(r.Context())
 	updates, unsubscribe := s.subscribe()
 	defer unsubscribe()
 	heartbeat := time.NewTicker(25 * time.Second)
@@ -111,7 +112,8 @@ func (s *eventStream) serve(origin string, w http.ResponseWriter, r *http.Reques
 		select {
 		case <-ctx.Done():
 			return
-		case payload = <-updates:
+		case <-updates:
+			payload = changeEvent
 		case <-heartbeat.C:
 		}
 		writeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
