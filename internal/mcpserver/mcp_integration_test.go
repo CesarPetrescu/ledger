@@ -12,32 +12,9 @@ import (
 	"testing"
 
 	"github.com/cesarpetrescu/ledger/internal/store"
+	"github.com/cesarpetrescu/ledger/internal/testdb"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
 )
-
-func mcpDB(t *testing.T) (*store.DB, context.Context) {
-	t.Helper()
-	ctx := context.Background()
-	c, err := postgres.Run(ctx, "pgvector/pgvector:pg16", postgres.WithDatabase("ledger"), postgres.WithUsername("ledger"), postgres.WithPassword("ledger"), postgres.BasicWaitStrategies())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = c.Terminate(ctx) })
-	dsn, err := c.ConnectionString(ctx, "sslmode=disable")
-	if err != nil {
-		t.Fatal(err)
-	}
-	db, err := store.Open(ctx, dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(db.Close)
-	if err := db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-	return db, ctx
-}
 
 type bearerTransport struct {
 	token string
@@ -74,7 +51,7 @@ func connectMCP(t *testing.T, endpoint, token, name string) *mcp.ClientSession {
 }
 
 func TestAuthenticatedMCPWriteScopeAndClientInfoSource(t *testing.T) {
-	db, ctx := mcpDB(t)
+	db, ctx := testdb.Open(t)
 	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus", HoursWK: 8}); err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +110,7 @@ func TestAuthenticatedMCPWriteScopeAndClientInfoSource(t *testing.T) {
 }
 
 func TestWriteOnlyTokenCannotRead(t *testing.T) {
-	db, ctx := mcpDB(t)
+	db, ctx := testdb.Open(t)
 	addAccess(t, db, ctx, "write-only-token", []string{"ledger:write"})
 	server := httptest.NewServer(HTTPHandler(NewServer(db, "http://127.0.0.1:1"), db, "https://ledger.example.com"))
 	defer server.Close()
@@ -158,7 +135,7 @@ func TestWriteOnlyTokenCannotRead(t *testing.T) {
 }
 
 func TestMCPContextHeaderValidation(t *testing.T) {
-	db, ctx := mcpDB(t)
+	db, ctx := testdb.Open(t)
 	addAccess(t, db, ctx, "bounded-token", []string{"ledger:read", "ledger:write"})
 	server := httptest.NewServer(HTTPHandler(NewServer(db, "http://unused"), db, "https://ledger.example.com"))
 	defer server.Close()

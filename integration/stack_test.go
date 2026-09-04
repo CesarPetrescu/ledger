@@ -316,6 +316,174 @@ func TestRealStackAcceptance(t *testing.T) {
 	}
 }
 
+// adminRequest sends a browser-like request to the operator console API.
+func (s *stack) adminRequest(t *testing.T, method, path, body string, headers map[string]string) (*http.Response, []byte) {
+	t.Helper()
+	req, err := http.NewRequest(method, s.base+path, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("X-Forwarded-For", "198.51.100.90")
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+	res, err := s.http.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	payload, _ := io.ReadAll(io.LimitReader(res.Body, 4<<20))
+	return res, payload
+}
+
+func TestRealStackAdminConsole(t *testing.T) {
+	s := stackConfig(t)
+	adminPassword := os.Getenv("LEDGER_STACK_ADMIN_PASSWORD")
+	if adminPassword == "" {
+		t.Fatal("LEDGER_STACK_ADMIN_PASSWORD is required")
+	}
+	origin := map[string]string{"Origin": s.publicURL}
+
+	res, _ := s.adminRequest(t, http.MethodGet, "/", "", nil)
+	if res.StatusCode != http.StatusFound || res.Header.Get("Location") != "/admin/" {
+		t.Fatalf("root = %d location=%q, want redirect to /admin/", res.StatusCode, res.Header.Get("Location"))
+	}
+	res, page := s.adminRequest(t, http.MethodGet, "/admin/", "", nil)
+	html := string(page)
+	if res.StatusCode != http.StatusOK || !strings.HasPrefix(res.Header.Get("Content-Type"), "text/html") || !strings.Contains(html, `<div id="root">`) || !strings.Contains(html, `/admin/assets/`) {
+		t.Fatalf("console shell = %d %q: %.200s", res.StatusCode, res.Header.Get("Content-Type"), html)
+	}
+	if csp := res.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "default-src 'self'") || !strings.Contains(csp, "frame-ancestors 'none'") || res.Header.Get("X-Frame-Options") != "DENY" || res.Header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("console shell headers: csp=%q xfo=%q cache=%q", csp, res.Header.Get("X-Frame-Options"), res.Header.Get("Cache-Control"))
+	}
+	if start := strings.Index(html, `src="/admin/assets/`); start >= 0 {
+		asset := html[start+len(`src="`):]
+		asset = asset[:strings.IndexByte(asset, '"')]
+		res, _ = s.adminRequest(t, http.MethodGet, asset, "", nil)
+		if res.StatusCode != http.StatusOK || !strings.Contains(res.Header.Get("Cache-Control"), "immutable") {
+			t.Fatalf("asset %s = %d cache=%q", asset, res.StatusCode, res.Header.Get("Cache-Control"))
+		}
+	}
+	res, _ = s.adminRequest(t, http.MethodGet, "/admin/projects/atlas", "", nil)
+	if res.StatusCode != http.StatusOK || !strings.HasPrefix(res.Header.Get("Content-Type"), "text/html") {
+		t.Fatalf("deep link = %d %q, want SPA fallback", res.StatusCode, res.Header.Get("Content-Type"))
+	}
+
+	for _, path := range []string{"/admin/api/session", "/admin/api/overview", "/admin/api/projects", "/admin/api/oauth/clients"} {
+		res, _ = s.adminRequest(t, http.MethodGet, path, "", map[string]string{"Cookie": "ledger_admin_session=forged"})
+		if res.StatusCode != http.StatusUnauthorized || res.Header.Get("Cache-Control") != "no-store" {
+			t.Fatalf("unauthenticated %s = %d cache=%q", path, res.StatusCode, res.Header.Get("Cache-Control"))
+		}
+	}
+	res, _ = s.adminRequest(t, http.MethodPost, "/admin/api/login", `{"password":"`+adminPassword+`"}`, map[string]string{"Origin": "https://evil.example"})
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("login from foreign origin = %d", res.StatusCode)
+	}
+	res, body := s.adminRequest(t, http.MethodPost, "/admin/api/login", `{"password":"not-the-password"}`, origin)
+	if res.StatusCode != http.StatusUnauthorized || strings.Contains(string(body), "not-the-password") {
+		t.Fatalf("wrong admin password = %d %s", res.StatusCode, body)
+	}
+	res, body = s.adminRequest(t, http.MethodPost, "/admin/api/login", `{"password":"`+adminPassword+`"}`, origin)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("admin login = %d %s", res.StatusCode, body)
+	}
+	var login struct {
+		CSRF string `json:"csrf_token"`
+	}
+	if err := json.Unmarshal(body, &login); err != nil || login.CSRF == "" {
+		t.Fatalf("login body = %s", body)
+	}
+	var cookie *http.Cookie
+	for _, candidate := range res.Cookies() {
+		if candidate.Name == "ledger_admin_session" {
+			cookie = candidate
+		}
+	}
+	if cookie == nil || cookie.Value == "" || !cookie.Secure || !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode || cookie.Path != "/admin" || cookie.MaxAge <= 0 {
+		t.Fatalf("session cookie = %#v", cookie)
+	}
+	session := map[string]string{"Cookie": cookie.Name + "=" + cookie.Value}
+	mutating := map[string]string{"Cookie": cookie.Name + "=" + cookie.Value, "Origin": s.publicURL, "X-CSRF-Token": login.CSRF}
+
+	res, body = s.adminRequest(t, http.MethodGet, "/admin/api/session", "", session)
+	if res.StatusCode != http.StatusOK || !strings.Contains(string(body), `"authenticated":true`) {
+		t.Fatalf("session bootstrap = %d %s", res.StatusCode, body)
+	}
+	project := `{"name":"Console acceptance","tier":"maintain","hours_wk":2,"goal":"Prove the operator console","deadline":"today"}`
+	for name, headers := range map[string]map[string]string{
+		"missing csrf":   session,
+		"wrong origin":   {"Cookie": session["Cookie"], "Origin": "https://evil.example", "X-CSRF-Token": login.CSRF},
+		"missing origin": {"Cookie": session["Cookie"], "X-CSRF-Token": login.CSRF},
+	} {
+		res, _ = s.adminRequest(t, http.MethodPut, "/admin/api/projects/console-acceptance", project, headers)
+		if res.StatusCode != http.StatusForbidden {
+			t.Fatalf("project write with %s = %d, want 403", name, res.StatusCode)
+		}
+	}
+	res, body = s.adminRequest(t, http.MethodPut, "/admin/api/projects/console-acceptance", project, mutating)
+	if res.StatusCode != http.StatusOK || !strings.Contains(string(body), `"slug":"console-acceptance"`) {
+		t.Fatalf("project write = %d %s", res.StatusCode, body)
+	}
+	res, body = s.adminRequest(t, http.MethodPost, "/admin/api/projects/console-acceptance/entries", `{"kind":"decision","body":"Consola de administrare / admin console verified end to end."}`, mutating)
+	if res.StatusCode != http.StatusCreated || !strings.Contains(string(body), `"source":"ledger-admin"`) {
+		t.Fatalf("entry append = %d %s", res.StatusCode, body)
+	}
+	res, body = s.adminRequest(t, http.MethodGet, "/admin/api/projects/console-acceptance?entries=5", "", session)
+	if res.StatusCode != http.StatusOK || !strings.Contains(string(body), "admin console verified") {
+		t.Fatalf("project read = %d %s", res.StatusCode, body)
+	}
+	res, body = s.adminRequest(t, http.MethodGet, "/admin/api/overview", "", session)
+	var overview struct {
+		Counts struct {
+			Projects int `json:"projects"`
+			Sessions int `json:"active_admin_sessions"`
+		} `json:"counts"`
+	}
+	if err := json.Unmarshal(body, &overview); err != nil || res.StatusCode != http.StatusOK || overview.Counts.Projects < 1 || overview.Counts.Sessions < 1 {
+		t.Fatalf("overview = %d %s", res.StatusCode, body)
+	}
+	found := false
+	for deadline := time.Now().Add(45 * time.Second); time.Now().Before(deadline) && !found; time.Sleep(500 * time.Millisecond) {
+		res, body = s.adminRequest(t, http.MethodPost, "/admin/api/search", `{"q":"consola administrare","limit":5,"project":"console-acceptance"}`, mutating)
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("search = %d %s", res.StatusCode, body)
+		}
+		var result struct {
+			Hits []struct {
+				Ref    string `json:"ref"`
+				Source string `json:"source"`
+			} `json:"hits"`
+		}
+		_ = json.Unmarshal(body, &result)
+		for _, hit := range result.Hits {
+			found = found || strings.HasPrefix(hit.Ref, "entry:") && hit.Source == "ledger-admin"
+		}
+	}
+	if !found {
+		t.Fatal("console search never returned the appended entry with provenance")
+	}
+	res, body = s.adminRequest(t, http.MethodGet, "/admin/api/oauth/clients", "", session)
+	if res.StatusCode != http.StatusOK || strings.Contains(strings.ToLower(string(body)), "hash") {
+		t.Fatalf("clients = %d %s", res.StatusCode, body)
+	}
+
+	res, _ = s.adminRequest(t, http.MethodPost, "/admin/api/logout", "", mutating)
+	if res.StatusCode != http.StatusNoContent {
+		t.Fatalf("logout = %d", res.StatusCode)
+	}
+	res, _ = s.adminRequest(t, http.MethodGet, "/admin/api/session", "", session)
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("session after logout = %d", res.StatusCode)
+	}
+	res, _ = s.adminRequest(t, http.MethodPut, "/admin/api/projects/console-acceptance", project, mutating)
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("write after logout = %d", res.StatusCode)
+	}
+}
+
 func cloneValues(values url.Values) url.Values {
 	clone := make(url.Values, len(values))
 	for key, items := range values {

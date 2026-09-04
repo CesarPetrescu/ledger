@@ -32,8 +32,8 @@ type Server struct {
 	db       *store.DB
 	mux      *http.ServeMux
 	trusted  *netip.Prefix
-	requests *rateLimiter
-	failures *rateLimiter
+	requests *RateLimiter
+	failures *RateLimiter
 	http     *http.Client
 	cacheMu  sync.Mutex
 	cimd     map[string]time.Time
@@ -47,7 +47,7 @@ func NewServer(config Config, db *store.DB) *Server {
 	copyClient := *client
 	copyClient.Timeout = 5 * time.Second
 	copyClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	s := &Server{config: config, db: db, mux: http.NewServeMux(), requests: newRateLimiter(), failures: newRateLimiter(), http: &copyClient, cimd: map[string]time.Time{}}
+	s := &Server{config: config, db: db, mux: http.NewServeMux(), requests: NewRateLimiter(), failures: NewRateLimiter(), http: &copyClient, cimd: map[string]time.Time{}}
 	if config.InternalProxyCIDR != "" {
 		prefix, err := netip.ParsePrefix(config.InternalProxyCIDR)
 		if err != nil {
@@ -104,7 +104,7 @@ type registrationRequest struct {
 }
 
 func (s *Server) register(w http.ResponseWriter, r *http.Request) {
-	if !s.requests.allow("register:"+realIP(r, s.trusted), 5, time.Minute) {
+	if !s.requests.Allow("register:"+RealIP(r, s.trusted), 5, time.Minute) {
 		w.Header().Set("Retry-After", "60")
 		oauthError(w, http.StatusTooManyRequests, "invalid_client", "registration rate limit exceeded")
 		return
@@ -187,7 +187,7 @@ var authorizeTemplate = template.Must(template.New("authorize").Parse(`<!doctype
 var errorTemplate = template.Must(template.New("error").Parse(`<!doctype html><html><body><h1>Authorization error</h1><p>{{.}}</p></body></html>`))
 
 func (s *Server) authorizeGet(w http.ResponseWriter, r *http.Request) {
-	if !s.requests.allow("authorize:"+realIP(r, s.trusted), 20, time.Minute) {
+	if !s.requests.Allow("authorize:"+RealIP(r, s.trusted), 20, time.Minute) {
 		w.Header().Set("Retry-After", "60")
 		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 		return
@@ -208,8 +208,8 @@ func (s *Server) authorizeGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) authorizePost(w http.ResponseWriter, r *http.Request) {
-	ip := realIP(r, s.trusted)
-	if !s.requests.allow("authorize:"+ip, 20, time.Minute) {
+	ip := RealIP(r, s.trusted)
+	if !s.requests.Allow("authorize:"+ip, 20, time.Minute) {
 		w.Header().Set("Retry-After", "60")
 		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 		return
@@ -219,7 +219,7 @@ func (s *Server) authorizePost(w http.ResponseWriter, r *http.Request) {
 	client, scopes, problem := s.validateAuthorization(r.Context(), request)
 	passwordOK := VerifyPassword(s.config.PasswordHash, r.PostForm.Get("password"))
 	if !passwordOK {
-		if !s.failures.allow("password:"+ip, 4, 15*time.Minute) {
+		if !s.failures.Allow("password:"+ip, 4, 15*time.Minute) {
 			w.Header().Set("Retry-After", "900")
 			http.Error(w, "too many failed passwords", http.StatusTooManyRequests)
 			return
@@ -267,7 +267,7 @@ func localError(w http.ResponseWriter, message string) {
 
 func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	if !s.requests.allow("token:"+realIP(r, s.trusted), 20, time.Minute) {
+	if !s.requests.Allow("token:"+RealIP(r, s.trusted), 20, time.Minute) {
 		w.Header().Set("Retry-After", "60")
 		oauthError(w, http.StatusTooManyRequests, "temporarily_unavailable", "token rate limit exceeded")
 		return

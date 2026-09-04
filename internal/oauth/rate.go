@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-type rateLimiter struct {
+type RateLimiter struct {
 	mu        sync.Mutex
 	events    map[string]rateBucket
 	nextSweep time.Time
@@ -24,11 +24,11 @@ type rateBucket struct {
 // rateLimiterCapacity bounds attacker-controlled IP buckets; new keys fail closed at capacity.
 const rateLimiterCapacity = 10_000
 
-func newRateLimiter() *rateLimiter {
-	return &rateLimiter{events: map[string]rateBucket{}, now: time.Now}
+func NewRateLimiter() *RateLimiter {
+	return &RateLimiter{events: map[string]rateBucket{}, now: time.Now}
 }
 
-func (l *rateLimiter) allow(key string, maximum int, window time.Duration) bool {
+func (l *RateLimiter) Allow(key string, maximum int, window time.Duration) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if maximum < 1 || window <= 0 {
@@ -61,7 +61,22 @@ func (l *rateLimiter) allow(key string, maximum int, window time.Duration) bool 
 	return true
 }
 
-func (l *rateLimiter) sweep(now time.Time) {
+// Blocked reports whether key already reached maximum events inside window
+// without recording a new event.
+func (l *RateLimiter) Blocked(key string, maximum int, window time.Duration) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	cutoff := l.now().Add(-window)
+	live := 0
+	for _, at := range l.events[key].events {
+		if !at.Before(cutoff) {
+			live++
+		}
+	}
+	return live >= maximum
+}
+
+func (l *RateLimiter) sweep(now time.Time) {
 	l.nextSweep = time.Time{}
 	for key, bucket := range l.events {
 		cutoff := now.Add(-bucket.window)
@@ -82,7 +97,7 @@ func (l *rateLimiter) sweep(now time.Time) {
 	}
 }
 
-func realIP(r *http.Request, trusted *netip.Prefix) string {
+func RealIP(r *http.Request, trusted *netip.Prefix) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = r.RemoteAddr

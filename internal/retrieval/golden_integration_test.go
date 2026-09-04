@@ -13,6 +13,7 @@ import (
 	"unicode"
 
 	"github.com/cesarpetrescu/ledger/internal/store"
+	"github.com/cesarpetrescu/ledger/internal/testdb"
 )
 
 var concepts = [][]string{
@@ -99,7 +100,7 @@ func semanticInfer(t *testing.T) *httptest.Server {
 }
 
 func TestThirtyEntriesTenBilingualGoldenQueries(t *testing.T) {
-	db, ctx := indexDB(t)
+	db, ctx := testdb.Open(t)
 	for i := 0; i < 5; i++ {
 		slug := "project-" + string(rune('a'+i))
 		if _, err := db.UpsertProject(ctx, store.Project{Slug: slug, Name: "Project " + string(rune('A'+i)), Tier: "focus", HoursWK: i + 1}); err != nil {

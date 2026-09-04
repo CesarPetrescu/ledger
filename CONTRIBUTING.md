@@ -37,8 +37,17 @@ Use fictional fixtures such as `Atlas`, reserved example domains such as `exampl
    go vet ./...
    ```
 
-5. Validate Compose with non-production placeholder values.
-6. Review the complete diff for secrets and private operational data.
+   Set `LEDGER_TEST_DATABASE_URL` to a local PostgreSQL 16 server with `vector` and `unaccent` when Docker is unavailable for the integration suite.
+
+5. For console changes, run the pinned frontend toolchain from `frontend/`:
+
+   ```sh
+   npm ci
+   npm run verify
+   ```
+
+6. Validate Compose with non-production placeholder values.
+7. Review the complete diff for secrets and private operational data.
 
 ## Pull requests
 

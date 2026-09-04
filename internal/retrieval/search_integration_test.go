@@ -4,6 +4,7 @@ package retrieval
 
 import (
 	"encoding/json"
+	"github.com/cesarpetrescu/ledger/internal/testdb"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,7 +12,7 @@ import (
 )
 
 func TestSearchDegradesToFTSWhenEmbeddingFails(t *testing.T) {
-	db, ctx := indexDB(t)
+	db, ctx := testdb.Open(t)
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO project(slug,name,tier,hours_wk) VALUES($1,$2,$3,$4)`, "atlas", "Atlas", "focus", 8); err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +44,7 @@ func TestSearchDegradesToFTSWhenEmbeddingFails(t *testing.T) {
 }
 
 func TestSearchRerankFailurePreservesRRF(t *testing.T) {
-	db, ctx := indexDB(t)
+	db, ctx := testdb.Open(t)
 	for _, row := range []struct{ ref, text, hash string }{
 		{"project:aa", "[project: Alpha (aa) | tier: focus | deadline: none]\nalpha alpha alpha", strings.Repeat("01", 32)},
 		{"project:bb", "[project: Beta (bb) | tier: focus | deadline: none]\nalpha", strings.Repeat("02", 32)},
@@ -75,7 +76,7 @@ func TestSearchRerankFailurePreservesRRF(t *testing.T) {
 }
 
 func TestSearchMalformedRerankPreservesBoundedRRF(t *testing.T) {
-	db, ctx := indexDB(t)
+	db, ctx := testdb.Open(t)
 	for _, row := range []struct{ ref, text, hash string }{
 		{"project:aa", "[project: Alpha (aa) | tier: focus | deadline: none]\nalpha alpha alpha", strings.Repeat("01", 32)},
 		{"project:bb", "[project: Beta (bb) | tier: focus | deadline: none]\nalpha alpha", strings.Repeat("02", 32)},

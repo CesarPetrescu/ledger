@@ -1,39 +1,25 @@
 //go:build integration
 
-package store
+package store_test
 
 import (
-	"context"
 	"reflect"
 	"testing"
 
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
+	"github.com/cesarpetrescu/ledger/internal/testdb"
 )
 
 func TestMigrationsEmptyAndIdempotent(t *testing.T) {
-	ctx := context.Background()
-	container, err := postgres.Run(ctx, "pgvector/pgvector:pg16", postgres.WithDatabase("ledger"), postgres.WithUsername("ledger"), postgres.WithPassword("ledger"), postgres.BasicWaitStrategies())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = container.Terminate(ctx) })
-	dsn, err := container.ConnectionString(ctx, "sslmode=disable")
-	if err != nil {
-		t.Fatal(err)
-	}
-	db, err := Open(ctx, dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(db.Close)
-	if err := db.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
+	db, ctx := testdb.Open(t)
 	if err := db.Migrate(ctx); err != nil {
 		t.Fatalf("second migration: %v", err)
 	}
+	var versions []int
+	if err := db.Pool.QueryRow(ctx, `SELECT array_agg(version ORDER BY version) FROM schema_migration`).Scan(&versions); err != nil || !reflect.DeepEqual(versions, []int{1, 2}) {
+		t.Fatalf("applied migrations = %v, %v", versions, err)
+	}
 	var exists bool
-	if err := db.Pool.QueryRow(ctx, `SELECT to_regclass('public.project') IS NOT NULL AND to_regclass('public.chunk') IS NOT NULL`).Scan(&exists); err != nil || !exists {
+	if err := db.Pool.QueryRow(ctx, `SELECT to_regclass('public.project') IS NOT NULL AND to_regclass('public.chunk') IS NOT NULL AND to_regclass('public.admin_session') IS NOT NULL`).Scan(&exists); err != nil || !exists {
 		t.Fatalf("tables missing: %v", err)
 	}
 	if err := db.Pool.QueryRow(ctx, `SELECT
@@ -70,5 +56,13 @@ func TestMigrationsEmptyAndIdempotent(t *testing.T) {
 	wantCodeColumns := []string{"hash", "client_id", "redirect_uri", "code_challenge", "scope", "expires_at", "used"}
 	if !reflect.DeepEqual(codeColumns, wantCodeColumns) {
 		t.Fatalf("oauth_code columns = %v, want %v", codeColumns, wantCodeColumns)
+	}
+	var sessionColumns []string
+	if err := db.Pool.QueryRow(ctx, `SELECT array_agg(column_name::text ORDER BY ordinal_position) FROM information_schema.columns WHERE table_schema='public' AND table_name='admin_session'`).Scan(&sessionColumns); err != nil {
+		t.Fatal(err)
+	}
+	wantSessionColumns := []string{"hash", "csrf_token", "created_at", "expires_at", "last_seen_at"}
+	if !reflect.DeepEqual(sessionColumns, wantSessionColumns) {
+		t.Fatalf("admin_session columns = %v, want %v", sessionColumns, wantSessionColumns)
 	}
 }

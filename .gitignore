@@ -19,6 +19,7 @@ secrets*
 /ledger-auth
 /ledger-mcp
 /ledger-index
+/ledger-admin
 *.test
 *.out
 coverage.*
@@ -35,6 +36,10 @@ coverage.*
 *.backup
 backup/
 backups/
+
+# Frontend tooling
+node_modules/
+/frontend/dist/
 
 # Go and tooling
 /vendor/

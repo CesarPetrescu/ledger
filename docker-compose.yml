@@ -1,6 +1,9 @@
-x-common-env: &common-env
+x-service-env: &service-env
   LEDGER_PUBLIC_URL: ${LEDGER_PUBLIC_URL:?set LEDGER_PUBLIC_URL}
-  LEDGER_DATABASE_URL: postgres://ledger:${LEDGER_POSTGRES_PASSWORD}@postgres:5432/ledger?sslmode=disable
+  LEDGER_DATABASE_URL: postgres://ledger:${LEDGER_POSTGRES_PASSWORD:?set LEDGER_POSTGRES_PASSWORD}@postgres:5432/ledger?sslmode=disable
+
+x-common-env: &common-env
+  <<: *service-env
   LEDGER_PASSWORD_HASH: ${LEDGER_PASSWORD_HASH:?set LEDGER_PASSWORD_HASH}
   LEDGER_TRUSTED_PROXY_CIDR: ${LEDGER_TRUSTED_PROXY_CIDR:?set LEDGER_TRUSTED_PROXY_CIDR}
 
@@ -21,6 +24,10 @@ services:
       ledger-auth:
         condition: service_started
       ledger-mcp:
+        condition: service_started
+      ledger-admin:
+        condition: service_started
+      ledger-frontend:
         condition: service_started
     networks:
       ledger-internal:
@@ -68,6 +75,31 @@ services:
       LEDGER_INFER_API_KEY: ${LEDGER_INFER_API_KEY:-}
     depends_on:
       postgres: *postgres-ready
+    networks:
+      - ledger-internal
+
+  # Operator API on internal :8084. It deliberately does not receive the OAuth approval hash.
+  ledger-admin:
+    build:
+      context: .
+      args:
+        CMD: ledger-admin
+    environment:
+      <<: *service-env
+      LEDGER_ADMIN_PASSWORD_HASH: ${LEDGER_ADMIN_PASSWORD_HASH:?set LEDGER_ADMIN_PASSWORD_HASH}
+      LEDGER_INTERNAL_PROXY_CIDR: ${LEDGER_NGINX_INTERNAL_IP:-10.251.250.254}/32
+      LEDGER_INDEX_URL: http://ledger-index:8083
+    depends_on:
+      postgres: *postgres-ready
+      ledger-index:
+        condition: service_started
+    networks:
+      - ledger-internal
+
+  # Static operator UI on internal :8085; holds no configuration or secrets.
+  ledger-frontend:
+    build:
+      context: ./frontend
     networks:
       - ledger-internal
 
