@@ -640,7 +640,7 @@ label > textarea {
 }
 .segmented label { position: relative; display: flex; flex: 1; min-width: 0; margin: 0; }
 .segmented input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
-.segmented span {
+.segmented label > span {
   display: flex;
   flex: 1;
   align-items: center;
