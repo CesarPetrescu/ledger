@@ -140,21 +140,26 @@ func (db *DB) ActiveTokenCounts(ctx context.Context) (map[string]int, error) {
 	return out, rows.Err()
 }
 
+type ClientTokenCounts struct {
+	ActiveAccessTokens  int `json:"active_access_tokens"`
+	ActiveRefreshTokens int `json:"active_refresh_tokens"`
+}
+
 // ActiveTokenCountsForClients bounds the aggregation to one operator-console page.
-func (db *DB) ActiveTokenCountsForClients(ctx context.Context, clientIDs []string) (map[string]int, error) {
-	out := map[string]int{}
+func (db *DB) ActiveTokenCountsForClients(ctx context.Context, clientIDs []string) (map[string]ClientTokenCounts, error) {
+	out := map[string]ClientTokenCounts{}
 	if len(clientIDs) == 0 {
 		return out, nil
 	}
-	rows, err := db.Pool.Query(ctx, `SELECT client_id,count(*) FROM oauth_token WHERE kind='access' AND NOT revoked AND expires_at>now() AND client_id=ANY($1) GROUP BY client_id`, clientIDs)
+	rows, err := db.Pool.Query(ctx, `SELECT client_id,count(*) FILTER (WHERE kind='access'),count(*) FILTER (WHERE kind='refresh') FROM oauth_token WHERE NOT revoked AND expires_at>now() AND client_id=ANY($1) GROUP BY client_id`, clientIDs)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var id string
-		var count int
-		if err := rows.Scan(&id, &count); err != nil {
+		var count ClientTokenCounts
+		if err := rows.Scan(&id, &count.ActiveAccessTokens, &count.ActiveRefreshTokens); err != nil {
 			return nil, err
 		}
 		out[id] = count

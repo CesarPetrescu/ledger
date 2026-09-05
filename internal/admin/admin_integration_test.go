@@ -443,10 +443,10 @@ func TestProjectsEntriesOverviewAndClientsThroughTheAPI(t *testing.T) {
 	}
 
 	clients := request(t, server, http.MethodGet, "/admin/api/oauth/clients", "", authed(s, false))
-	if clients.Code != http.StatusOK || !strings.Contains(clients.Body.String(), `"client_name":"Agent A"`) || !strings.Contains(clients.Body.String(), `"active_access_tokens":1`) {
+	if clients.Code != http.StatusOK || !strings.Contains(clients.Body.String(), `"client_name":"Agent A"`) || !strings.Contains(clients.Body.String(), `"active_access_tokens":1`) || !strings.Contains(clients.Body.String(), `"active_refresh_tokens":0`) {
 		t.Fatalf("clients = %d %s", clients.Code, clients.Body.String())
 	}
-	for _, forbidden := range []string{"hash", "0101010101", "secret", "refresh"} {
+	for _, forbidden := range []string{"hash", "0101010101", "secret", `"refresh_token":`} {
 		if strings.Contains(strings.ToLower(clients.Body.String()), forbidden) {
 			t.Fatalf("clients response leaks %q: %s", forbidden, clients.Body.String())
 		}

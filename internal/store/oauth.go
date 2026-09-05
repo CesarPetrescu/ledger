@@ -79,12 +79,24 @@ func (db *DB) ListClientsPage(ctx context.Context, limit, offset int) ([]OAuthCl
 }
 
 func (db *DB) Revoke(ctx context.Context, clientID string, all bool) (int64, error) {
-	if all {
-		result, err := db.Pool.Exec(ctx, `UPDATE oauth_token SET revoked=true WHERE NOT revoked`)
-		return result.RowsAffected(), err
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return 0, err
 	}
-	result, err := db.Pool.Exec(ctx, `UPDATE oauth_token SET revoked=true WHERE client_id=$1 AND NOT revoked`, clientID)
-	return result.RowsAffected(), err
+	defer tx.Rollback(ctx)
+	// ponytail: revocation briefly pauses issuance for all clients; use per-client locks if contention matters.
+	// The two-key lock namespace is separate from the token-family locks.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('ledger:oauth'), 0)`); err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM oauth_code WHERE $2 OR client_id=$1`, clientID, all); err != nil {
+		return 0, err
+	}
+	result, err := tx.Exec(ctx, `UPDATE oauth_token SET revoked=true WHERE NOT revoked AND ($2 OR client_id=$1)`, clientID, all)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), tx.Commit(ctx)
 }
 
 func (db *DB) GC(ctx context.Context) (int64, error) {
@@ -120,9 +132,19 @@ WHERE t.expires_at < now()
 }
 
 func (db *DB) CreateCode(ctx context.Context, raw, clientID, redirectURI, challenge string, scopes []string) error {
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err := lockOAuthIssuance(ctx, tx); err != nil {
+		return err
+	}
 	hash := sha256.Sum256([]byte(raw))
-	_, err := db.Pool.Exec(ctx, `INSERT INTO oauth_code(hash,client_id,redirect_uri,code_challenge,scope,expires_at) VALUES($1,$2,$3,$4,$5,now()+interval '60 seconds')`, hash[:], clientID, redirectURI, challenge, strings.Join(scopes, " "))
-	return err
+	if _, err := tx.Exec(ctx, `INSERT INTO oauth_code(hash,client_id,redirect_uri,code_challenge,scope,expires_at) VALUES($1,$2,$3,$4,$5,now()+interval '60 seconds')`, hash[:], clientID, redirectURI, challenge, strings.Join(scopes, " ")); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 type TokenPair struct {
@@ -139,6 +161,9 @@ func (db *DB) ExchangeCode(ctx context.Context, raw, clientID, redirectURI, veri
 		return TokenPair{}, err
 	}
 	defer tx.Rollback(ctx)
+	if err := lockOAuthIssuance(ctx, tx); err != nil {
+		return TokenPair{}, err
+	}
 	hash := sha256.Sum256([]byte(raw))
 	family := familyFromCodeHash(hash)
 	if err := lockTokenFamily(ctx, tx, family); err != nil {
@@ -193,6 +218,9 @@ func (db *DB) ExchangeRefresh(ctx context.Context, raw, clientID string) (TokenP
 		return TokenPair{}, err
 	}
 	defer tx.Rollback(ctx)
+	if err := lockOAuthIssuance(ctx, tx); err != nil {
+		return TokenPair{}, err
+	}
 	hash := sha256.Sum256([]byte(raw))
 	var storedClient, family string
 	var scope string
@@ -287,4 +315,10 @@ func familyFromCodeHash(hash [32]byte) string {
 	raw[6] = raw[6]&0x0f | 0x40
 	raw[8] = raw[8]&0x3f | 0x80
 	return fmt.Sprintf("%x-%x-%x-%x-%x", raw[:4], raw[4:6], raw[6:8], raw[8:10], raw[10:])
+}
+
+// lockOAuthIssuance lets grants proceed concurrently but excludes revocation until commit.
+func lockOAuthIssuance(ctx context.Context, tx pgx.Tx) error {
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock_shared(hashtext('ledger:oauth'), 0)`)
+	return err
 }
