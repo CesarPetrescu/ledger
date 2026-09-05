@@ -147,3 +147,27 @@ func TestAdminOverviewCountsAreTruthful(t *testing.T) {
 		t.Fatalf("active token counts = %#v, %v", tokens, err)
 	}
 }
+
+func TestClientTokenCountsIncludeOnlyLiveCredentials(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	if _, err := db.PutClient(ctx, store.OAuthClient{ClientID: "agent", Kind: "dcr", RedirectURIs: []string{"http://127.0.0.1/cb"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO oauth_token(hash,kind,client_id,scope,family,expires_at,revoked) VALUES
+ (decode(repeat('01',32),'hex'),'access','agent','ledger:read','00000000-0000-4000-8000-000000000001',now()-interval '1 minute',false),
+ (decode(repeat('02',32),'hex'),'refresh','agent','ledger:read','00000000-0000-4000-8000-000000000001',now()+interval '1 day',false),
+ (decode(repeat('03',32),'hex'),'refresh','agent','ledger:read','00000000-0000-4000-8000-000000000001',now()+interval '1 day',true),
+ (decode(repeat('04',32),'hex'),'refresh','agent','ledger:read','00000000-0000-4000-8000-000000000001',now()-interval '1 day',false)`); err != nil {
+		t.Fatal(err)
+	}
+	counts, err := db.ActiveTokenCountsForClients(ctx, []string{"agent"})
+	if err != nil || counts["agent"].ActiveAccessTokens != 0 || counts["agent"].ActiveRefreshTokens != 1 {
+		t.Fatalf("counts = %#v, %v", counts, err)
+	}
+	for _, ids := range [][]string{nil, {"other"}} {
+		counts, err := db.ActiveTokenCountsForClients(ctx, ids)
+		if err != nil || len(counts) != 0 {
+			t.Fatalf("unrequested counts = %#v, %v", counts, err)
+		}
+	}
+}

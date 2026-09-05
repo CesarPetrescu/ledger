@@ -782,7 +782,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 
 type clientSummary struct {
 	store.OAuthClient
-	ActiveAccessTokens int `json:"active_access_tokens"`
+	store.ClientTokenCounts
 }
 
 func (s *Server) listClients(w http.ResponseWriter, r *http.Request) {
@@ -825,7 +825,7 @@ func (s *Server) listClients(w http.ResponseWriter, r *http.Request) {
 	}
 	summaries := make([]clientSummary, len(clients))
 	for i, client := range clients {
-		summaries[i] = clientSummary{OAuthClient: client, ActiveAccessTokens: tokens[client.ClientID]}
+		summaries[i] = clientSummary{OAuthClient: client, ClientTokenCounts: tokens[client.ClientID]}
 	}
 	response := map[string]any{"clients": summaries}
 	if hasMore {
