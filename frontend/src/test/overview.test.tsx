@@ -13,7 +13,7 @@ describe('overview', () => {
     expect(within(counts).getByText('Projects').nextElementSibling).toHaveTextContent('2')
     expect(within(counts).getByText('Entries').nextElementSibling).toHaveTextContent('2')
     expect(within(counts).getByText('OAuth clients').nextElementSibling).toHaveTextContent('1')
-    expect(within(counts).getByText('Active tokens').nextElementSibling).toHaveTextContent('3')
+    expect(within(counts).getByText('Active access tokens').nextElementSibling).toHaveTextContent('3')
     expect(within(counts).getByText('Admin sessions').nextElementSibling).toHaveTextContent('1')
     const focus = screen.getByRole('region', { name: /^focus/i })
     expect(within(focus).getByRole('link', { name: /atlas/i })).toHaveAttribute('href', '/admin/projects/atlas')

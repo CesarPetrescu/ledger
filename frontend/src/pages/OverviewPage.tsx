@@ -74,7 +74,7 @@ export function OverviewPage() {
             <strong>{counts.oauth_clients}</strong>
           </li>
           <li>
-            <span>Active tokens</span>
+            <span>Active access tokens</span>
             <strong>{counts.active_access_tokens}</strong>
           </li>
           <li>

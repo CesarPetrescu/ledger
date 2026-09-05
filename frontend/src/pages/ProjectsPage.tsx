@@ -386,6 +386,7 @@ export function ProjectsPage({ slug, view = 'overview' }: { slug?: string | unde
     const needle = filter.trim().toLowerCase()
     return (list.data ?? []).filter((project) => (tier === 'all' || project.tier === tier) && (needle === '' || project.name.toLowerCase().includes(needle) || project.slug.includes(needle)))
   }, [list.data, filter, tier])
+  const tierCount = (option: string) => (list.data ?? []).filter((project) => option === 'all' || project.tier === option).length
 
   const upsertInList = (saved: Project) =>
     list.update((projects) => {
@@ -413,12 +414,17 @@ export function ProjectsPage({ slug, view = 'overview' }: { slug?: string | unde
           <input id="project-filter" type="search" placeholder="Name or slug" value={filter} onChange={(event) => setFilter(event.target.value)} autoComplete="off" />
           <fieldset className="segmented">
             <legend className="visually-hidden">Tier</legend>
+            <div>
             {['all', ...TIERS].map((option) => (
               <label key={option}>
                 <input type="radio" name="tier" value={option} checked={tier === option} onChange={() => setTier(option)} />
-                <span>{option === 'all' ? 'All' : option}</span>
+                <span>
+                  {option === 'all' ? 'All' : option}
+                  {list.data && <span className="count" aria-hidden="true">{tierCount(option)}</span>}
+                </span>
               </label>
             ))}
+            </div>
           </fieldset>
         </div>
         {list.loading && <Loading label="Loading projects…" />}
@@ -431,9 +437,11 @@ export function ProjectsPage({ slug, view = 'overview' }: { slug?: string | unde
               <li key={project.slug}>
                 <Link to={`/projects/${project.slug}`} aria-current={project.slug === slug ? 'page' : undefined}>
                   <span className="project-name">{project.name}</span>
-                  <code>{project.slug}</code>
-                  <TierBadge tier={project.tier} />
                   <span className="muted small">{project.last_entry_at ? <Timestamp iso={project.last_entry_at} /> : 'no entries'}</span>
+                  <span className="project-tags">
+                    <TierBadge tier={project.tier} />
+                    <code>{project.slug}</code>
+                  </span>
                 </Link>
               </li>
             ))}

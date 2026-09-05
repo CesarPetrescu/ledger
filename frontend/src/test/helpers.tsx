@@ -122,6 +122,7 @@ export const clients: Client[] = [
     created_at: '2026-08-20T10:00:00Z',
     last_used_at: '2026-09-03T11:00:00Z',
     active_access_tokens: 3,
+    active_refresh_tokens: 1,
   },
   {
     client_id: 'https://app.example/client.json',
@@ -131,6 +132,7 @@ export const clients: Client[] = [
     created_at: '2026-08-01T10:00:00Z',
     last_used_at: '2026-08-01T10:00:00Z',
     active_access_tokens: 0,
+    active_refresh_tokens: 1,
   },
 ]
 

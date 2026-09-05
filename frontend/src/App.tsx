@@ -23,7 +23,7 @@ function resolve(path: string, query: URLSearchParams): { title: string; page: R
   if (path === '/handoffs/new') return { title: 'New handoff', page: <HandoffsPage creating initialProject={query.get('project') ?? ''} /> }
   const handoff = /^\/handoffs\/([^/]+)$/.exec(path)
   if (handoff?.[1]) return { title: 'Handoffs', page: <HandoffsPage id={decodeURIComponent(handoff[1])} /> }
-  if (path === '/clients') return { title: 'OAuth clients', page: <ClientsPage /> }
+  if (path === '/clients') return { title: 'Agents', page: <ClientsPage /> }
   return {
     title: 'Not found',
     page: (

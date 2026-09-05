@@ -16,15 +16,17 @@ describe('oauth clients', () => {
     expect(rows[0]).toHaveTextContent('3')
     expect(rows[1]).toHaveTextContent('Client ID metadata')
     expect(rows[1]).toHaveTextContent('https://app.example/client.json')
+    expect(rows[1]!.querySelector('[data-label="Access tokens"]')).toHaveTextContent('0')
+    expect(rows[1]!.querySelector('[data-label="Refresh tokens"]')).toHaveTextContent('1')
     expect(table.textContent).not.toMatch(/hash|secret|refresh_token/i)
     const firstRowCells = within(rows[0]!).getAllByRole('cell')
-    expect(firstRowCells.map((cell) => cell.getAttribute('data-label'))).toEqual(['Name', 'Type', 'Client ID', 'Redirect URIs', 'Created', 'Last used', 'Active tokens', 'Actions'])
+    expect(firstRowCells.map((cell) => cell.getAttribute('data-label'))).toEqual(['Name', 'Type', 'Client ID', 'Redirect URIs', 'Created', 'Last used', 'Access tokens', 'Refresh tokens', 'Actions'])
   })
 
   it('requires explicit confirmation before revoking and reports the result', async () => {
     const { calls } = mockApi({
       'GET /admin/api/session': authenticatedSession,
-      'GET /admin/api/oauth/clients': [{ body: { clients } }, { body: { clients: [{ ...clients[0]!, active_access_tokens: 0 }, clients[1]!] } }],
+      'GET /admin/api/oauth/clients': [{ body: { clients } }, { body: { clients: [{ ...clients[0]!, active_access_tokens: 0, active_refresh_tokens: 0 }, clients[1]!] } }],
       'POST /admin/api/oauth/revoke': { body: { revoked: 3 } },
     })
     renderApp('/admin/clients')
