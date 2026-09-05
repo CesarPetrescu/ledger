@@ -12,7 +12,7 @@ describe('authenticated shell and routing', () => {
       'POST /admin/api/logout': { status: 204 },
     })
     renderApp('/admin/clients')
-    expect(await screen.findByRole('heading', { name: /oauth clients/i })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /^agents$/i })).toBeInTheDocument()
     const nav = screen.getByRole('navigation', { name: /primary/i })
     for (const label of ['Overview', 'Projects', 'Search', 'Calendar', 'Agents']) {
       expect(within(nav).getByRole('link', { name: label })).toBeInTheDocument()
@@ -36,11 +36,11 @@ describe('authenticated shell and routing', () => {
       'POST /admin/api/logout': { status: 500, body: { error: 'internal detail must stay hidden' } },
     })
     renderApp('/admin/clients')
-    expect(await screen.findByRole('heading', { name: /oauth clients/i })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /^agents$/i })).toBeInTheDocument()
 
     await userEvent.setup().click(screen.getByRole('button', { name: /sign out/i }))
 
-    expect(await screen.findByRole('heading', { name: /oauth clients/i })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /^agents$/i })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: /operator sign-in/i })).not.toBeInTheDocument()
     expect(screen.getByRole('status', { name: /notifications/i })).toHaveTextContent(/server could not complete the request/i)
     expect(screen.getByRole('status', { name: /notifications/i })).not.toHaveTextContent(/internal detail/i)
@@ -65,7 +65,7 @@ describe('authenticated shell and routing', () => {
     renderApp('/admin/clients')
     const user = userEvent.setup()
     await user.type(await screen.findByLabelText(/^password$/i), 'correct horse{Enter}')
-    expect(await screen.findByRole('heading', { name: /oauth clients/i })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /^agents$/i })).toBeInTheDocument()
   })
 
   it('opens search from the keyboard shortcut', async () => {

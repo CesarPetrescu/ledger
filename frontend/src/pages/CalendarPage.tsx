@@ -405,8 +405,8 @@ function CalendarWorkspace({ connection, onDisconnected }: { connection: Calenda
             <input type="date" value={anchor} onChange={(changeEvent) => setAnchor(changeEvent.target.value)} />
           </label>
           <fieldset className="segmented">
-            <legend className="visually-hidden">Range</legend>
-            {[7, 30].map((rangeDays) => <label key={rangeDays}><input type="radio" name="calendar-range" checked={days === rangeDays} onChange={() => setDays(rangeDays)} /><span>{rangeDays} days</span></label>)}
+            <legend>Range</legend>
+            <div>{[7, 30].map((rangeDays) => <label key={rangeDays}><input type="radio" name="calendar-range" checked={days === rangeDays} onChange={() => setDays(rangeDays)} /><span>{rangeDays} days</span></label>)}</div>
           </fieldset>
           <label>
             Calendar

@@ -33,8 +33,8 @@ export function ClientsPage() {
   return (
     <>
       <header className="page-head">
-        <h1>OAuth clients</h1>
-        <p className="muted">Registered MCP clients and their live credentials. Secrets and token hashes are never shown.</p>
+        <h1>Agents</h1>
+        <p className="muted">MCP clients that have connected through OAuth. Client IDs identify apps; they do not grant access. Access tokens allow requests; refresh tokens let an app renew access without another approval.</p>
       </header>
       {page.loading && <Loading label="Loading clients…" />}
       {!page.loading && !page.data && <ErrorState message="Couldn't load OAuth clients." onRetry={page.reload} />}
@@ -57,8 +57,9 @@ export function ClientsPage() {
               <th scope="col">Created</th>
               <th scope="col">Last used</th>
               <th scope="col" className="num">
-                Active tokens
+                Access tokens
               </th>
+              <th scope="col" className="num">Refresh tokens</th>
               <th scope="col">
                 <span className="visually-hidden">Actions</span>
               </th>
@@ -87,7 +88,8 @@ export function ClientsPage() {
                 <td data-label="Last used">
                   <Timestamp iso={client.last_used_at} />
                 </td>
-                <td data-label="Active tokens" className="num">{client.active_access_tokens}</td>
+                <td data-label="Access tokens" className="num">{client.active_access_tokens}</td>
+                <td data-label="Refresh tokens" className="num">{client.active_refresh_tokens}</td>
                 <td data-label="Actions">
                   <button type="button" className="btn btn-danger-quiet" onClick={() => setTarget(client)}>
                     Revoke tokens
@@ -112,7 +114,7 @@ export function ClientsPage() {
         </>
       )}
       <ConfirmDialog open={target !== null} title={`Revoke tokens for ${target?.client_name || target?.client_id || ''}?`} confirmLabel="Revoke" busy={busy} onCancel={() => setTarget(null)} onConfirm={() => void revoke()}>
-        <p>Every active access and refresh token for this client stops working immediately. The client can authorize again through the normal OAuth flow.</p>
+        <p>Revokes all access and refresh tokens and invalidates pending authorization codes. The client registration stays, but reconnecting requires a new authorization with your approval password.</p>
       </ConfirmDialog>
     </>
   )

@@ -384,7 +384,7 @@ export function HandoffsPage({ id, creating = false, initialProject = '' }: { id
           <input id="handoff-search" type="search" placeholder="Search title, scope, messages" value={query} onChange={(event) => setQuery(event.target.value)} />
           <div className="handoff-filter-row">
             <label><span className="visually-hidden">Work status</span><select value={status} onChange={(event) => setStatus(event.target.value)}>{WORK_STATES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
-            <label><span className="visually-hidden">Archive</span><select value={archive} onChange={(event) => setArchive(event.target.value)}><option value="active">Active</option><option value="archived">Archived</option><option value="all">All</option></select></label>
+            <label><span className="visually-hidden">Archive</span><select value={archive} onChange={(event) => setArchive(event.target.value)}><option value="active">Active only</option><option value="archived">Archived only</option><option value="all">Active and archived</option></select></label>
           </div>
           <div className="handoff-filter-row">
             <label><span className="visually-hidden">Filter by project</span><select value={project} onChange={(event) => setProject(event.target.value)}><option value="">Any project</option>{(projects.data ?? []).map((item) => <option key={item.slug} value={item.slug}>{item.name}</option>)}</select></label>
