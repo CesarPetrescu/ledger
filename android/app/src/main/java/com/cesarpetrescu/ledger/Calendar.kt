@@ -27,7 +27,7 @@ fun CalendarScreen(model: LedgerModel) {
     Load(model, "calendar:$day", { api ->
         val connection = api.request("GET", "/calendar/connection")
         if (!connection.optBoolean("connected")) json("connection" to connection)
-        else api.request("GET", "/calendar/events?start=${segment(date.atStartOfDay(zone).toOffsetDateTime().toString())}&end=${segment(date.plusDays(7).atStartOfDay(zone).toOffsetDateTime().toString())}")
+        else api.request("GET", "/calendar/events?start=${segment(date.atStartOfDay(zone).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME))}&end=${segment(date.plusDays(7).atStartOfDay(zone).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME))}")
             .put("connection", connection)
     }) { data ->
         Page {
