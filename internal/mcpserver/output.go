@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"time"
 
+	calendarapi "github.com/cesarpetrescu/ledger/internal/calendar"
 	"github.com/google/jsonschema-go/jsonschema"
 )
 
@@ -16,6 +17,18 @@ func outputSchema[T any]() *jsonschema.Schema {
 }
 
 // These types describe the MCP projections, which differ from the stored rows.
+type projectList struct {
+	Projects []projectSummary `json:"projects"`
+}
+
+type calendarList struct {
+	Calendars []calendarapi.Calendar `json:"calendars"`
+}
+
+type calendarEventList struct {
+	Events []calendarapi.Event `json:"events"`
+}
+
 type projectSummary struct {
 	Slug        string     `json:"slug"`
 	Name        string     `json:"name"`
