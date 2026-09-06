@@ -111,6 +111,7 @@ func NewServer(config Config, db *store.DB) *Server {
 	s.mux.HandleFunc("GET /admin/api/calendar/events/{id}", s.getCalendarEvent)
 	s.mux.HandleFunc("PUT /admin/api/calendar/events/{id}", s.updateCalendarEvent)
 	s.mux.HandleFunc("DELETE /admin/api/calendar/events/{id}", s.deleteCalendarEvent)
+	s.mux.HandleFunc("POST /admin/api/oauth/device", s.deviceRequest)
 	s.mux.HandleFunc("GET /admin/api/oauth/clients", s.listClients)
 	s.mux.HandleFunc("POST /admin/api/oauth/revoke", s.revokeClient)
 	s.mux.HandleFunc("GET /admin/api/events", func(w http.ResponseWriter, r *http.Request) { s.events.serve(s.origin, w, r) })

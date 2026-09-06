@@ -70,11 +70,13 @@ func TestOAuthMetadataIsExactAndCacheable(t *testing.T) {
 	_ = json.Unmarshal(res.Body.Bytes(), &got)
 	want := map[string]any{
 		"issuer":                                         "https://ledger.example.com",
+		"device_authorization_endpoint":                  "https://ledger.example.com/oauth/device",
+		"revocation_endpoint":                            "https://ledger.example.com/oauth/revoke",
 		"authorization_endpoint":                         "https://ledger.example.com/oauth/authorize",
 		"token_endpoint":                                 "https://ledger.example.com/oauth/token",
 		"registration_endpoint":                          "https://ledger.example.com/oauth/register",
 		"response_types_supported":                       []any{"code"},
-		"grant_types_supported":                          []any{"authorization_code", "refresh_token"},
+		"grant_types_supported":                          []any{"authorization_code", "refresh_token", DeviceGrant},
 		"code_challenge_methods_supported":               []any{"S256"},
 		"token_endpoint_auth_methods_supported":          []any{"none"},
 		"scopes_supported":                               []any{"ledger:read", "ledger:write", "calendar:read", "calendar:write"},

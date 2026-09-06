@@ -15,7 +15,7 @@ func TestMigrationsEmptyAndIdempotent(t *testing.T) {
 		t.Fatalf("second migration: %v", err)
 	}
 	var versions []int
-	if err := db.Pool.QueryRow(ctx, `SELECT array_agg(version ORDER BY version) FROM schema_migration`).Scan(&versions); err != nil || !reflect.DeepEqual(versions, []int{1, 2, 3, 4, 5}) {
+	if err := db.Pool.QueryRow(ctx, `SELECT array_agg(version ORDER BY version) FROM schema_migration`).Scan(&versions); err != nil || !reflect.DeepEqual(versions, []int{1, 2, 3, 4, 5, 6}) {
 		t.Fatalf("applied migrations = %v, %v", versions, err)
 	}
 	var exists bool
@@ -26,6 +26,7 @@ func TestMigrationsEmptyAndIdempotent(t *testing.T) {
   to_regclass('public.oauth_client') IS NOT NULL AND
   to_regclass('public.oauth_code') IS NOT NULL AND
   to_regclass('public.oauth_token') IS NOT NULL AND
+  to_regclass('public.oauth_device') IS NOT NULL AND
   to_regclass('public.client') IS NULL AND
   to_regclass('public.code') IS NULL AND
   to_regclass('public.token') IS NULL`).Scan(&exists); err != nil || !exists {

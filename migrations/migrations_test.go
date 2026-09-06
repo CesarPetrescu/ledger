@@ -79,7 +79,7 @@ func TestAdminSessionMigrationStoresHashesOnly(t *testing.T) {
 	for _, entry := range entries {
 		names = append(names, entry.Name())
 	}
-	if len(names) != 5 || names[0] != "0001_init.sql" || names[1] != "0002_admin_session.sql" || names[2] != "0003_admin_events.sql" || names[3] != "0004_calendar.sql" || names[4] != "0005_handoffs.sql" {
+	if len(names) != 6 || names[0] != "0001_init.sql" || names[1] != "0002_admin_session.sql" || names[2] != "0003_admin_events.sql" || names[3] != "0004_calendar.sql" || names[4] != "0005_handoffs.sql" || names[5] != "0006_device_auth.sql" {
 		t.Fatalf("migration files = %v, want strictly numbered sequence", names)
 	}
 }

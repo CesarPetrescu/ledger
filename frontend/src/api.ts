@@ -97,13 +97,21 @@ export interface SearchRequest {
 
 export interface Client {
   client_id: string
-  kind: 'dcr' | 'cimd'
+  kind: 'dcr' | 'cimd' | 'device'
   client_name: string
   redirect_uris: string[]
   created_at: string
   last_used_at: string
   active_access_tokens: number
   active_refresh_tokens: number
+}
+
+export interface DeviceRequest {
+  user_code: string
+  client_name: string
+  scope: string
+  created_at: string
+  expires_at: string
 }
 
 export interface ClientPage {
@@ -306,6 +314,8 @@ async function requestText(path: string): Promise<string> {
 }
 
 export const api = {
+  lookupDevice: (user_code: string) => request<DeviceRequest>('POST', '/oauth/device', { user_code, action: 'lookup' }),
+  decideDevice: (user_code: string, action: 'approve' | 'deny') => request<void>('POST', '/oauth/device', { user_code, action }),
   getSession: () => request<Session & { authenticated: boolean }>('GET', '/session'),
   login: (password: string) => request<Session>('POST', '/login', { password }),
   logout: () => request<void>('POST', '/logout'),

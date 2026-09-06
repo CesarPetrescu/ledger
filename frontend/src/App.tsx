@@ -2,6 +2,7 @@ import { AuthProvider, useAuth } from './auth'
 import { Shell } from './components/Shell'
 import { ToastProvider } from './components/Toast'
 import { Link, useLocation } from './router'
+import { ConnectPage } from './pages/ConnectPage'
 import { ClientsPage } from './pages/ClientsPage'
 import { LoginPage } from './pages/LoginPage'
 import { OverviewPage } from './pages/OverviewPage'
@@ -23,6 +24,7 @@ function resolve(path: string, query: URLSearchParams): { title: string; page: R
   if (path === '/handoffs/new') return { title: 'New handoff', page: <HandoffsPage creating initialProject={query.get('project') ?? ''} /> }
   const handoff = /^\/handoffs\/([^/]+)$/.exec(path)
   if (handoff?.[1]) return { title: 'Handoffs', page: <HandoffsPage id={decodeURIComponent(handoff[1])} /> }
+  if (path === '/connect') return { title: 'Connect a machine', page: <ConnectPage /> }
   if (path === '/clients') return { title: 'Agents', page: <ClientsPage /> }
   return {
     title: 'Not found',
