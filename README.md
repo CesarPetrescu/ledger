@@ -529,3 +529,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Please keep real infrastructure identifi
 ## License
 
 Ledger is free software released under the [GNU Affero General Public License v3.0](LICENSE). You may run, study, modify, and redistribute it, provided that modified versions stay under the same license and that anyone who interacts with a modified version over a network can obtain its source. This keeps Ledger open even when it is offered as a hosted service.
+
+## Android app
+
+Install the native owner console from [GitHub Releases](https://github.com/CesarPetrescu/ledger/releases/latest). See [Android build, signing, and usage](android/README.md). Version tags publish signed APKs alongside the CLI; CI also provides development APK artifacts.
