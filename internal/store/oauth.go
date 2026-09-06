@@ -92,6 +92,9 @@ func (db *DB) Revoke(ctx context.Context, clientID string, all bool) (int64, err
 	if _, err := tx.Exec(ctx, `DELETE FROM oauth_code WHERE $2 OR client_id=$1`, clientID, all); err != nil {
 		return 0, err
 	}
+	if _, err := tx.Exec(ctx, `DELETE FROM oauth_device WHERE $2 OR client_id=$1`, clientID, all); err != nil {
+		return 0, err
+	}
 	result, err := tx.Exec(ctx, `UPDATE oauth_token SET revoked=true WHERE NOT revoked AND ($2 OR client_id=$1)`, clientID, all)
 	if err != nil {
 		return 0, err
@@ -107,6 +110,7 @@ func (db *DB) GC(ctx context.Context) (int64, error) {
 	defer tx.Rollback(ctx)
 	var count int64
 	for _, query := range []string{
+		`DELETE FROM oauth_device WHERE expires_at < now()`,
 		`DELETE FROM oauth_code c
 WHERE c.expires_at < now()
   AND (NOT c.used OR NOT EXISTS (
@@ -120,7 +124,7 @@ WHERE t.expires_at < now()
     SELECT 1 FROM oauth_token live
     WHERE live.family=t.family AND NOT live.revoked AND live.expires_at >= now()
   ))`,
-		`DELETE FROM oauth_client c WHERE kind='dcr' AND last_used_at < now()-interval '60 days' AND NOT EXISTS(SELECT 1 FROM oauth_token t WHERE t.client_id=c.client_id AND t.expires_at >= now())`,
+		`DELETE FROM oauth_client c WHERE kind IN ('dcr','device') AND last_used_at < now()-interval '60 days' AND NOT EXISTS(SELECT 1 FROM oauth_token t WHERE t.client_id=c.client_id AND t.expires_at >= now())`,
 	} {
 		result, err := tx.Exec(ctx, query)
 		if err != nil {

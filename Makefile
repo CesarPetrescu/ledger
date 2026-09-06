@@ -2,6 +2,7 @@
 
 build:
 	mkdir -p bin
+	go build -trimpath -ldflags="-s -w" -o bin/ledger ./cmd/ledger
 	go build -o bin/ledger-auth ./cmd/ledger-auth
 	go build -o bin/ledger-mcp ./cmd/ledger-mcp
 	go build -o bin/ledger-index ./cmd/ledger-index

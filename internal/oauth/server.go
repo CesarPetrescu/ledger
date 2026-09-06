@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -62,6 +63,8 @@ func NewServer(config Config, db *store.DB) *Server {
 	s.mux.HandleFunc("GET /oauth/authorize", s.authorizeGet)
 	s.mux.HandleFunc("POST /oauth/authorize", s.authorizePost)
 	s.mux.HandleFunc("POST /oauth/token", s.token)
+	s.mux.HandleFunc("POST /oauth/device", s.device)
+	s.mux.HandleFunc("POST /oauth/revoke", s.revoke)
 	return s
 }
 
@@ -83,7 +86,9 @@ func (s *Server) authorizationMetadata(w http.ResponseWriter, _ *http.Request) {
 		"token_endpoint":                                 s.config.PublicURL + "/oauth/token",
 		"registration_endpoint":                          s.config.PublicURL + "/oauth/register",
 		"response_types_supported":                       []string{"code"},
-		"grant_types_supported":                          []string{"authorization_code", "refresh_token"},
+		"grant_types_supported":                          []string{"authorization_code", "refresh_token", DeviceGrant},
+		"device_authorization_endpoint":                  s.config.PublicURL + "/oauth/device",
+		"revocation_endpoint":                            s.config.PublicURL + "/oauth/revoke",
 		"code_challenge_methods_supported":               []string{"S256"},
 		"token_endpoint_auth_methods_supported":          []string{"none"},
 		"scopes_supported":                               SupportedScopes,
@@ -101,6 +106,7 @@ func metadata(w http.ResponseWriter, value any) {
 type registrationRequest struct {
 	RedirectURIs []string `json:"redirect_uris"`
 	ClientName   string   `json:"client_name"`
+	GrantTypes   []string `json:"grant_types"`
 }
 
 func (s *Server) register(w http.ResponseWriter, r *http.Request) {
@@ -111,13 +117,39 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	var input registrationRequest
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
-	if err := decoder.Decode(&input); err != nil || len(input.RedirectURIs) == 0 {
+	if err := decoder.Decode(&input); err != nil {
 		oauthError(w, http.StatusBadRequest, "invalid_client_metadata", "redirect_uris is required")
 		return
 	}
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
 		oauthError(w, http.StatusBadRequest, "invalid_client_metadata", "request must contain one JSON value")
+		return
+	}
+	kind := "dcr"
+	grants := []string{"authorization_code", "refresh_token"}
+	responses := []string{"code"}
+	if slices.Contains(input.GrantTypes, DeviceGrant) {
+		for _, grant := range input.GrantTypes {
+			if grant != DeviceGrant && grant != "refresh_token" {
+				oauthError(w, 400, "invalid_client_metadata", "unsupported device grant")
+				return
+			}
+		}
+		kind = "device"
+		grants = input.GrantTypes
+		responses = []string{}
+		if len(input.RedirectURIs) != 0 {
+			oauthError(w, 400, "invalid_client_metadata", "device clients do not use redirects")
+			return
+		}
+		input.RedirectURIs = []string{}
+	} else if len(input.RedirectURIs) == 0 {
+		oauthError(w, 400, "invalid_client_metadata", "redirect_uris is required")
+		return
+	}
+	if len(input.ClientName) > 100 || strings.ContainsAny(input.ClientName, "\r\n\x1b") {
+		oauthError(w, 400, "invalid_client_metadata", "invalid client name")
 		return
 	}
 	for _, redirect := range input.RedirectURIs {
@@ -131,7 +163,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	client, err := s.db.PutClient(r.Context(), store.OAuthClient{ClientID: id, Kind: "dcr", RedirectURIs: input.RedirectURIs, Name: input.ClientName})
+	client, err := s.db.PutClient(r.Context(), store.OAuthClient{ClientID: id, Kind: kind, RedirectURIs: input.RedirectURIs, Name: input.ClientName})
 	if err != nil {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
@@ -141,7 +173,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"client_id": client.ClientID, "client_id_issued_at": client.CreatedAt.Unix(), "client_name": client.Name,
 		"redirect_uris": client.RedirectURIs, "token_endpoint_auth_method": "none",
-		"grant_types": []string{"authorization_code", "refresh_token"}, "response_types": []string{"code"},
+		"grant_types": grants, "response_types": responses,
 		"scope": strings.Join(SupportedScopes, " "),
 	})
 }
@@ -282,13 +314,18 @@ func authorizationPageHeaders(w http.ResponseWriter) {
 
 func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	if !s.requests.Allow("token:"+RealIP(r, s.trusted), 20, time.Minute) {
-		w.Header().Set("Retry-After", "60")
-		oauthError(w, http.StatusTooManyRequests, "temporarily_unavailable", "token rate limit exceeded")
+	r.Body = http.MaxBytesReader(w, r.Body, 8192)
+	if err := r.ParseForm(); err != nil {
+		oauthError(w, 400, "invalid_request", "invalid form body")
 		return
 	}
-	if err := r.ParseForm(); err != nil {
-		oauthError(w, http.StatusBadRequest, "invalid_request", "invalid form body")
+	rateKey, rateLimit := "token:", 20
+	if r.PostForm.Get("grant_type") == DeviceGrant {
+		rateKey, rateLimit = "device-poll:", 120
+	}
+	if !s.requests.Allow(rateKey+RealIP(r, s.trusted), rateLimit, time.Minute) {
+		w.Header().Set("Retry-After", "60")
+		oauthError(w, http.StatusTooManyRequests, "temporarily_unavailable", "token rate limit exceeded")
 		return
 	}
 	if len(r.Header.Values("Authorization")) != 0 {
@@ -305,11 +342,19 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 	switch r.PostForm.Get("grant_type") {
 	case "authorization_code":
 		pair, err = s.db.ExchangeCode(r.Context(), r.PostForm.Get("code"), clientID, r.PostForm.Get("redirect_uri"), r.PostForm.Get("code_verifier"), VerifyPKCE)
+	case DeviceGrant:
+		pair, err = s.db.ExchangeDevice(r.Context(), r.PostForm.Get("device_code"), clientID)
 	case "refresh_token":
 		pair, err = s.db.ExchangeRefresh(r.Context(), r.PostForm.Get("refresh_token"), clientID)
 	default:
-		oauthError(w, http.StatusBadRequest, "unsupported_grant_type", "supported grants are authorization_code and refresh_token")
+		oauthError(w, http.StatusBadRequest, "unsupported_grant_type", "unsupported grant type")
 		return
+	}
+	for _, deviceErr := range []error{store.ErrAuthorizationPending, store.ErrSlowDown, store.ErrAccessDenied, store.ErrExpiredToken} {
+		if errors.Is(err, deviceErr) {
+			oauthError(w, 400, deviceErr.Error(), deviceErr.Error())
+			return
+		}
 	}
 	if errors.Is(err, store.ErrInvalidGrant) {
 		oauthError(w, http.StatusBadRequest, "invalid_grant", "grant is invalid, expired, or already used")

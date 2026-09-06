@@ -1,3 +1,4 @@
+import { Link } from '../router'
 import { useState } from 'react'
 import { api, describeError, type Client } from '../api'
 import { ConfirmDialog } from '../components/ConfirmDialog'
@@ -5,7 +6,7 @@ import { useToast } from '../components/Toast'
 import { EmptyState, ErrorState, Loading, StaleNotice, Timestamp } from '../components/ui'
 import { useResource } from '../hooks/useResource'
 
-const KIND_LABEL: Record<Client['kind'], string> = { dcr: 'Dynamic registration', cimd: 'Client ID metadata' }
+const KIND_LABEL: Record<Client['kind'], string> = { dcr: 'Dynamic registration', cimd: 'Client ID metadata', device: 'Connected machine' }
 const PAGE_SIZE = 50
 
 export function ClientsPage() {
@@ -34,6 +35,7 @@ export function ClientsPage() {
     <>
       <header className="page-head">
         <h1>Agents</h1>
+        <Link to="/connect" className="btn">Connect a machine</Link>
         <p className="muted">MCP clients that have connected through OAuth. Client IDs identify apps; they do not grant access. Access tokens allow requests; refresh tokens let an app renew access without another approval.</p>
       </header>
       {page.loading && <Loading label="Loading clients…" />}
@@ -114,7 +116,7 @@ export function ClientsPage() {
         </>
       )}
       <ConfirmDialog open={target !== null} title={`Revoke tokens for ${target?.client_name || target?.client_id || ''}?`} confirmLabel="Revoke" busy={busy} onCancel={() => setTarget(null)} onConfirm={() => void revoke()}>
-        <p>Revokes all access and refresh tokens and invalidates pending authorization codes. The client registration stays, but reconnecting requires a new authorization with your approval password.</p>
+        <p>Revokes all access and refresh tokens and invalidates pending browser and device authorizations. The client registration stays, but reconnecting requires a new authorization in your browser.</p>
       </ConfirmDialog>
     </>
   )
