@@ -115,7 +115,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/calendar/events':
             query = parse_qs(urlsplit(self.path).query)
             # Like the Go API, require seconds and a time-zone offset on both bounds.
-            if not all(re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})', query.get(key, [''])[0]) for key in ('start', 'end')):
+            if method == 'GET' and not all(re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})', query.get(key, [''])[0]) for key in ('start', 'end')):
                 return self.send_json(400, {'error': 'start and end must be RFC 3339 timestamps'})
             return self.send_json(200, {'events': [EVENT]})
         if path == '/calendar/events/event-1':
