@@ -57,3 +57,12 @@ Thumbs.db
 # Temporary files
 /tmp/
 *.log
+
+# Android
+/android/.gradle/
+/android/.kotlin/
+/android/**/build/
+/android/local.properties
+*.jks
+*.keystore
+keystore.properties

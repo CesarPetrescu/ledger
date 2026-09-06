@@ -87,3 +87,59 @@ jobs:
         run: docker build --build-arg CMD=ledger-admin -t ledger-admin:ci .
       - name: Build frontend image
         run: docker build -f frontend/Dockerfile -t ledger-frontend:ci frontend
+
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle.kts
+            android/gradle/libs.versions.toml
+            android/gradle/wrapper/gradle-wrapper.properties
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          packages: platform-tools platforms;android-36 build-tools;36.0.0
+          log-accepted-android-sdk-licenses: false
+      - name: Test, lint, and build Android
+        working-directory: android
+        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+      - name: Upload development APK
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ledger-android-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+      - name: Exercise owner flows on Android 35
+        working-directory: android
+        env:
+          ANDROID_AVD_HOME: ${{ runner.temp }}/ledger-avd
+        run: |
+          sdkmanager 'emulator' 'system-images;android-35;google_apis;x86_64'
+          sudo chmod 666 /dev/kvm
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo no | avdmanager create avd --name ledger-ci --path "$ANDROID_AVD_HOME/ledger-ci.avd" --package 'system-images;android-35;google_apis;x86_64'
+          test -f "$ANDROID_AVD_HOME/ledger-ci.ini"
+          "$ANDROID_HOME/emulator/emulator" @ledger-ci -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader -feature -Vulkan -cores 2 > "$RUNNER_TEMP/emulator.log" 2>&1 &
+          emulator_pid=$!
+          trap 'kill "$emulator_pid" 2>/dev/null || true' EXIT
+          booted=0
+          for attempt in $(seq 1 90); do
+            if ! kill -0 "$emulator_pid" 2>/dev/null; then cat "$RUNNER_TEMP/emulator.log"; exit 1; fi
+            if [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == 1 ]]; then booted=1; break; fi
+            sleep 2
+          done
+          if [[ "$booted" != 1 ]]; then cat "$RUNNER_TEMP/emulator.log"; exit 1; fi
+          adb shell settings put system screen_off_timeout 1800000
+          adb shell input keyevent 82
+          adb shell settings put global window_animation_scale 0
+          adb shell settings put global transition_animation_scale 0
+          adb shell settings put global animator_duration_scale 0
+          ./smoke.sh
