@@ -3,7 +3,7 @@ import argparse
 import json
 import ssl
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, parse_qs
 
 TOKEN = 'a' * 43
 CSRF = 'b' * 43
@@ -49,6 +49,21 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(302, {}, {'Location': 'https://localhost:8443/leaked'})
         if path == '/leaked':
             raise AssertionError('The client followed a credentialed redirect')
+        if path == '/large-export':
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/markdown')
+            self.send_header('Content-Length', str(28 * 1024 * 1024))
+            self.end_headers()
+            chunk = b'x' * (64 * 1024)
+            for _ in range(448):
+                self.wfile.write(chunk)
+            return
+        if path == '/handoffs/large':
+            count = int(parse_qs(urlsplit(self.path).query).get('messages', ['50'])[0])
+            if not 1 <= count <= 100:
+                return self.send_json(400, {'error': 'messages must be between 1 and 100'})
+            messages = [dict(MESSAGES[0], id=str(i + 1), body='\x01' * 100000) for i in range(count)]
+            return self.send_json(200, {'handoff': HANDOFF, 'messages': messages})
         if path == '/logout':
             return self.send_json(204)
         if path == '/session':
@@ -74,6 +89,8 @@ class Handler(BaseHTTPRequestHandler):
         if path.endswith('/files'):
             return self.send_json(200, {'files': []})
         if path == '/search':
+            if not 1 <= body.get('limit', 10) <= 30:
+                return self.send_json(400, {'error': 'limit must be between 1 and 30'})
             return self.send_json(200, {'hits': [dict(ref='project:atlas', kind='project', project_slug='atlas', project_name='Atlas search result', snippet=PROJECT['goal'])], 'degraded': []})
         if path == '/handoffs':
             return self.send_json(200, {'handoffs': [HANDOFF]})
@@ -82,6 +99,8 @@ class Handler(BaseHTTPRequestHandler):
                 HANDOFF.update(body)
             return self.send_json(200, {'handoff': HANDOFF, 'messages': MESSAGES})
         if path == '/handoff-messages/1/actions':
+            if body['action'] == 'retarget' and (MESSAGES[0]['work_state'] not in ('draft', 'ready') or len(body.get('target', '')) > 100):
+                return self.send_json(400, {'error': 'invalid retarget'})
             actions = {'publish': 'ready', 'claim': 'in_progress', 'block': 'blocked', 'complete': 'done', 'release': 'ready', 'reopen': 'ready'}
             if body['action'] in actions:
                 MESSAGES[0]['work_state'] = actions[body['action']]

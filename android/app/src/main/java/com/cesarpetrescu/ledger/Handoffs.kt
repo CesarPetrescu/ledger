@@ -39,7 +39,7 @@ fun Handoffs(model: LedgerModel) {
                 Choice("Archive", archive, listOf("active" to "Active", "archived" to "Archived", "all" to "All")) { archive = it }
                 Choice("Status", status, listOf("" to "All statuses") + listOf("draft", "ready", "in_progress", "blocked", "done").map { it to label(it) }) { status = it }
                 Field("Project slug (optional)", project, { project = it }, max = 64)
-                Field("Target (optional)", target, { target = it }, max = 200)
+                Field("Target (optional)", target, { target = it }, max = 100)
                 Button(onClick = {
                     filter = "archive=$archive&q=${segment(query)}&status=$status&project=${segment(project)}&target=${segment(target)}"
                     before = ""; filters = false
@@ -66,7 +66,7 @@ fun Handoffs(model: LedgerModel) {
 @Composable
 fun HandoffDetail(model: LedgerModel, id: String) {
     var before by rememberSaveable { mutableStateOf("") }
-    Load(model, "handoff:$id:$before", { it.request("GET", "/handoffs/${segment(id)}?messages=50&before=${segment(before)}") }) { data ->
+    Load(model, "handoff:$id:$before", { it.request("GET", handoffPath(id, before)) }) { data ->
         val h = data.getJSONObject("handoff")
         Page {
             item { SummaryCard(h.text("title"), h.text("project_name").ifBlank { "General" }, listOf(h.text("description"), h.text("scope")).filter { it.isNotBlank() }.joinToString("\n\n")) }
@@ -98,14 +98,14 @@ private fun MessageCard(model: LedgerModel, message: JSONObject) {
             messageActions(message.text("work_state"), message.text("delivery_state")).forEach { action ->
                 OutlinedButton(enabled = !model.busy, onClick = { model.act("${label(action)} applied") { it.request("POST", "/handoff-messages/${segment(id)}/actions", json("action" to action)) } }) { Text(label(action)) }
             }
-            TextButton(onClick = { retarget = true }, enabled = !model.busy) { Text("Retarget") }
+            if (canRetarget(message.text("work_state"), message.text("claimed_at").isNotBlank())) TextButton(onClick = { retarget = true }, enabled = !model.busy) { Text("Retarget") }
         }
         message.rows("files").forEach { file -> FileRow(model, file, message.text("work_state") == "draft") }
         if (message.text("work_state") == "draft") UploadButton(model, id)
         HorizontalDivider()
     }
     if (retarget) AlertDialog(onDismissRequest = { retarget = false }, title = { Text("Retarget message") },
-        text = { Field("Target", target, { target = it }, max = 200) },
+        text = { Field("Target", target, { target = it }, max = 100) },
         confirmButton = { TextButton(enabled = !model.busy, onClick = {
             model.act(after = { retarget = false }) { it.request("POST", "/handoff-messages/${segment(id)}/actions", json("action" to "retarget", "target" to target.trim())) }
         }) { Text("Save") } }, dismissButton = { TextButton(onClick = { retarget = false }) { Text("Cancel") } })
@@ -134,7 +134,7 @@ private fun HandoffForm(model: LedgerModel, id: String, h: JSONObject) {
         item { Field("Scope", scope, { scope = it }, max = 500) }
         if (id.isBlank()) {
             item { Field("First message", body, { body = it }, multiline = true, max = 100000) }
-            item { Field("Target (optional)", target, { target = it }, max = 200) }
+            item { Field("Target (optional)", target, { target = it }, max = 100) }
             item { DraftSwitch(draft) { draft = it } }
         }
         item { Button(enabled = !model.busy && title.isNotBlank() && (id.isNotBlank() || body.isNotBlank()), modifier = Modifier.fillMaxWidth(), onClick = {
@@ -163,7 +163,7 @@ fun MessageEditor(model: LedgerModel, id: String) {
     Page {
         item { Text("Add a message", style = MaterialTheme.typography.headlineSmall) }
         item { Field("Message", body, { body = it }, multiline = true, max = 100000) }
-        item { Field("Target (optional)", target, { target = it }, max = 200) }
+        item { Field("Target (optional)", target, { target = it }, max = 100) }
         item { DraftSwitch(draft) { draft = it } }
         item { Text("Messages are permanent. Add a correction as a new message.", style = MaterialTheme.typography.bodySmall) }
         item { Button(enabled = !model.busy && body.isNotBlank(), modifier = Modifier.fillMaxWidth(), onClick = {
@@ -177,9 +177,8 @@ fun DownloadButton(model: LedgerModel, path: String, filename: String, text: Str
     val resolver = LocalContext.current.contentResolver
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(mime)) { uri ->
         if (uri != null) model.act("File saved") { api ->
-            val bytes = api.download(path)
             val stream = resolver.openOutputStream(uri, "w") ?: throw IllegalStateException("Cannot write to this location.")
-            stream.use { it.write(bytes) }
+            stream.use { api.download(path, it) }
         }
     }
     OutlinedButton(onClick = { launcher.launch(filename.substringAfterLast('/').substringAfterLast('\\').take(200).ifBlank { "attachment" }) }, enabled = !model.busy) { Text(text) }
@@ -206,7 +205,7 @@ fun FileRow(model: LedgerModel, file: JSONObject, removable: Boolean = false) {
         Text(file.text("filename"), style = MaterialTheme.typography.titleSmall)
         Text("${(file.optLong("size_bytes") + 1023) / 1024} KiB", style = MaterialTheme.typography.bodySmall)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            DownloadButton(model, "/handoff-files/${segment(file.text("id"))}", file.text("filename"))
+            DownloadButton(model, "/handoff-files/${segment(file.text("id"))}", file.text("filename"), mime = file.text("media_type").ifBlank { "application/octet-stream" })
             if (removable) ConfirmButton("Remove", "Remove this attachment from the draft?", !model.busy) {
                 model.act("Attachment removed") { it.request("DELETE", "/handoff-files/${segment(file.text("id"))}") }
             }

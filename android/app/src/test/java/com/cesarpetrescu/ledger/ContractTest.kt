@@ -20,6 +20,20 @@ class ContractTest {
         assertArrayEquals(byteArrayOf(1, 2), byteArrayOf(1, 2).inputStream().readBounded(2))
         assertThrows(IllegalArgumentException::class.java) { byteArrayOf(1, 2, 3).inputStream().readBounded(2) }
     }
+    @Test fun formBoundariesMatchServerValidation() {
+        listOf("atlas", "a-", "a1", "a".repeat(64)).forEach { assertTrue(validProjectSlug(it)) }
+        listOf("-atlas", "--", "a", "a".repeat(65), "Atlas").forEach { assertFalse(validProjectSlug(it)) }
+        assertTrue(validFieldText("😀".repeat(100), 100, false))
+        assertFalse(validFieldText("😀".repeat(101), 100, false))
+        assertFalse(validFieldText("target\nother", 100, false))
+        assertTrue(validFieldText("line\nline", 100, true))
+        assertTrue(validFieldText("a".repeat(200), 200, false))
+        assertFalse(validFieldText("a".repeat(201), 200, false))
+        assertTrue(canRetarget("draft"))
+        assertTrue(canRetarget("ready"))
+        listOf("in_progress", "blocked", "done").forEach { assertFalse(canRetarget(it)) }
+        assertFalse(canRetarget("ready", claimed = true))
+    }
     @Test fun messageStateTransitionsMatchOwnerConsole() {
         assertEquals(listOf("publish"), messageActions("draft", "unseen"))
         assertEquals(listOf("acknowledge", "claim"), messageActions("ready", "unseen"))

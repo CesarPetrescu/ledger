@@ -1,6 +1,7 @@
 package com.cesarpetrescu.ledger
 
 import android.content.Context
+import java.io.OutputStream
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import android.view.inputmethod.InputMethodManager
@@ -70,6 +71,15 @@ class OwnerFlowTest {
         val client = Api("https://localhost:8443").login("fixture-password")
         try { client.request("GET", "/redirect-test"); fail("Followed a redirect") }
         catch (e: ApiError) { assertEquals(302, e.status) }
+        var downloaded = 0L
+        client.download("/large-export", object : OutputStream() {
+            override fun write(value: Int) { downloaded++ }
+            override fun write(bytes: ByteArray, offset: Int, length: Int) { downloaded += length }
+        })
+        assertEquals(28L * 1024 * 1024, downloaded)
+        val large = client.request("GET", handoffPath("large")).rows("messages")
+        assertEquals(10, large.size)
+        assertEquals(100000, large.first().text("body").length)
         ActivityScenario.launch(MainActivity::class.java).use { activity ->
             awaitText("Server address")
             ui.onNodeWithText("Server address").performTextInput("https://localhost:8443")
@@ -108,6 +118,7 @@ class OwnerFlowTest {
             awaitText("Claim")
             tap("Claim")
             awaitText("Complete")
+            ui.onNodeWithText("Retarget").assertDoesNotExist()
             ui.onNodeWithText("Complete").performScrollTo().performClick()
             awaitText("Reopen")
             ui.onNodeWithContentDescription("Back").performClick()

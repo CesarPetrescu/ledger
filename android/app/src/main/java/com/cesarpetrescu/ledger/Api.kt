@@ -3,6 +3,7 @@ package com.cesarpetrescu.ledger
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.InputStream
+import java.io.OutputStream
 import java.net.HttpCookie
 import java.net.URI
 import java.net.URLEncoder
@@ -17,6 +18,13 @@ fun serverOrigin(input: String): String {
     }
     return "https://${uri.host.lowercase()}${if (uri.port != -1 && uri.port != 443) ":${uri.port}" else ""}"
 }
+
+fun validProjectSlug(value: String) = value.matches(Regex("[a-z0-9][a-z0-9-]{1,63}"))
+fun validFieldText(value: String, max: Int, multiline: Boolean) =
+    value.codePointCount(0, value.length) <= max && (multiline || !value.contains('\n') && !value.contains('\r'))
+fun canRetarget(work: String, claimed: Boolean = false) = !claimed && work in listOf("draft", "ready")
+// Ten worst-case JSON-escaped 100,000-rune messages fit within the 8 MiB response cap.
+fun handoffPath(id: String, before: String = "") = "/handoffs/${segment(id)}?messages=10&before=${segment(before)}"
 
 fun segment(value: String): String = URLEncoder.encode(value, Charsets.UTF_8.name()).replace("+", "%20")
 fun json(vararg fields: Pair<String, Any?>) = JSONObject().apply { fields.forEach { (k, v) -> put(k, v ?: JSONObject.NULL) } }
@@ -54,6 +62,12 @@ class Api(val origin: String, val cookie: String = "", val csrf: String = "") {
         try {
             if (method != "GET") {
                 val bytes = (body ?: JSONObject()).toString().toByteArray()
+                val limit = when {
+                    path == "/login" -> 8 * 1024
+                    method == "POST" && (path == "/handoffs" || path.startsWith("/handoffs/") && path.endsWith("/messages")) -> 1024 * 1024
+                    else -> 64 * 1024
+                }
+                require(bytes.size <= limit) { "This form is too large for the server. Shorten its text and try again." }
                 connection.setRequestProperty("Content-Type", "application/json")
                 connection.doOutput = true
                 connection.setFixedLengthStreamingMode(bytes.size)
@@ -73,16 +87,17 @@ class Api(val origin: String, val cookie: String = "", val csrf: String = "") {
         return Api(origin, sessionCookie(cookies), token)
     }
 
-    fun download(path: String): ByteArray {
+    fun download(path: String, destination: OutputStream) {
         val connection = connect("GET", path)
         try {
             checkResponse(connection)
-            return connection.inputStream.use { it.readBounded(26 * 1024 * 1024) }
+            // Exports include every message; keep memory bounded while streaming to the selected document.
+            connection.inputStream.use { it.copyTo(destination) }
         } finally { connection.disconnect() }
     }
 
     fun upload(messageId: String, filename: String, bytes: ByteArray): JSONObject {
-        require(bytes.size <= 25 * 1024 * 1024) { "Files must be 25 MiB or smaller." }
+        require(bytes.isNotEmpty() && bytes.size <= 25 * 1024 * 1024) { "Files must contain 1 byte to 25 MiB." }
         val boundary = "ledger-${java.util.UUID.randomUUID()}"
         val safeName = filename.substringAfterLast('/').substringAfterLast('\\').replace(Regex("[\\r\\n\\\"\\p{Cntrl}]"), "_").take(200).ifBlank { "attachment" }
         val prefix = "--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"$safeName\"\r\nContent-Type: application/octet-stream\r\n\r\n".toByteArray()

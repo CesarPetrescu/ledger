@@ -110,11 +110,11 @@ private fun ProjectForm(model: LedgerModel, existingSlug: String, p: JSONObject)
         item { Field("Goal", goal, { goal = it }, multiline = true) }
         item { Field("Description", description, { description = it }, multiline = true) }
         item { Field("Type", type, { type = it }) }
-        item { Field("Deadline", deadline, { deadline = it }) }
+        item { Field("Deadline", deadline, { deadline = it }, max = 200) }
         item { Field("Needs me", needs, { needs = it }, multiline = true) }
         item { Field("Automate", automate, { automate = it }, multiline = true) }
         item { Field("Stack", stack, { stack = it }) }
-        item { Button(enabled = !model.busy && slug.matches(Regex("[a-z0-9-]{2,64}")) && name.isNotBlank() && hours.toIntOrNull() in 0..168,
+        item { Button(enabled = !model.busy && validProjectSlug(slug) && name.isNotBlank() && hours.toIntOrNull() in 0..168,
             onClick = {
                 model.act(after = model::back) { api ->
                     if (existingSlug.isBlank()) {
@@ -157,7 +157,7 @@ fun SearchScreen(model: LedgerModel) {
                 Choice("Entry kind", kind, listOf("" to "All kinds") + kinds) { kind = it }
             }
             Row {
-                Button(modifier = Modifier.testTag("search-submit"), onClick = { submitted = json("q" to query.trim(), "limit" to 50, "project" to project, "kind" to kind).toString(); model.refresh() }, enabled = query.isNotBlank()) { Text("Search") }
+                Button(modifier = Modifier.testTag("search-submit"), onClick = { submitted = json("q" to query.trim(), "limit" to 20, "project" to project, "kind" to kind).toString(); model.refresh() }, enabled = query.isNotBlank()) { Text("Search") }
                 TextButton(onClick = { filters = !filters }) { Text("Filters") }
             }
         }

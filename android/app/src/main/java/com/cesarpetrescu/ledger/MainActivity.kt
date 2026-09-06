@@ -196,7 +196,7 @@ fun Load(model: LedgerModel, key: String, fetch: (Api) -> JSONObject, content: @
 @Composable
 fun Field(label: String, value: String, onChange: (String) -> Unit, multiline: Boolean = false, max: Int = 4000,
           placeholder: String = "", keyboard: KeyboardType = KeyboardType.Text, enabled: Boolean = true) {
-    OutlinedTextField(value, { if (it.length <= max) onChange(it) }, label = { Text(label) },
+    OutlinedTextField(value, { if (validFieldText(it, max, multiline)) onChange(it) }, label = { Text(label) },
         placeholder = { Text(placeholder) }, singleLine = !multiline, minLines = if (multiline) 3 else 1,
         keyboardOptions = KeyboardOptions(keyboardType = keyboard), modifier = Modifier.fillMaxWidth(), enabled = enabled && LocalEditingEnabled.current)
 }
