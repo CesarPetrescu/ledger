@@ -1,6 +1,11 @@
 <div align="center">
 
-# Ledger
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/ledger-logo.png">
+    <img src="assets/ledger-logo-transparent.png" alt="Ledger" width="280" height="280">
+  </picture>
+</h1>
 
 **Long-term project memory for AI assistants, served over MCP.**
 
