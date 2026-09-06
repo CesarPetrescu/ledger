@@ -340,6 +340,8 @@ claude mcp add --transport http ledger https://ledger.example.com/mcp
 
 The server exposes 17 tools. Project and handoff reads require `ledger:read`; their mutations require `ledger:write`. Calendar tools use `calendar:read` and `calendar:write`. If a client omits `scope`, `ledger:read` is the default.
 
+Every tool advertises an output schema and validates successful structured results against it. Project and calendar list tools retain their existing top-level arrays; handoff IDs and cursors remain strings. Tool errors use MCP's `isError` result.
+
 | Area | Tools |
 |------|-------|
 | Project memory | `list_projects`, `get_project`, `search`, `upsert_project`, `append_entry` |
