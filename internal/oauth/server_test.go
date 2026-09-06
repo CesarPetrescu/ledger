@@ -42,6 +42,26 @@ func TestAuthorizationErrorsUseTheResponsivePage(t *testing.T) {
 	}
 }
 
+func TestAuthorizationPageCSPAllowsOnlyCallbackOrigin(t *testing.T) {
+	for _, test := range []struct{ redirect, origin string }{
+		{"", ""},
+		{"https://chatgpt.com/connector_platform_oauth_redirect?state=private", " https://chatgpt.com"},
+		{"https://app.example.com:8443/callback", " https://app.example.com:8443"},
+		{"http://127.0.0.1:8123/callback", " http://127.0.0.1:8123"},
+		{"http://[::1]:8123/callback", " http://[::1]:8123"},
+		{"https://*.example.com/callback", ""},
+		{"https://example.com;form-action*/callback", ""},
+		{"http://app.example.com/callback", ""},
+	} {
+		res := httptest.NewRecorder()
+		authorizationPageHeaders(res, test.redirect)
+		want := "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'" + test.origin + "; frame-ancestors 'none'; base-uri 'none'"
+		if got := res.Header().Get("Content-Security-Policy"); got != want {
+			t.Errorf("callback %q: CSP = %q, want %q", test.redirect, got, want)
+		}
+	}
+}
+
 func TestOAuthMetadataIsExactAndCacheable(t *testing.T) {
 	server := NewServer(Config{PublicURL: "https://ledger.example.com"}, nil)
 	for _, path := range []string{"/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp"} {
