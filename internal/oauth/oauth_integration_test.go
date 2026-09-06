@@ -35,6 +35,11 @@ func TestAuthorizationCodeAndRefreshRotationRevokeFamilyOnReuse(t *testing.T) {
 		"code_challenge": {PKCEChallenge(verifier)}, "code_challenge_method": {"S256"}, "scope": {"ledger:read ledger:write"},
 		"resource": {"https://ledger.example.com/mcp"}, "state": {"state-1"}, "password": {"secret"}, "action": {"approve"},
 	}
+	page := httptest.NewRecorder()
+	server.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/oauth/authorize?"+form.Encode(), nil))
+	if page.Code != http.StatusOK || !strings.Contains(page.Header().Get("Content-Security-Policy"), "form-action 'self' http://127.0.0.1:8123;") {
+		t.Fatalf("authorization page does not allow its validated callback: status %d, CSP %q", page.Code, page.Header().Get("Content-Security-Policy"))
+	}
 	denied := make(url.Values, len(form))
 	for key, values := range form {
 		denied[key] = append([]string(nil), values...)

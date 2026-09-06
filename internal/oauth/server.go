@@ -239,7 +239,7 @@ func (s *Server) authorizeGet(w http.ResponseWriter, r *http.Request) {
 		"code_challenge": request.Challenge, "code_challenge_method": request.ChallengeMethod, "scope": strings.Join(scopes, " "),
 		"resource": request.Resource, "state": request.State,
 	}
-	authorizationPageHeaders(w)
+	authorizationPageHeaders(w, request.RedirectURI)
 	_ = authorizeTemplate.Execute(w, map[string]any{"Name": client.Name, "Read": HasScope(scopes, ScopeRead), "Write": HasScope(scopes, ScopeWrite), "CalendarRead": HasScope(scopes, ScopeCalendarRead), "CalendarWrite": HasScope(scopes, ScopeCalendarWrite), "Fields": fields})
 }
 
@@ -299,15 +299,22 @@ func localError(w http.ResponseWriter, message string) {
 }
 
 func localErrorStatus(w http.ResponseWriter, status int, message string) {
-	authorizationPageHeaders(w)
+	authorizationPageHeaders(w, "")
 	w.WriteHeader(status)
 	_ = errorTemplate.Execute(w, message)
 }
 
-func authorizationPageHeaders(w http.ResponseWriter) {
+func authorizationPageHeaders(w http.ResponseWriter, redirectURI string) {
+	formAction := "'self'"
+	// Browsers also apply form-action to the redirect after approval or denial.
+	// Only the already-validated callback origin belongs in the page's policy.
+	if callback, err := url.Parse(redirectURI); err == nil && ValidRedirectURI(redirectURI) &&
+		strings.Trim(callback.Host, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-:[]") == "" {
+		formAction += " " + callback.Scheme + "://" + callback.Host
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action "+formAction+"; frame-ancestors 'none'; base-uri 'none'")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 }
