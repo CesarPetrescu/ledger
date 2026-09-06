@@ -69,6 +69,11 @@ func TestToolsListIsExactAndAnnotated(t *testing.T) {
 		"attach_handoff_file":    {handoffFileOutput(file)},
 		"read_handoff_file":      {map[string]string{"id": "9007199254740993", "filename": "note.txt", "uri": "ledger://handoff-file/9007199254740993"}},
 	}
+	for name, key := range map[string]string{"list_projects": "projects", "list_calendars": "calendars", "list_calendar_events": "events"} {
+		for i, value := range samples[name] {
+			samples[name][i] = map[string]any{key: value}
+		}
+	}
 	for _, tool := range result.Tools {
 		if tool.OutputSchema == nil {
 			t.Errorf("tool %q missing output schema", tool.Name)
@@ -78,6 +83,9 @@ func TestToolsListIsExactAndAnnotated(t *testing.T) {
 		encoded, err := json.Marshal(tool.OutputSchema)
 		if err != nil || json.Unmarshal(encoded, &schema) != nil {
 			t.Fatalf("tool %q invalid output schema: %s, %v", tool.Name, encoded, err)
+		}
+		if schema.Type != "object" {
+			t.Errorf("tool %q output schema must have an object root for client compatibility", tool.Name)
 		}
 		resolved, err := schema.Resolve(nil)
 		if err != nil {

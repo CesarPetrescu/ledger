@@ -69,8 +69,11 @@ func TestAuthenticatedMCPWriteScopeAndClientInfoSource(t *testing.T) {
 		t.Fatalf("list_projects = %#v, %v", list, err)
 	}
 	listJSON, _ := json.Marshal(list.StructuredContent)
-	if string(listJSON) == "" || listJSON[0] != '[' {
-		t.Fatalf("list_projects structured output = %s, want top-level array", listJSON)
+	var listed struct {
+		Projects []store.Project `json:"projects"`
+	}
+	if err := json.Unmarshal(listJSON, &listed); err != nil || len(listed.Projects) != 1 || listed.Projects[0].Slug != "atlas" {
+		t.Fatalf("list_projects structured output = %s, want projects object", listJSON)
 	}
 
 	addAccess(t, db, ctx, "write-token", []string{"ledger:read", "ledger:write"})

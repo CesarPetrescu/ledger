@@ -43,7 +43,7 @@ func NewServer(db *store.DB, indexURL string, services ...*calendarapi.Service) 
 	type listInput struct {
 		Tier string `json:"tier,omitempty" jsonschema:"optional tier: focus, maintain, or park"`
 	}
-	mcp.AddTool(server, &mcp.Tool{Name: "list_projects", OutputSchema: outputSchema[[]projectSummary](), Description: "List the project registry, optionally filtered by tier. " + DescriptionSuffix, Annotations: read},
+	mcp.AddTool(server, &mcp.Tool{Name: "list_projects", OutputSchema: outputSchema[projectList](), Description: "List the project registry, optionally filtered by tier. " + DescriptionSuffix, Annotations: read},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input listInput) (*mcp.CallToolResult, any, error) {
 			if !canRead(ctx) {
 				return scopeError(), nil, nil
@@ -59,7 +59,7 @@ func NewServer(db *store.DB, indexURL string, services ...*calendarapi.Service) 
 			for i, project := range projects {
 				rows[i] = map[string]any{"slug": project.Slug, "name": project.Name, "tier": project.Tier, "hours_wk": project.HoursWK, "goal": project.Goal, "deadline": project.Deadline, "last_entry_at": project.LastEntryAt}
 			}
-			return nil, rows, nil
+			return nil, map[string]any{"projects": rows}, nil
 		})
 
 	type getInput struct {
@@ -164,7 +164,7 @@ func NewServer(db *store.DB, indexURL string, services ...*calendarapi.Service) 
 
 	addHandoffTools(server, db)
 
-	mcp.AddTool(server, &mcp.Tool{Name: "list_calendars", OutputSchema: outputSchema[[]calendarapi.Calendar](), Description: "List the Nextcloud calendars explicitly selected by the owner. " + CalendarDescriptionSuffix, Annotations: calendarRead},
+	mcp.AddTool(server, &mcp.Tool{Name: "list_calendars", OutputSchema: outputSchema[calendarList](), Description: "List the Nextcloud calendars explicitly selected by the owner. " + CalendarDescriptionSuffix, Annotations: calendarRead},
 		func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
 			if !canCalendarRead(ctx) {
 				return scopeError(), nil, nil
@@ -177,7 +177,7 @@ func NewServer(db *store.DB, indexURL string, services ...*calendarapi.Service) 
 				return nil, nil, err
 			}
 			selected := slices.DeleteFunc(items, func(item calendarapi.Calendar) bool { return !item.Selected })
-			return nil, selected, nil
+			return nil, calendarList{Calendars: selected}, nil
 		})
 
 	type listEventsInput struct {
@@ -185,7 +185,7 @@ func NewServer(db *store.DB, indexURL string, services ...*calendarapi.Service) 
 		End        string `json:"end" jsonschema:"exclusive RFC 3339 timestamp, no more than 366 days after start"`
 		CalendarID string `json:"calendar_id,omitempty" jsonschema:"optional selected calendar ID"`
 	}
-	mcp.AddTool(server, &mcp.Tool{Name: "list_calendar_events", OutputSchema: outputSchema[[]calendarapi.Event](), Description: "List events in a bounded time range from selected Nextcloud calendars. " + CalendarDescriptionSuffix, Annotations: calendarRead},
+	mcp.AddTool(server, &mcp.Tool{Name: "list_calendar_events", OutputSchema: outputSchema[calendarEventList](), Description: "List events in a bounded time range from selected Nextcloud calendars. " + CalendarDescriptionSuffix, Annotations: calendarRead},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input listEventsInput) (*mcp.CallToolResult, any, error) {
 			if !canCalendarRead(ctx) {
 				return scopeError(), nil, nil
@@ -202,7 +202,7 @@ func NewServer(db *store.DB, indexURL string, services ...*calendarapi.Service) 
 				return nil, nil, fmt.Errorf("end must be an RFC 3339 timestamp")
 			}
 			events, err := calendar.ListEvents(ctx, start, end, input.CalendarID)
-			return nil, events, err
+			return nil, calendarEventList{Events: events}, err
 		})
 
 	type createEventInput struct {
