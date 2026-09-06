@@ -43,7 +43,7 @@ func NewServer(db *store.DB, indexURL string, services ...*calendarapi.Service) 
 	type listInput struct {
 		Tier string `json:"tier,omitempty" jsonschema:"optional tier: focus, maintain, or park"`
 	}
-	mcp.AddTool(server, &mcp.Tool{Name: "list_projects", Description: "List the project registry, optionally filtered by tier. " + DescriptionSuffix, Annotations: read},
+	mcp.AddTool(server, &mcp.Tool{Name: "list_projects", OutputSchema: outputSchema[[]projectSummary](), Description: "List the project registry, optionally filtered by tier. " + DescriptionSuffix, Annotations: read},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input listInput) (*mcp.CallToolResult, any, error) {
 			if !canRead(ctx) {
 				return scopeError(), nil, nil
@@ -66,7 +66,7 @@ func NewServer(db *store.DB, indexURL string, services ...*calendarapi.Service) 
 		Slug    string `json:"slug" jsonschema:"project slug, 2 to 64 lowercase letters, digits, or hyphens"`
 		Entries int    `json:"entries,omitempty" jsonschema:"number of newest entries, default 20, maximum 100"`
 	}
-	mcp.AddTool(server, &mcp.Tool{Name: "get_project", Description: "Get one project and its newest entries. " + DescriptionSuffix, Annotations: read},
+	mcp.AddTool(server, &mcp.Tool{Name: "get_project", OutputSchema: outputSchema[store.ProjectWithEntries](), Description: "Get one project and its newest entries. " + DescriptionSuffix, Annotations: read},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input getInput) (*mcp.CallToolResult, any, error) {
 			if !canRead(ctx) {
 				return scopeError(), nil, nil
@@ -88,7 +88,7 @@ func NewServer(db *store.DB, indexURL string, services ...*calendarapi.Service) 
 		Query string `json:"q" jsonschema:"historical search query"`
 		Limit int    `json:"limit,omitempty" jsonschema:"result count, default 10, maximum 30"`
 	}
-	mcp.AddTool(server, &mcp.Tool{Name: "search", Description: "Search project history with lexical and semantic retrieval. " + DescriptionSuffix, Annotations: read},
+	mcp.AddTool(server, &mcp.Tool{Name: "search", OutputSchema: outputSchema[retrieval.SearchResult](), Description: "Search project history with lexical and semantic retrieval. " + DescriptionSuffix, Annotations: read},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input searchInput) (*mcp.CallToolResult, any, error) {
 			if !canRead(ctx) {
 				return scopeError(), nil, nil
@@ -119,7 +119,7 @@ func NewServer(db *store.DB, indexURL string, services ...*calendarapi.Service) 
 		Automate    string `json:"automate,omitempty" jsonschema:"automation opportunities"`
 		Stack       string `json:"stack,omitempty" jsonschema:"technology stack"`
 	}
-	mcp.AddTool(server, &mcp.Tool{Name: "upsert_project", Description: "Create or replace the mutable fields of a project. " + DescriptionSuffix, Annotations: write},
+	mcp.AddTool(server, &mcp.Tool{Name: "upsert_project", OutputSchema: outputSchema[store.Project](), Description: "Create or replace the mutable fields of a project. " + DescriptionSuffix, Annotations: write},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input upsertInput) (*mcp.CallToolResult, any, error) {
 			if !canWrite(ctx) {
 				return scopeError(), nil, nil
@@ -142,7 +142,7 @@ func NewServer(db *store.DB, indexURL string, services ...*calendarapi.Service) 
 		Kind string `json:"kind" jsonschema:"decision, note, todo, or status"`
 		Body string `json:"body" jsonschema:"entry body, 1 to 4000 characters"`
 	}
-	mcp.AddTool(server, &mcp.Tool{Name: "append_entry", Description: "Append an immutable entry to a project. " + DescriptionSuffix, Annotations: write},
+	mcp.AddTool(server, &mcp.Tool{Name: "append_entry", OutputSchema: outputSchema[entryReceipt](), Description: "Append an immutable entry to a project. " + DescriptionSuffix, Annotations: write},
 		func(ctx context.Context, request *mcp.CallToolRequest, input appendInput) (*mcp.CallToolResult, any, error) {
 			id := identityFrom(ctx)
 			if !oauth.HasScope(id.Scopes, oauth.ScopeWrite) {
@@ -164,7 +164,7 @@ func NewServer(db *store.DB, indexURL string, services ...*calendarapi.Service) 
 
 	addHandoffTools(server, db)
 
-	mcp.AddTool(server, &mcp.Tool{Name: "list_calendars", Description: "List the Nextcloud calendars explicitly selected by the owner. " + CalendarDescriptionSuffix, Annotations: calendarRead},
+	mcp.AddTool(server, &mcp.Tool{Name: "list_calendars", OutputSchema: outputSchema[[]calendarapi.Calendar](), Description: "List the Nextcloud calendars explicitly selected by the owner. " + CalendarDescriptionSuffix, Annotations: calendarRead},
 		func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
 			if !canCalendarRead(ctx) {
 				return scopeError(), nil, nil
@@ -185,7 +185,7 @@ func NewServer(db *store.DB, indexURL string, services ...*calendarapi.Service) 
 		End        string `json:"end" jsonschema:"exclusive RFC 3339 timestamp, no more than 366 days after start"`
 		CalendarID string `json:"calendar_id,omitempty" jsonschema:"optional selected calendar ID"`
 	}
-	mcp.AddTool(server, &mcp.Tool{Name: "list_calendar_events", Description: "List events in a bounded time range from selected Nextcloud calendars. " + CalendarDescriptionSuffix, Annotations: calendarRead},
+	mcp.AddTool(server, &mcp.Tool{Name: "list_calendar_events", OutputSchema: outputSchema[[]calendarapi.Event](), Description: "List events in a bounded time range from selected Nextcloud calendars. " + CalendarDescriptionSuffix, Annotations: calendarRead},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input listEventsInput) (*mcp.CallToolResult, any, error) {
 			if !canCalendarRead(ctx) {
 				return scopeError(), nil, nil
@@ -209,7 +209,7 @@ func NewServer(db *store.DB, indexURL string, services ...*calendarapi.Service) 
 		CalendarID string `json:"calendar_id" jsonschema:"selected calendar ID from list_calendars"`
 		calendarapi.EventInput
 	}
-	mcp.AddTool(server, &mcp.Tool{Name: "create_calendar_event", Description: "Create an event in a selected Nextcloud calendar. Does not invite attendees. " + CalendarDescriptionSuffix, Annotations: calendarCreate},
+	mcp.AddTool(server, &mcp.Tool{Name: "create_calendar_event", OutputSchema: outputSchema[calendarapi.Event](), Description: "Create an event in a selected Nextcloud calendar. Does not invite attendees. " + CalendarDescriptionSuffix, Annotations: calendarCreate},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input createEventInput) (*mcp.CallToolResult, any, error) {
 			if !canCalendarWrite(ctx) {
 				return scopeError(), nil, nil
@@ -226,7 +226,7 @@ func NewServer(db *store.DB, indexURL string, services ...*calendarapi.Service) 
 		ETag string `json:"etag" jsonschema:"exact ETag returned by list_calendar_events; prevents overwriting a newer edit"`
 		calendarapi.EventInput
 	}
-	mcp.AddTool(server, &mcp.Tool{Name: "update_calendar_event", Description: "Replace the editable fields of one event or its whole recurring series. Requires the current ETag. " + CalendarDescriptionSuffix, Annotations: calendarChange},
+	mcp.AddTool(server, &mcp.Tool{Name: "update_calendar_event", OutputSchema: outputSchema[calendarapi.Event](), Description: "Replace the editable fields of one event or its whole recurring series. Requires the current ETag. " + CalendarDescriptionSuffix, Annotations: calendarChange},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input changeEventInput) (*mcp.CallToolResult, any, error) {
 			if !canCalendarWrite(ctx) {
 				return scopeError(), nil, nil
@@ -242,7 +242,7 @@ func NewServer(db *store.DB, indexURL string, services ...*calendarapi.Service) 
 		ID   string `json:"id" jsonschema:"event ID returned by list_calendar_events"`
 		ETag string `json:"etag" jsonschema:"exact ETag returned by list_calendar_events; prevents deleting a newer edit"`
 	}
-	mcp.AddTool(server, &mcp.Tool{Name: "delete_calendar_event", Description: "Permanently delete an event or whole recurring series from Nextcloud. Requires the current ETag. " + CalendarDescriptionSuffix, Annotations: calendarChange},
+	mcp.AddTool(server, &mcp.Tool{Name: "delete_calendar_event", OutputSchema: outputSchema[deleteReceipt](), Description: "Permanently delete an event or whole recurring series from Nextcloud. Requires the current ETag. " + CalendarDescriptionSuffix, Annotations: calendarChange},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input deleteEventInput) (*mcp.CallToolResult, any, error) {
 			if !canCalendarWrite(ctx) {
 				return scopeError(), nil, nil

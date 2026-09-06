@@ -118,7 +118,7 @@ func addHandoffTools(server *mcp.Server, db *store.DB) {
 		Limit      int    `json:"limit,omitempty" jsonschema:"result count, default 20, maximum 100"`
 		Before     string `json:"before,omitempty" jsonschema:"opaque cursor returned by the previous call"`
 	}
-	mcp.AddTool(server, &mcp.Tool{Name: "list_handoffs", Description: "List lightweight handoff summaries. By default returns active work for Anyone, this MCP client, or work already claimed by this OAuth client. " + HandoffDescriptionSuffix, Annotations: read},
+	mcp.AddTool(server, &mcp.Tool{Name: "list_handoffs", OutputSchema: outputSchema[handoffList](), Description: "List lightweight handoff summaries. By default returns active work for Anyone, this MCP client, or work already claimed by this OAuth client. " + HandoffDescriptionSuffix, Annotations: read},
 		func(ctx context.Context, request *mcp.CallToolRequest, input listInput) (*mcp.CallToolResult, any, error) {
 			if !canRead(ctx) {
 				return scopeError(), nil, nil
@@ -181,7 +181,7 @@ func addHandoffTools(server *mcp.Server, db *store.DB) {
 		Messages int    `json:"messages,omitempty" jsonschema:"newest message count, default 20, maximum 100"`
 		Before   string `json:"before,omitempty" jsonschema:"message ID cursor returned by the previous call"`
 	}
-	mcp.AddTool(server, &mcp.Tool{Name: "get_handoff", Description: "Get one handoff and a chronological page of its messages and file metadata. Draft messages from other OAuth clients are omitted. " + HandoffDescriptionSuffix, Annotations: read},
+	mcp.AddTool(server, &mcp.Tool{Name: "get_handoff", OutputSchema: outputSchema[handoffDetail](), Description: "Get one handoff and a chronological page of its messages and file metadata. Draft messages from other OAuth clients are omitted. " + HandoffDescriptionSuffix, Annotations: read},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input getInput) (*mcp.CallToolResult, any, error) {
 			if !canRead(ctx) {
 				return scopeError(), nil, nil
@@ -220,7 +220,7 @@ func addHandoffTools(server *mcp.Server, db *store.DB) {
 		Target      string `json:"target,omitempty" jsonschema:"routing hint such as Claude, Codex, ChatGPT, or empty for Anyone"`
 		Draft       bool   `json:"draft,omitempty" jsonschema:"create as Draft when files will be attached before publishing"`
 	}
-	mcp.AddTool(server, &mcp.Tool{Name: "create_handoff", Description: "Create a handoff with its first append-only message. Use draft=true before attaching files, then publish it. " + HandoffDescriptionSuffix, Annotations: write},
+	mcp.AddTool(server, &mcp.Tool{Name: "create_handoff", OutputSchema: outputSchema[handoffDetail](), Description: "Create a handoff with its first append-only message. Use draft=true before attaching files, then publish it. " + HandoffDescriptionSuffix, Annotations: write},
 		func(ctx context.Context, request *mcp.CallToolRequest, input createInput) (*mcp.CallToolResult, any, error) {
 			if !canWrite(ctx) {
 				return scopeError(), nil, nil
@@ -246,7 +246,7 @@ func addHandoffTools(server *mcp.Server, db *store.DB) {
 		Target    string `json:"target,omitempty" jsonschema:"optional routing hint"`
 		Draft     bool   `json:"draft,omitempty" jsonschema:"append as Draft when files will be attached"`
 	}
-	mcp.AddTool(server, &mcp.Tool{Name: "append_handoff_message", Description: "Append a new immutable message to an existing handoff. " + HandoffDescriptionSuffix, Annotations: write},
+	mcp.AddTool(server, &mcp.Tool{Name: "append_handoff_message", OutputSchema: outputSchema[handoffMessage](), Description: "Append a new immutable message to an existing handoff. " + HandoffDescriptionSuffix, Annotations: write},
 		func(ctx context.Context, request *mcp.CallToolRequest, input appendInput) (*mcp.CallToolResult, any, error) {
 			if !canWrite(ctx) {
 				return scopeError(), nil, nil
@@ -275,7 +275,7 @@ func addHandoffTools(server *mcp.Server, db *store.DB) {
 		Action    string `json:"action" jsonschema:"acknowledge, publish, claim, block, complete, release, reopen, or retarget"`
 		Target    string `json:"target,omitempty" jsonschema:"new target for retarget"`
 	}
-	mcp.AddTool(server, &mcp.Tool{Name: "update_handoff_message", Description: "Acknowledge, publish, atomically claim, block, complete, release, or retarget a handoff message. Reopen is owner-console only. " + HandoffDescriptionSuffix, Annotations: change},
+	mcp.AddTool(server, &mcp.Tool{Name: "update_handoff_message", OutputSchema: outputSchema[handoffMessage](), Description: "Acknowledge, publish, atomically claim, block, complete, release, or retarget a handoff message. Reopen is owner-console only. " + HandoffDescriptionSuffix, Annotations: change},
 		func(ctx context.Context, request *mcp.CallToolRequest, input updateInput) (*mcp.CallToolResult, any, error) {
 			if !canWrite(ctx) {
 				return scopeError(), nil, nil
@@ -301,7 +301,7 @@ func addHandoffTools(server *mcp.Server, db *store.DB) {
 		MediaType     string `json:"media_type,omitempty" jsonschema:"IANA media type; defaults to application/octet-stream"`
 		ContentBase64 string `json:"content_base64" jsonschema:"standard base64 file bytes, maximum 25 MiB decoded"`
 	}
-	mcp.AddTool(server, &mcp.Tool{Name: "attach_handoff_file", Description: "Attach one file to a Draft message authored by this OAuth client. Maximum 10 files and 100 MiB total per message. " + HandoffDescriptionSuffix, Annotations: write},
+	mcp.AddTool(server, &mcp.Tool{Name: "attach_handoff_file", OutputSchema: outputSchema[handoffFile](), Description: "Attach one file to a Draft message authored by this OAuth client. Maximum 10 files and 100 MiB total per message. " + HandoffDescriptionSuffix, Annotations: write},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input attachInput) (*mcp.CallToolResult, any, error) {
 			if !canWrite(ctx) {
 				return scopeError(), nil, nil
@@ -324,7 +324,7 @@ func addHandoffTools(server *mcp.Server, db *store.DB) {
 	type readFileInput struct {
 		FileID string `json:"file_id" jsonschema:"file ID returned in handoff file metadata"`
 	}
-	mcp.AddTool(server, &mcp.Tool{Name: "read_handoff_file", Description: "Read one handoff attachment as embedded MCP resource content. Request files deliberately because they may be large. " + HandoffDescriptionSuffix, Annotations: read},
+	mcp.AddTool(server, &mcp.Tool{Name: "read_handoff_file", OutputSchema: outputSchema[handoffFileResource](), Description: "Read one handoff attachment as embedded MCP resource content. Request files deliberately because they may be large. " + HandoffDescriptionSuffix, Annotations: read},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input readFileInput) (*mcp.CallToolResult, any, error) {
 			if !canRead(ctx) {
 				return scopeError(), nil, nil

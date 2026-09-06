@@ -7,7 +7,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	calendarapi "github.com/cesarpetrescu/ledger/internal/calendar"
+	"github.com/cesarpetrescu/ledger/internal/retrieval"
+	"github.com/cesarpetrescu/ledger/internal/store"
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -39,7 +44,61 @@ func TestToolsListIsExactAndAnnotated(t *testing.T) {
 	if len(result.Tools) != len(want) {
 		t.Fatalf("got %d tools", len(result.Tools))
 	}
+	now := time.Now().UTC()
+	file := store.HandoffFile{ID: 9007199254740993, MessageID: 2, CreatedAt: now}
+	message := store.HandoffMessage{ID: 2, HandoffID: 1, Files: []store.HandoffFile{file}}
+	detail := handoffDetailOutput(store.HandoffDetail{Messages: []store.HandoffMessage{message}})
+	cursor := int64(2)
+	page := handoffDetailOutput(store.HandoffDetail{NextBefore: &cursor})
+	samples := map[string][]any{
+		"list_projects":          {[]any{}, []any{map[string]any{"slug": "atlas", "name": "Atlas", "tier": "focus", "hours_wk": 8, "goal": "Ship", "deadline": "", "last_entry_at": nil}}, []any{map[string]any{"slug": "atlas", "name": "Atlas", "tier": "focus", "hours_wk": 8, "goal": "Ship", "deadline": "", "last_entry_at": now}}},
+		"get_project":            {store.ProjectWithEntries{Entries: []store.Entry{}}},
+		"search":                 {retrieval.SearchResult{Hits: []retrieval.Ranked{}, Degraded: []string{}}, retrieval.SearchResult{Hits: []retrieval.Ranked{{Ref: "entry:1", Score: 0.5}}, Degraded: []string{"rerank"}}},
+		"upsert_project":         {store.Project{}, store.Project{LastEntryAt: &now}},
+		"append_entry":           {map[string]any{"id": int64(1), "created_at": now}},
+		"list_calendars":         {[]calendarapi.Calendar{}, []calendarapi.Calendar{{ID: "calendar", Selected: true}}},
+		"list_calendar_events":   {[]calendarapi.Event{}, []calendarapi.Event{{ID: "event"}}},
+		"create_calendar_event":  {calendarapi.Event{}},
+		"update_calendar_event":  {calendarapi.Event{Description: "Updated"}},
+		"delete_calendar_event":  {map[string]bool{"deleted": true}},
+		"list_handoffs":          {map[string]any{"handoffs": []any{}}, map[string]any{"handoffs": []any{handoffOutput(store.Handoff{ArchivedAt: &now})}, "next_before": now.Format(time.RFC3339Nano) + "|1"}},
+		"get_handoff":            {detail, page},
+		"create_handoff":         {detail},
+		"append_handoff_message": {handoffMessageOutput(message)},
+		"update_handoff_message": {handoffMessageOutput(store.HandoffMessage{SeenAt: &now, ClaimedAt: &now})},
+		"attach_handoff_file":    {handoffFileOutput(file)},
+		"read_handoff_file":      {map[string]string{"id": "9007199254740993", "filename": "note.txt", "uri": "ledger://handoff-file/9007199254740993"}},
+	}
 	for _, tool := range result.Tools {
+		if tool.OutputSchema == nil {
+			t.Errorf("tool %q missing output schema", tool.Name)
+			continue
+		}
+		var schema jsonschema.Schema
+		encoded, err := json.Marshal(tool.OutputSchema)
+		if err != nil || json.Unmarshal(encoded, &schema) != nil {
+			t.Fatalf("tool %q invalid output schema: %s, %v", tool.Name, encoded, err)
+		}
+		resolved, err := schema.Resolve(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(samples[tool.Name]) == 0 {
+			t.Errorf("tool %q missing output samples", tool.Name)
+		}
+		for _, sample := range samples[tool.Name] {
+			encoded, err := json.Marshal(sample)
+			var value any
+			if err != nil || json.Unmarshal(encoded, &value) != nil {
+				t.Fatalf("tool %q invalid sample: %v", tool.Name, err)
+			}
+			if err := resolved.Validate(value); err != nil {
+				t.Errorf("tool %q output does not match schema: %v", tool.Name, err)
+			}
+		}
+		if resolved.Validate(map[string]any{"unexpected": true}) == nil {
+			t.Errorf("tool %q accepts an invalid output", tool.Name)
+		}
 		readOnly, ok := want[tool.Name]
 		if !ok || tool.Annotations == nil || tool.Annotations.ReadOnlyHint != readOnly {
 			t.Errorf("tool %q annotations = %#v", tool.Name, tool.Annotations)
