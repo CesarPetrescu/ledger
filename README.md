@@ -1,6 +1,6 @@
 <div align="center">
 
-# Ledger
+<h1><img src="assets/ledger-logo.png" alt="Ledger" width="280" height="280"></h1>
 
 **Long-term project memory for AI assistants, served over MCP.**
 
