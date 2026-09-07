@@ -5,7 +5,7 @@ import java.io.OutputStream
 import androidx.compose.ui.test.*
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
-import android.view.inputmethod.InputMethodManager
+import androidx.test.espresso.Espresso
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
 import androidx.test.core.app.ActivityScenario
@@ -33,11 +33,10 @@ class OwnerFlowTest {
         ui.onNodeWithText(text).performClick()
     }
     private fun scrollTo(text: String) {
+        Espresso.closeSoftKeyboard()
         ui.runOnUiThread {
             ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).forEach { activity ->
                 activity.currentFocus?.clearFocus()
-                (activity.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
-                    .hideSoftInputFromWindow(activity.window.decorView.windowToken, 0)
             }
         }
         ui.waitForIdle()
