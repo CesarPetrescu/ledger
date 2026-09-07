@@ -5,7 +5,10 @@ on:
 permissions:
   contents: write
 jobs:
+  windows:
+    uses: ./.github/workflows/windows-client.yml
   release:
+    needs: windows
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -41,6 +44,9 @@ jobs:
           for arch in amd64 arm64; do
             CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -ldflags="-s -w -X main.version=$RELEASE_TAG" -o "dist/ledger_linux_$arch" ./cmd/ledger
           done
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=windows GOARCH="$arch" go build -trimpath -ldflags="-s -w -X main.version=$RELEASE_TAG" -o "dist/ledger_windows_$arch.exe" ./cmd/ledger
+          done
       - name: Build signed Android APK
         working-directory: android
         env:
@@ -64,9 +70,29 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk "../dist/ledger-android-${RELEASE_TAG}.apk"
       - name: Checksum release assets
         working-directory: dist
-        run: sha256sum ledger_linux_* ledger-android-*.apk > SHA256SUMS
+        run: sha256sum ledger_linux_* ledger_windows_*.exe ledger-android-*.apk > SHA256SUMS
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: gh release create "$RELEASE_TAG" dist/* --verify-tag --generate-notes
+
+  install-windows:
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, windows-11-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Install the published Windows release
+        shell: powershell
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $installDir = Join-Path $env:RUNNER_TEMP 'Ledger installation smoke'
+          ./install.ps1 -InstallDir $installDir -NoPath
+          $version = & (Join-Path $installDir 'ledger.exe') version
+          if ($LASTEXITCODE -ne 0 -or $version.Trim() -ne $env:RELEASE_TAG) { throw 'Published client version is incorrect.' }

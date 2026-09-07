@@ -7,8 +7,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -18,7 +16,7 @@ import (
 
 func TestCLIConnectRefreshAndReconnectAgainstLedger(t *testing.T) {
 	db, ctx := testdb.Open(t)
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolateConfig(t)
 	t.Setenv("CODEX_HOME", t.TempDir())
 	t.Setenv("LEDGER_AUTO_UPDATE", "0")
 	var auth http.Handler
@@ -84,11 +82,7 @@ func TestCLIConnectRefreshAndReconnectAgainstLedger(t *testing.T) {
 		t.Fatal("revoked profile was not reauthorized")
 	}
 	// Setup writes only into an isolated Codex home and delegates OAuth cleanup to Codex.
-	bin := t.TempDir()
-	if err = os.WriteFile(filepath.Join(bin, "codex"), []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	fakeCodex(t)
 	if err = configureCodex(server.URL, "codex"); err != nil {
 		t.Fatal(err)
 	}
