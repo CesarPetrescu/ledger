@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -46,7 +47,7 @@ func TestCLIConnectRefreshAndReconnectAgainstLedger(t *testing.T) {
 	old := authHTTP
 	authHTTP = server.Client()
 	t.Cleanup(func() { authHTTP = old })
-	path, err := credentialPath("codex")
+	path, err := credentialPath("", "codex")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,11 +84,10 @@ func TestCLIConnectRefreshAndReconnectAgainstLedger(t *testing.T) {
 	}
 	// Setup writes only into an isolated Codex home and delegates OAuth cleanup to Codex.
 	fakeCodex(t)
-	if err = configureCodex(server.URL, "codex"); err != nil {
-		t.Fatal(err)
-	}
-	if err = configureCodex(server.URL, "codex"); err != nil {
-		t.Fatal(err)
+	for range 2 {
+		if err = configureCodex(server.URL, "codex", filepath.Dir(path)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err = run(context.Background(), []string{"auth", "logout"}); err != nil {
 		t.Fatal(err)
