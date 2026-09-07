@@ -1,11 +1,15 @@
 package com.cesarpetrescu.ledger
 
 import android.content.Context
+import android.os.Build
+import androidx.test.espresso.Espresso
 import java.io.OutputStream
 import androidx.compose.ui.test.*
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
-import androidx.test.espresso.Espresso
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
 import androidx.test.core.app.ActivityScenario
@@ -33,10 +37,22 @@ class OwnerFlowTest {
         ui.onNodeWithText(text).performClick()
     }
     private fun scrollTo(text: String) {
-        Espresso.closeSoftKeyboard()
-        ui.runOnUiThread {
-            ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).forEach { activity ->
+        val activity = ui.runOnUiThread {
+            ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).single()
+        }
+        if (Build.VERSION.SDK_INT < 30) {
+            Espresso.closeSoftKeyboard()
+            ui.runOnUiThread { activity.currentFocus?.clearFocus() }
+        } else {
+            // New Android versions do not reliably deliver the legacy keyboard result callback.
+            ui.runOnUiThread {
                 activity.currentFocus?.clearFocus()
+                WindowCompat.getInsetsController(activity.window, activity.window.decorView).hide(WindowInsetsCompat.Type.ime())
+            }
+            ui.waitUntil(10_000) {
+                ui.runOnUiThread {
+                    ViewCompat.getRootWindowInsets(activity.window.decorView)?.isVisible(WindowInsetsCompat.Type.ime()) == false
+                }
             }
         }
         ui.waitForIdle()
