@@ -20,6 +20,8 @@ secrets*
 /ledger-mcp
 /ledger-index
 /ledger-admin
+/ledger.exe
+/ledger.exe.old
 *.test
 *.out
 coverage.*

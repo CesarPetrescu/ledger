@@ -17,6 +17,8 @@ dist
 /ledger-mcp
 /ledger-index
 /ledger-admin
+/ledger.exe
+/ledger.exe.old
 frontend
 coverage.*
 *.out
