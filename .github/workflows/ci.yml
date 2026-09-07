@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -89,6 +91,10 @@ jobs:
         run: docker build -f frontend/Dockerfile -t ledger-frontend:ci frontend
 
   android:
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [28, 36]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -113,19 +119,20 @@ jobs:
       - name: Upload development APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ledger-android-debug
+          name: ledger-android-debug-api-${{ matrix.api }}
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
-      - name: Exercise owner flows on Android 35
+      - name: Exercise owner flows on Android ${{ matrix.api }}
         working-directory: android
         env:
+          ANDROID_API: ${{ matrix.api }}
           ANDROID_AVD_HOME: ${{ runner.temp }}/ledger-avd
         run: |
-          sdkmanager 'emulator' 'system-images;android-35;google_apis;x86_64'
+          sdkmanager 'emulator' "system-images;android-$ANDROID_API;google_apis;x86_64"
           sudo chmod 666 /dev/kvm
           mkdir -p "$ANDROID_AVD_HOME"
-          echo no | avdmanager create avd --name ledger-ci --path "$ANDROID_AVD_HOME/ledger-ci.avd" --package 'system-images;android-35;google_apis;x86_64'
+          echo no | avdmanager create avd --name ledger-ci --path "$ANDROID_AVD_HOME/ledger-ci.avd" --package "system-images;android-$ANDROID_API;google_apis;x86_64"
           test -f "$ANDROID_AVD_HOME/ledger-ci.ini"
           "$ANDROID_HOME/emulator/emulator" @ledger-ci -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader -feature -Vulkan -cores 2 > "$RUNNER_TEMP/emulator.log" 2>&1 &
           emulator_pid=$!
@@ -143,6 +150,65 @@ jobs:
           adb shell settings put global transition_animation_scale 0
           adb shell settings put global animator_duration_scale 0
           ./smoke.sh
+
+      - name: Upload Android test reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android-reports-api-${{ matrix.api }}
+          path: |
+            android/app/build/reports/
+            android/app/build/outputs/androidTest-results/
+            ${{ runner.temp }}/emulator.log
+          retention-days: 14
+
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: 1.27.1
+      - name: Test native Linux client and installer
+        run: |
+          go test -race -count=1 -v ./cmd/ledger
+          go vet ./cmd/ledger
+          go build -trimpath -ldflags='-s -w -X main.version=v0.0.0' -o "$RUNNER_TEMP/ledger" ./cmd/ledger
+          ./scripts/test-linux-installer.sh "$RUNNER_TEMP/ledger"
+
+  wine:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: 1.27.1
+      - name: Test Windows client in Docker and Wine
+        shell: bash
+        run: ./scripts/test-wine.sh 2>&1 | tee "$RUNNER_TEMP/wine-tests.log"
+      - name: Upload Wine test log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: wine-test-log
+          path: ${{ runner.temp }}/wine-tests.log
+          retention-days: 14
+
+  client-checks:
+    if: always()
+    needs: [linux, windows, wine, android, frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every client test job to pass
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: echo "$RESULTS" | jq -e 'all(.[]; .result == "success")'
 
   windows:
     uses: ./.github/workflows/windows-client.yml
