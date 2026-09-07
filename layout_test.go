@@ -410,6 +410,17 @@ func TestDocumentationContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	readme := string(body)
+	documentation := readme
+	for _, path := range []string{"docs/clients.md", "docs/hosting.md", "docs/reference.md", "docs/development.md"} {
+		if !strings.Contains(readme, "("+path+")") {
+			t.Errorf("README missing link to %s", path)
+		}
+		guide, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		documentation += "\n" + string(guide)
+	}
 	for _, required := range []string{
 		"`ledger:read`", "`ledger:write`", "`ledger:read` is the default",
 		"`oauth_client`, `oauth_code`, and `oauth_token`",
@@ -429,8 +440,8 @@ func TestDocumentationContract(t *testing.T) {
 		"--exclude-table-data=chunk_dirty",
 		"`calendar_account`",
 	} {
-		if !strings.Contains(readme, required) {
-			t.Errorf("README missing %q", required)
+		if !strings.Contains(documentation, required) {
+			t.Errorf("documentation missing %q", required)
 		}
 	}
 	security, err := os.ReadFile("SECURITY.md")
@@ -443,8 +454,8 @@ func TestDocumentationContract(t *testing.T) {
 		}
 	}
 	for _, obsolete := range []string{"request `read`", "and/or `write`", "`client`, `code`, and `token`", "docker compose run --rm index", "--exclude-table=chunk", "`calendar_connection`", "`calendar_selection`"} {
-		if strings.Contains(readme, obsolete) {
-			t.Errorf("README retains obsolete contract %q", obsolete)
+		if strings.Contains(documentation, obsolete) {
+			t.Errorf("documentation retains obsolete contract %q", obsolete)
 		}
 	}
 }
