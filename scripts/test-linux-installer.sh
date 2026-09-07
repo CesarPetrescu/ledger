@@ -41,6 +41,7 @@ export PATH="$fixture/bin:$PATH"
 expected=$("$fixture/client" version)
 sh "$installer"
 test "$("$LEDGER_INSTALL_DIR/ledger" version)" = "$expected"
+printf 'old installation\n' > "$LEDGER_INSTALL_DIR/ledger"
 sh "$installer"
 cmp "$fixture/client" "$LEDGER_INSTALL_DIR/ledger"
 for failure in corrupt fail missing-checksum; do
