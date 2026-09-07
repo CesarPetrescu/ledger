@@ -76,3 +76,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: gh release create "$RELEASE_TAG" dist/* --verify-tag --generate-notes
+
+  install-windows:
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, windows-11-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Install the published Windows release
+        shell: powershell
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $installDir = Join-Path $env:RUNNER_TEMP 'Ledger installation smoke'
+          ./install.ps1 -InstallDir $installDir -NoPath
+          $version = & (Join-Path $installDir 'ledger.exe') version
+          if ($LASTEXITCODE -ne 0 -or $version.Trim() -ne $env:RELEASE_TAG) { throw 'Published client version is incorrect.' }

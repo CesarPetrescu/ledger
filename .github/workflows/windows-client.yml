@@ -23,13 +23,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go vet ./cmd/ledger
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          go build -trimpath -ldflags="-s -w -X main.version=v0.2.0" -o ledger.exe ./cmd/ledger
+          go build -trimpath -ldflags="-s -w -X main.version=v0.0.0" -o ledger.exe ./cmd/ledger
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./ledger.exe version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./scripts/test-windows-installer.ps1 -Binary ./ledger.exe
-      - name: Upload Windows development client
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: ledger-${{ matrix.os }}
-          path: ledger.exe
