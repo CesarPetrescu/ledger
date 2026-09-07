@@ -145,31 +145,4 @@ jobs:
           ./smoke.sh
 
   windows:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, windows-11-arm]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
-        with:
-          go-version: 1.27.1
-      - name: Test and build Windows client
-        shell: powershell
-        run: |
-          go test -count=1 -v ./cmd/ledger
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          go vet ./cmd/ledger
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          go build -trimpath -ldflags="-s -w -X main.version=v0.2.0" -o ledger.exe ./cmd/ledger
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./ledger.exe version
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./scripts/test-windows-installer.ps1 -Binary ./ledger.exe
-      - name: Upload Windows development client
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: ledger-${{ matrix.os }}
-          path: ledger.exe
+    uses: ./.github/workflows/windows-client.yml

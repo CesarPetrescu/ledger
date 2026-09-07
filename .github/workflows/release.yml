@@ -5,7 +5,10 @@ on:
 permissions:
   contents: write
 jobs:
+  windows:
+    uses: ./.github/workflows/windows-client.yml
   release:
+    needs: windows
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:

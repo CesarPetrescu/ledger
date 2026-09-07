@@ -1,18 +1,18 @@
 param([Parameter(Mandatory = $true)][string]$Binary)
 $ErrorActionPreference = 'Stop'
-$binaryPath = (Resolve-Path -LiteralPath $Binary).Path
+$script:fixtureBinaryPath = (Resolve-Path -LiteralPath $Binary).Path
 $installer = Join-Path $PSScriptRoot '..\install.ps1'
 $testDir = Join-Path ([IO.Path]::GetTempPath()) ('ledger-test-' + [guid]::NewGuid().ToString('N'))
 $null = [IO.Directory]::CreateDirectory($testDir)
 $installDir = Join-Path $testDir 'Atlas client with spaces'
 $arch = if (($env:PROCESSOR_ARCHITEW6432 -eq 'ARM64') -or ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64')) { 'arm64' } else { 'amd64' }
 $assetName = "ledger_windows_$arch.exe"
-$tag = (& $binaryPath version).Trim()
-$digest = (Get-FileHash -LiteralPath $binaryPath -Algorithm SHA256).Hash.ToLowerInvariant()
-$assetUrl = "https://github.com/CesarPetrescu/ledger/releases/download/$tag/$assetName"
-$metadata = @{
+$tag = (& $script:fixtureBinaryPath version).Trim()
+$digest = (Get-FileHash -LiteralPath $script:fixtureBinaryPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$script:fixtureAssetUrl = "https://github.com/CesarPetrescu/ledger/releases/download/$tag/$assetName"
+$script:fixtureMetadata = @{
     tag_name = $tag; draft = $false; prerelease = $false
-    assets = @(@{name = $assetName; browser_download_url = $assetUrl; digest = "sha256:$digest"; size = (Get-Item -LiteralPath $binaryPath).Length})
+    assets = @(@{name = $assetName; browser_download_url = $script:fixtureAssetUrl; digest = "sha256:$digest"; size = (Get-Item -LiteralPath $script:fixtureBinaryPath).Length})
 }
 $script:corrupt = $false
 $script:requestedAssets = 0
@@ -21,11 +21,11 @@ function curl.exe {
     $destination = $args[[Array]::IndexOf($args, '--output') + 1]
     $url = $args[[Array]::IndexOf($args, '--output') - 1]
     if ($url -eq 'https://api.github.com/repos/CesarPetrescu/ledger/releases/latest') {
-        $metadata | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $destination -Encoding UTF8
-    } elseif ($url -eq $assetUrl) {
+        $script:fixtureMetadata | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $destination -Encoding UTF8
+    } elseif ($url -eq $script:fixtureAssetUrl) {
         $script:requestedAssets++
         if ($script:corrupt) { [IO.File]::WriteAllText($destination, 'corrupt') }
-        else { [IO.File]::Copy($binaryPath, $destination) }
+        else { [IO.File]::Copy($script:fixtureBinaryPath, $destination) }
     } else { throw 'Installer requested an unexpected URL.' }
     $global:LASTEXITCODE = 0
 }
@@ -41,7 +41,7 @@ try {
     try { & $installer -InstallDir $installDir -NoPath } catch { $rejected = $true }
     if (-not $rejected) { throw 'Installer accepted a corrupt download.' }
     if ((Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash.ToLowerInvariant() -ne $digest) { throw 'Failed installation changed the working client.' }
-    $metadata.assets[0].browser_download_url = 'https://evil.example/ledger.exe'
+    $script:fixtureMetadata.assets[0].browser_download_url = 'https://evil.example/ledger.exe'
     $requestsBefore = $script:requestedAssets
     $rejected = $false
     try { & $installer -InstallDir $installDir -NoPath } catch { $rejected = $true }

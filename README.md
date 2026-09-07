@@ -23,20 +23,45 @@ Think of it as a lab notebook your assistant can read and write, so you stop re-
 
 ## Install the Ledger client
 
-Use this on the **Linux machine where Codex runs**, including a remote machine
-over SSH or Windows WSL. Intel/AMD 64-bit and ARM64 are detected automatically.
-Native Windows and macOS clients are not available yet.
+Install the client on the **machine where Codex runs**. Native Windows 10/11
+and Linux (including WSL and remote Linux over SSH) support x64 and ARM64.
+You need Codex CLI 0.152 or newer and the HTTPS address of a Ledger server.
+The installers download and verify the latest release without Go, Git, Docker,
+or administrator access.
 
-You need `curl`, Codex CLI 0.152 or newer, and the HTTPS address of a Ledger
-server with device login deployed. You do **not** need Go, Git, Docker, or a
-browser on this machine. The installer downloads the latest published
-[GitHub release](https://github.com/CesarPetrescu/ledger/releases), verifies its
-SHA-256 checksum, and installs to `~/.local/bin` without sudo.
+### Windows (PowerShell)
 
-**A maintainer must publish the first release before the installer can download
-a binary.** See [Publishing a client release](#publishing-a-client-release).
+Run this in PowerShell:
 
-### 1. Copy and paste to install
+```powershell
+curl.exe -fsSL https://raw.githubusercontent.com/CesarPetrescu/ledger/main/install.ps1 -o "$env:TEMP\ledger-install.ps1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\ledger-install.ps1"
+```
+
+The installer detects x64 or ARM64, verifies the GitHub release's SHA-256 digest,
+and installs to `%LOCALAPPDATA%\Programs\Ledger`. It adds that directory to your
+user PATH. Open a **new terminal**, then connect:
+
+```powershell
+ledger connect codex --server https://ledger.example.com --name "My Windows PC"
+```
+
+Approve the device code in your Ledger owner console, then start Codex. The
+same `auth status`, `auth logout`, and `update` commands below work on Windows.
+Setup supports standalone Codex and npm's `codex.cmd`, including paths with spaces.
+
+For a portable installation, download the [x64 executable](https://github.com/CesarPetrescu/ledger/releases/latest/download/ledger_windows_amd64.exe)
+or [ARM64 executable](https://github.com/CesarPetrescu/ledger/releases/latest/download/ledger_windows_arm64.exe)
+and rename it to `ledger.exe`. Keep it in a writable directory so `ledger update`
+can replace it. Published checksums are in `SHA256SUMS` on the same release.
+Windows binaries are not Authenticode-signed.
+
+The installer also accepts `-Server URL`, `-Name "My PC"`, `-InstallDir PATH`,
+and `-NoPath`. `-NoPath` leaves your PATH unchanged.
+
+### Linux and WSL
+
+#### 1. Copy and paste to install
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/CesarPetrescu/ledger/main/install.sh | sh
@@ -52,7 +77,7 @@ To inspect the installer first, download
 read it, and run `sh install.sh`. Set `LEDGER_INSTALL_DIR` when running it to use
 a different installation directory.
 
-### 2. Set your server URL and connect
+#### 2. Set your server URL and connect
 
 Replace `https://ledger.example.com` with **your Ledger server's address**. Use
 the base HTTPS URL, without `/mcp` or `/admin`. The machine name can be anything
@@ -71,7 +96,7 @@ curl -fsSL https://raw.githubusercontent.com/CesarPetrescu/ledger/main/install.s
 The URL is saved in the local profile. You do not need to supply it each time you
 start Codex or check the connection.
 
-### 3. Approve in your browser
+#### 3. Approve in your browser
 
 The terminal displays a URL such as `https://ledger.example.com/admin/connect`
 and a code such as `ABCD-2345`. Open the URL on your phone or laptop, sign into
@@ -142,7 +167,9 @@ also revoke the machine from the console's Agents page, including outstanding
 device approvals.
 
 Credentials are stored under `$XDG_CONFIG_HOME/ledger` (default
-`~/.config/ledger`), with a `0700` directory and `0600` files. Refresh and logout
+`~/.config/ledger`) on Linux, with a `0700` directory and `0600` files. On Windows
+they live in `%APPDATA%\ledger`, with private ACLs granting access only to the
+current Windows user and SYSTEM. Links and reparse points are rejected. Refresh and logout
 use a file lock; rotated credentials are replaced atomically. The
 `ledger auth headers` command is intended for Codex: its stdout contains a bearer
 credential, so do not paste it into a chat or logs. Someone with shell access as
@@ -155,9 +182,11 @@ possibly consumed refresh token automatically.
 Release binaries automatically check for a newer stable GitHub release at most
 once per day when used. The check runs in a detached process, including when
 Codex invokes the helper, so downloads do not delay authentication. It downloads
-only this repository's matching Linux binary, verifies the SHA-256 digest and
+only this repository's matching operating-system and architecture binary, verifies the SHA-256 digest and
 size from GitHub's release metadata, checks the executable's version, and
-atomically replaces the installation. The update trusts this repository's GitHub
+replaces the installation. Windows renames the running executable to
+`ledger.exe.old` first and restores it if replacement fails; one rollback copy
+is retained until the next update. The update trusts this repository's GitHub
 release publishing access. The installation directory must be writable by your
 user; no sudo is invoked. The next invocation uses the new version.
 
@@ -169,23 +198,26 @@ LEDGER_AUTO_UPDATE=0 ledger auth status # disable automatic checks for this invo
 
 Set `LEDGER_AUTO_UPDATE=0` in the environment that launches Codex to disable its
 background update checks too. Update output is kept in
-`~/.config/ledger/update.log` (or the XDG configuration directory). An unavailable
+`~/.config/ledger/update.log` (or the XDG configuration directory), or
+`%APPDATA%\ledger\update.log` on Windows. Codex contains Windows helper processes
+in a job that may terminate their background checks; run `ledger update` in a
+regular terminal to reliably update the Windows client. An unavailable
 release or failed verification preserves the current binary. Development builds
 report `dev` and skip automatic replacement; `ledger update` can switch one to a
-published release. No release is available until a maintainer publishes one.
+published release.
 
 ### Publishing a client release
 
-The `Release CLI` workflow builds Linux amd64 and arm64 binaries and checksums
-when a stable `vMAJOR.MINOR.PATCH` tag is pushed. Run normal CI before tagging;
-the release job also tests and vets the CLI. For the first release, a maintainer
-can run:
+The `Release` workflow publishes Linux and Windows x64/ARM64 clients, a signed
+Android APK, and `SHA256SUMS` when a stable `vMAJOR.MINOR.PATCH` tag is pushed on
+a commit merged into `main`. Run normal CI before tagging. Windows client tests
+and installer checks run on native x64 and ARM64 Windows runners.
 
 ```sh
 git switch main
 git pull --ff-only
-git tag -a v0.1.0 -m "Ledger CLI v0.1.0"
-git push origin v0.1.0
+git tag -a v0.2.0 -m "Ledger v0.2.0"
+git push origin v0.2.0
 ```
 
 Use a new version number for later releases. Once the release workflow finishes,
@@ -195,7 +227,7 @@ CLI updates.
 
 ### Build the client from source
 
-For development, or before the first release is available:
+For development on Linux:
 
 ```sh
 git clone https://github.com/CesarPetrescu/ledger.git
@@ -204,6 +236,14 @@ mkdir -p "$HOME/.local/bin"
 go build -trimpath -ldflags="-s -w" -o "$HOME/.local/bin/ledger" ./cmd/ledger
 export PATH="$HOME/.local/bin:$PATH"
 ledger connect codex --server https://ledger.example.com --name "My laptop"
+```
+
+On Windows, build and test from PowerShell:
+
+```powershell
+go test ./cmd/ledger
+go build -trimpath -o ledger.exe ./cmd/ledger
+.\ledger.exe connect codex --server https://ledger.example.com --name "My PC"
 ```
 
 Go uses the toolchain selected in `go.mod`. Development builds report `dev` and
