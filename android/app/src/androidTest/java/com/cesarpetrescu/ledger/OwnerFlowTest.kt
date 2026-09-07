@@ -3,6 +3,7 @@ package com.cesarpetrescu.ledger
 import android.content.Context
 import java.io.OutputStream
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import android.view.inputmethod.InputMethodManager
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
@@ -23,7 +24,14 @@ class OwnerFlowTest {
     private fun awaitText(text: String) {
         ui.waitUntil(15_000) { ui.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
     }
-    private fun tap(text: String) { awaitText(text); ui.onNodeWithText(text).performClick() }
+    private fun tap(text: String) {
+        awaitText(text)
+        // Transient snackbars can cover the target and consume its touch.
+        ui.waitUntil(15_000) {
+            ui.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion)).fetchSemanticsNodes().isEmpty()
+        }
+        ui.onNodeWithText(text).performClick()
+    }
     private fun scrollTo(text: String) {
         ui.runOnUiThread {
             ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).forEach { activity ->
