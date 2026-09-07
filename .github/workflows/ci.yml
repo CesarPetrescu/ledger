@@ -132,7 +132,7 @@ jobs:
           sdkmanager 'emulator' "system-images;android-$ANDROID_API;google_apis;x86_64"
           sudo chmod 666 /dev/kvm
           mkdir -p "$ANDROID_AVD_HOME"
-          echo no | avdmanager create avd --name ledger-ci --path "$ANDROID_AVD_HOME/ledger-ci.avd" --package "system-images;android-$ANDROID_API;google_apis;x86_64"
+          echo no | avdmanager create avd --name ledger-ci --device pixel_2 --path "$ANDROID_AVD_HOME/ledger-ci.avd" --package "system-images;android-$ANDROID_API;google_apis;x86_64"
           test -f "$ANDROID_AVD_HOME/ledger-ci.ini"
           "$ANDROID_HOME/emulator/emulator" @ledger-ci -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader -feature -Vulkan -cores 2 > "$RUNNER_TEMP/emulator.log" 2>&1 &
           emulator_pid=$!
