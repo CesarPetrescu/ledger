@@ -142,7 +142,7 @@ class OwnerFlowTest {
             ui.onNodeWithContentDescription("Back").performClick()
             scrollTo("Sign out")
             tap("Sign out")
-            ui.onAllNodesWithText("Sign out").onLast().performClick()
+            ui.onNode(hasText("Sign out") and hasClickAction() and hasAnyAncestor(isDialog())).performClick()
             awaitText("Server address")
             assertNull(SessionStore(context).read())
         }
