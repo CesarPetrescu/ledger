@@ -57,6 +57,7 @@ class OwnerFlowTest {
         ActivityScenario.launch(MainActivity::class.java).use {
             awaitText("Server address")
             ui.onNodeWithText("Server address").performTextInput("http://example.com")
+            scrollTo("Owner password")
             ui.onNodeWithText("Owner password").performTextInput("fixture-password")
             scrollTo("Sign in")
             tap("Sign in")
@@ -83,6 +84,7 @@ class OwnerFlowTest {
         ActivityScenario.launch(MainActivity::class.java).use { activity ->
             awaitText("Server address")
             ui.onNodeWithText("Server address").performTextInput("https://localhost:8443")
+            scrollTo("Owner password")
             ui.onNodeWithText("Owner password").performTextInput("fixture-password")
             scrollTo("Sign in")
             tap("Sign in")
