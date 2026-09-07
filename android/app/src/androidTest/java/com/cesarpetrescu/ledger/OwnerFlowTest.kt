@@ -1,10 +1,15 @@
 package com.cesarpetrescu.ledger
 
 import android.content.Context
+import android.os.Build
+import androidx.test.espresso.Espresso
 import java.io.OutputStream
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
-import android.view.inputmethod.InputMethodManager
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
 import androidx.test.core.app.ActivityScenario
@@ -23,13 +28,31 @@ class OwnerFlowTest {
     private fun awaitText(text: String) {
         ui.waitUntil(15_000) { ui.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
     }
-    private fun tap(text: String) { awaitText(text); ui.onNodeWithText(text).performClick() }
+    private fun tap(text: String) {
+        awaitText(text)
+        // Transient snackbars can cover the target and consume its touch.
+        ui.waitUntil(15_000) {
+            ui.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion)).fetchSemanticsNodes().isEmpty()
+        }
+        ui.onNodeWithText(text).performClick()
+    }
     private fun scrollTo(text: String) {
-        ui.runOnUiThread {
-            ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).forEach { activity ->
+        val activity = ui.runOnUiThread {
+            ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).single()
+        }
+        if (Build.VERSION.SDK_INT < 30) {
+            Espresso.closeSoftKeyboard()
+            ui.runOnUiThread { activity.currentFocus?.clearFocus() }
+        } else {
+            // New Android versions do not reliably deliver the legacy keyboard result callback.
+            ui.runOnUiThread {
                 activity.currentFocus?.clearFocus()
-                (activity.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
-                    .hideSoftInputFromWindow(activity.window.decorView.windowToken, 0)
+                WindowCompat.getInsetsController(activity.window, activity.window.decorView).hide(WindowInsetsCompat.Type.ime())
+            }
+            ui.waitUntil(10_000) {
+                ui.runOnUiThread {
+                    ViewCompat.getRootWindowInsets(activity.window.decorView)?.isVisible(WindowInsetsCompat.Type.ime()) == false
+                }
             }
         }
         ui.waitForIdle()
@@ -57,6 +80,7 @@ class OwnerFlowTest {
         ActivityScenario.launch(MainActivity::class.java).use {
             awaitText("Server address")
             ui.onNodeWithText("Server address").performTextInput("http://example.com")
+            scrollTo("Owner password")
             ui.onNodeWithText("Owner password").performTextInput("fixture-password")
             scrollTo("Sign in")
             tap("Sign in")
@@ -83,6 +107,7 @@ class OwnerFlowTest {
         ActivityScenario.launch(MainActivity::class.java).use { activity ->
             awaitText("Server address")
             ui.onNodeWithText("Server address").performTextInput("https://localhost:8443")
+            scrollTo("Owner password")
             ui.onNodeWithText("Owner password").performTextInput("fixture-password")
             scrollTo("Sign in")
             tap("Sign in")
@@ -140,7 +165,7 @@ class OwnerFlowTest {
             ui.onNodeWithContentDescription("Back").performClick()
             scrollTo("Sign out")
             tap("Sign out")
-            ui.onAllNodesWithText("Sign out").onLast().performClick()
+            ui.onNode(hasText("Sign out") and hasClickAction() and hasAnyAncestor(isDialog())).performClick()
             awaitText("Server address")
             assertNull(SessionStore(context).read())
         }

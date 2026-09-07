@@ -5,10 +5,10 @@ on:
 permissions:
   contents: write
 jobs:
-  windows:
-    uses: ./.github/workflows/windows-client.yml
+  checks:
+    uses: ./.github/workflows/ci.yml
   release:
-    needs: windows
+    needs: checks
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -96,3 +96,21 @@ jobs:
           ./install.ps1 -InstallDir $installDir -NoPath
           $version = & (Join-Path $installDir 'ledger.exe') version
           if ($LASTEXITCODE -ne 0 -or $version.Trim() -ne $env:RELEASE_TAG) { throw 'Published client version is incorrect.' }
+
+  install-linux:
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Install the published Linux release
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          LEDGER_INSTALL_DIR: ${{ runner.temp }}/Ledger installation smoke
+        run: |
+          sh ./install.sh
+          test "$("$LEDGER_INSTALL_DIR/ledger" version)" = "$RELEASE_TAG"

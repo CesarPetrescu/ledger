@@ -210,8 +210,23 @@ published release.
 
 The `Release` workflow publishes Linux and Windows x64/ARM64 clients, a signed
 Android APK, and `SHA256SUMS` when a stable `vMAJOR.MINOR.PATCH` tag is pushed on
-a commit merged into `main`. Run normal CI before tagging. Windows client tests
-and installer checks run on native x64 and ARM64 Windows runners.
+a commit merged into `main`. Publication waits for the full CI suite, including
+all client checks. After publication, native Linux and Windows runners install
+and execute the published assets on both x64 and ARM64.
+
+Every pull request and push to `main` tests:
+
+| Client | GitHub Actions coverage |
+| --- | --- |
+| Linux CLI | Native x64 and ARM64, race tests, installer success and download failure checks |
+| Windows CLI | Native x64 and ARM64, credential protection, updater, PowerShell and npm integration, installer checks |
+| Windows under Wine | Windows x64 tests in an isolated Docker container with current Wine; PowerShell/npm remain covered on native Windows |
+| Android | Unit tests, lint, APK builds, and HTTPS owner flows on Android 9 (API 28) and Android 16 (API 36) emulators |
+| Web console | Lint, type checking, component tests, production build, and dependency audit |
+
+The `client-checks` job fails if any client job fails or is skipped. Android
+reports and Wine logs are retained as CI artifacts for 14 days. To reproduce
+Wine checks locally with Go and Docker, run `./scripts/test-wine.sh`.
 
 ```sh
 git switch main

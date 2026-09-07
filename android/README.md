@@ -17,11 +17,11 @@ cd android
 ./gradlew connectedDebugAndroidTest
 ```
 
-The debug APK is `app/build/outputs/apk/debug/app-debug.apk`. It uses a separate `.debug` package so it can coexist with the release app. CI runs unit tests, lint, builds both the app and instrumentation test APK, and runs the smoke test on Android 35. The emulator checks cover native sign-in, encrypted session storage, and the owner flows against a disposable HTTPS fixture (see `smoke.sh`). No production credentials are needed.
+The debug APK is `app/build/outputs/apk/debug/app-debug.apk`. It uses a separate `.debug` package so it can coexist with the release app. CI runs unit tests, lint, builds both the app and instrumentation test APK, and runs the smoke test on Android 9 (API 28) and Android 16 (API 36). The emulator checks cover native sign-in, encrypted session storage, and the owner flows against a disposable HTTPS fixture (see `smoke.sh`). No production credentials are needed.
 
 ## Releases and signing
 
-Push a `vMAJOR.MINOR.PATCH` tag on a commit merged into `main`. The existing release workflow builds the Linux CLI and a signed, optimized universal APK, verifies its signature, and publishes both with `SHA256SUMS`. It fails when signing secrets are missing. Each push / PR also produces a development APK artifact in CI.
+Push a `vMAJOR.MINOR.PATCH` tag on a commit merged into `main`. The existing release workflow waits for the full CI suite, builds the Linux and Windows CLIs and a signed, optimized universal APK, verifies its signature, and publishes them with `SHA256SUMS`. It fails when signing secrets are missing. Each push / PR also produces a development APK artifact in CI.
 
 Configure these GitHub Actions repository secrets once:
 
