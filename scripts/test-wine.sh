@@ -6,6 +6,8 @@ fixture=$(mktemp -d)
 trap 'rm -rf "$fixture"' EXIT
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go test -c -o "$fixture/ledger-tests.exe" ./cmd/ledger
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags='-s -w -X main.version=v0.0.0' -o "$fixture/ledger.exe" ./cmd/ledger
+# The container has no DAC override; expose only these public test binaries.
+chmod a+rX "$fixture" "$fixture"/*.exe
 docker build -t ledger-wine-tests - < scripts/wine.Dockerfile
 docker run --rm --init --network=none --cap-drop=ALL --security-opt=no-new-privileges \
   -v "$fixture:/checks:ro" ledger-wine-tests xvfb-run -a sh -eu -c '
