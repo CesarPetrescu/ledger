@@ -15,7 +15,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -49,7 +48,7 @@ func startAutoUpdate() {
 	if err != nil {
 		return
 	}
-	log, err := os.OpenFile(filepath.Join(filepath.Dir(marker), "update.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC|syscall.O_NOFOLLOW, 0600)
+	log, err := openNoFollow(filepath.Join(filepath.Dir(marker), "update.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return
 	}
@@ -57,7 +56,7 @@ func startAutoUpdate() {
 	cmd := exec.Command(exe, "update", "--automatic")
 	cmd.Stdout = log
 	cmd.Stderr = log
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	detach(cmd)
 	if cmd.Start() == nil {
 		_ = cmd.Process.Release()
 	}
@@ -137,8 +136,12 @@ func selectAsset(r release, current, platform, arch string) (string, string, int
 			return "", "", 0, nil
 		}
 	}
+	name := "ledger_" + platform + "_" + arch
+	if platform == "windows" {
+		name += ".exe"
+	}
 	for _, a := range r.Assets {
-		if a.Name != "ledger_"+platform+"_"+arch {
+		if a.Name != name {
 			continue
 		}
 		expected := releasePrefix + url.PathEscape(r.Tag) + "/" + a.Name
@@ -209,7 +212,7 @@ func installRelease(ctx context.Context, client *http.Client, exe string, r rele
 		return err
 	}
 	// Validate the executable before replacing the working installation.
-	candidate, err := os.CreateTemp(filepath.Dir(exe), ".ledger-release-*")
+	candidate, err := privateTemp(filepath.Dir(exe), ".ledger-release-*"+executableSuffix)
 	if err != nil {
 		return err
 	}
@@ -234,15 +237,10 @@ func installRelease(ctx context.Context, client *http.Client, exe string, r rele
 	if err != nil || strings.TrimSpace(string(output)) != r.Tag {
 		return errors.New("downloaded executable failed its version check")
 	}
-	if err = os.Rename(candidatePath, exe); err != nil {
+	if err = replaceExecutable(candidatePath, exe); err != nil {
 		return err
 	}
-	dir, err := os.Open(filepath.Dir(exe))
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	if err = dir.Sync(); err != nil {
+	if err = syncDirectory(filepath.Dir(exe)); err != nil {
 		return err
 	}
 	fmt.Fprintln(os.Stderr, "Updated Ledger to", r.Tag)

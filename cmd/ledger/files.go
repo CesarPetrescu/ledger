@@ -11,47 +11,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/pelletier/go-toml/v2"
 )
-
-func privateDir(path string) error {
-	if err := os.MkdirAll(path, 0700); err != nil {
-		return err
-	}
-	info, err := os.Lstat(path)
-	if err != nil {
-		return err
-	}
-	if !info.IsDir() || info.Mode().Perm()&0077 != 0 {
-		return errors.New("credential directory must be a real directory with mode 0700")
-	}
-	return nil
-}
-
-func withLock(ctx context.Context, path string, fn func() error) error {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0600)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	for {
-		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-		if err == nil {
-			break
-		}
-		if err != syscall.EWOULDBLOCK {
-			return err
-		}
-		if err = waitFor(ctx, 25*time.Millisecond); err != nil {
-			return errors.New("credentials busy; retry shortly")
-		}
-	}
-	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-	return fn()
-}
 
 func atomicWrite(path string, body []byte, mode os.FileMode) error {
 	if info, err := os.Lstat(path); err == nil && !info.Mode().IsRegular() {
@@ -59,7 +22,7 @@ func atomicWrite(path string, body []byte, mode os.FileMode) error {
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	f, err := os.CreateTemp(filepath.Dir(path), ".ledger-*")
+	f, err := privateTemp(filepath.Dir(path), ".ledger-*")
 	if err != nil {
 		return err
 	}
@@ -77,15 +40,10 @@ func atomicWrite(path string, body []byte, mode os.FileMode) error {
 	if err = f.Close(); err != nil {
 		return err
 	}
-	if err = os.Rename(f.Name(), path); err != nil {
+	if err = replaceFile(f.Name(), path); err != nil {
 		return err
 	}
-	dir, err := os.Open(filepath.Dir(path))
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	return dir.Sync()
+	return syncDirectory(filepath.Dir(path))
 }
 
 func saveCredentials(path string, c Credentials) error {
@@ -98,7 +56,7 @@ func saveCredentials(path string, c Credentials) error {
 
 func loadCredentials(path string) (Credentials, error) {
 	var c Credentials
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	f, err := openNoFollow(path, os.O_RDONLY, 0)
 	if err != nil {
 		return c, errors.New("no readable credentials; run ledger connect codex --server URL")
 	}
@@ -107,8 +65,11 @@ func loadCredentials(path string) (Credentials, error) {
 	if err != nil {
 		return c, err
 	}
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 || info.Size() > 16384 {
+	if !info.Mode().IsRegular() || info.Size() > 16384 {
 		return c, errors.New("credentials must be a regular file with mode 0600")
+	}
+	if err = checkPrivate(f); err != nil {
+		return c, err
 	}
 	if err = json.NewDecoder(f).Decode(&c); err != nil {
 		return c, errors.New("invalid credentials file")
@@ -178,7 +139,7 @@ func configureCodex(rawServer, profile string) error {
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		helper := shellQuote(exe) + " auth headers --profile " + shellQuote(profile)
+		helper := headerHelper(exe, profile)
 		body, _, err := codexConfig(original, server, helper)
 		if err != nil {
 			return err
@@ -260,10 +221,8 @@ func codexConfig(original []byte, server, helper string) ([]byte, bool, error) {
 	return body, exists, err
 }
 
-func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
-
 func clearCodexOAuth(ctx context.Context, store string) error {
-	cmd := exec.CommandContext(ctx, "codex", "mcp", "logout", "ledger")
+	cmd := codexCommand(ctx, "mcp", "logout", "ledger")
 	_, err := cmd.Output()
 	if err == nil {
 		return nil
@@ -271,7 +230,7 @@ func clearCodexOAuth(ctx context.Context, store string) error {
 	var failure *exec.ExitError
 	if store != "keyring" && errors.As(err, &failure) && strings.Contains(string(failure.Stderr), "keyring") {
 		// In auto mode Codex falls back to file storage when a keyring is unavailable.
-		if exec.CommandContext(ctx, "codex", "-c", `mcp_oauth_credentials_store="file"`, "mcp", "logout", "ledger").Run() == nil {
+		if codexCommand(ctx, "-c", `mcp_oauth_credentials_store='file'`, "mcp", "logout", "ledger").Run() == nil {
 			fmt.Fprintln(os.Stderr, "Codex keyring unavailable; cleared file-backed Ledger OAuth credentials.")
 			return nil
 		}

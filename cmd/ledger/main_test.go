@@ -22,7 +22,7 @@ import (
 )
 
 func TestConcurrentHeadersRefreshOnceAndLogoutRetainsOnFailure(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolateConfig(t)
 	t.Setenv("LEDGER_AUTO_UPDATE", "0")
 	var calls atomic.Int32
 	var fail atomic.Bool
@@ -86,7 +86,7 @@ func TestConcurrentHeadersRefreshOnceAndLogoutRetainsOnFailure(t *testing.T) {
 }
 
 func TestCredentialProtectionAndLockDeadline(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolateConfig(t)
 	for _, bad := range []string{"../x", "", "a/b", "x;command"} {
 		if _, err := credentialPath(bad); err == nil {
 			t.Errorf("accepted profile %q", bad)
@@ -100,9 +100,7 @@ func TestCredentialProtectionAndLockDeadline(t *testing.T) {
 	if err = saveCredentials(path, c); err != nil {
 		t.Fatal(err)
 	}
-	if err = os.Chmod(path, 0644); err != nil {
-		t.Fatal(err)
-	}
+	makeCredentialsPublic(t, path)
 	if _, err = loadCredentials(path); err == nil {
 		t.Fatal("read public credentials")
 	}
@@ -161,10 +159,10 @@ func TestCodexConfigPreservesSettingsAndRemovesConflicts(t *testing.T) {
 }
 
 func TestUpdaterChecksIntegrityVersionAndAtomicReplacement(t *testing.T) {
-	binary := []byte("#!/bin/sh\nprintf 'v1.2.3\\n'\n")
+	binary := fixtureBinary(t, "v1.2.3")
 	sum := sha256.Sum256(binary)
 	var r release
-	metadata := fmt.Sprintf(`{"tag_name":"v1.2.3","assets":[{"name":"ledger_%s_%s","browser_download_url":"%sv1.2.3/ledger_%s_%s","digest":"sha256:%x","size":%d}]}`, runtime.GOOS, runtime.GOARCH, releasePrefix, runtime.GOOS, runtime.GOARCH, sum, len(binary))
+	metadata := fmt.Sprintf(`{"tag_name":"v1.2.3","assets":[{"name":"ledger_%s_%s%s","browser_download_url":"%sv1.2.3/ledger_%s_%s%s","digest":"sha256:%x","size":%d}]}`, runtime.GOOS, runtime.GOARCH, executableSuffix, releasePrefix, runtime.GOOS, runtime.GOARCH, executableSuffix, sum, len(binary))
 	if err := json.Unmarshal([]byte(metadata), &r); err != nil {
 		t.Fatal(err)
 	}
@@ -184,8 +182,8 @@ func TestUpdaterChecksIntegrityVersionAndAtomicReplacement(t *testing.T) {
 	if _, _, _, err := selectAsset(bad, "dev", runtime.GOOS, runtime.GOARCH); err == nil {
 		t.Fatal("accepted foreign asset")
 	}
-	exe := filepath.Join(t.TempDir(), "ledger")
-	original := []byte("#!/bin/sh\nprintf 'v1.0.0\\n'\n")
+	exe := filepath.Join(t.TempDir(), "ledger"+executableSuffix)
+	original := fixtureBinary(t, "v1.0.0")
 	if err := os.WriteFile(exe, original, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +228,7 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestDevicePollingBacksOffOnTimeout(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolateConfig(t)
 	var polls int
 	var previous time.Time
 	old := authHTTP
@@ -281,22 +279,15 @@ func TestDevicePollingBacksOffOnTimeout(t *testing.T) {
 }
 
 func TestCodexCleanupFallsBackOnlyWhenKeyringIsUnavailable(t *testing.T) {
-	bin := t.TempDir()
-	fake := filepath.Join(bin, "codex")
-	script := "#!/bin/sh\nif [ \"$1\" = '-c' ]; then exit 0; fi\necho 'failed to delete OAuth tokens from keyring' >&2\nexit 1\n"
-	if err := os.WriteFile(fake, []byte(script), 0755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	fakeCodex(t)
+	t.Setenv("LEDGER_TEST_CODEX_FAILURE", "keyring")
 	if err := clearCodexOAuth(context.Background(), "auto"); err != nil {
 		t.Fatal(err)
 	}
 	if err := clearCodexOAuth(context.Background(), "keyring"); err == nil {
 		t.Fatal("ignored explicit keyring policy")
 	}
-	if err := os.WriteFile(fake, []byte("#!/bin/sh\necho 'invalid configuration' >&2\nexit 1\n"), 0755); err != nil {
-		t.Fatal(err)
-	}
+	t.Setenv("LEDGER_TEST_CODEX_FAILURE", "configuration")
 	if err := clearCodexOAuth(context.Background(), "auto"); err == nil {
 		t.Fatal("masked a non-keyring failure")
 	}

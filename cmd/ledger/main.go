@@ -1,4 +1,4 @@
-// Ledger's headless client supports Linux; the server binaries remain portable.
+// Ledger's headless client supports Linux and Windows; the server binaries remain portable.
 package main
 
 import (
