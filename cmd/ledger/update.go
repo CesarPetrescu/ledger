@@ -248,6 +248,6 @@ func installRelease(ctx context.Context, client *http.Client, exe string, r rele
 }
 
 func updateMarker() (string, error) {
-	path, err := credentialPath("codex")
-	return filepath.Join(filepath.Dir(path), ".update-check"), err
+	dir, err := credentialDir("")
+	return filepath.Join(dir, ".update-check"), err
 }
