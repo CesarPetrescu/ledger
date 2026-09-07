@@ -5,6 +5,8 @@ cd "$(dirname "$0")"
 smoke_dir=$(mktemp -d)
 fixture_pid=''
 cleanup() {
+  local result=$?
+  if [[ "$result" != 0 && -f "$smoke_dir/server.log" ]]; then cat "$smoke_dir/server.log"; fi
   if [[ -n "$fixture_pid" ]]; then kill "$fixture_pid" 2>/dev/null || true; fi
   adb reverse --remove tcp:8443 >/dev/null 2>&1 || true
   rm -rf "$smoke_dir"

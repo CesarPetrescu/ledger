@@ -15,6 +15,8 @@ HANDOFF = dict(id='1', title='Atlas handoff', description='A fictional handoff',
 EVENT = dict(id='event-1', calendar_id='calendar-1', calendar_name='Planning', title='Plan the week', start='2026-09-06T10:00:00Z', end='2026-09-06T11:00:00Z', all_day=False, recurring=False, etag='"v1"')
 
 class Handler(BaseHTTPRequestHandler):
+    # Match production's persistent HTTP/1.1 responses, including large exports.
+    protocol_version = 'HTTP/1.1'
     entry_attempts = 0
     def log_message(self, *_):
         pass
