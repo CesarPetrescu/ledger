@@ -12,6 +12,7 @@ import (
 	"github.com/cesarpetrescu/ledger/internal/config"
 	"github.com/cesarpetrescu/ledger/internal/mcpserver"
 	"github.com/cesarpetrescu/ledger/internal/store"
+	"github.com/cesarpetrescu/ledger/internal/transcription"
 	"github.com/cesarpetrescu/ledger/internal/webcors"
 )
 
@@ -29,7 +30,11 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		server := mcpserver.NewServer(db, config.Required("LEDGER_INDEX_URL"), calendar)
+		speech, err := transcription.NewClient(os.Getenv("LEDGER_STT_URL"), os.Getenv("LEDGER_STT_API_KEY"), os.Getenv("LEDGER_STT_MODEL"), nil)
+		if err != nil {
+			log.Fatal(err)
+		}
+		server := mcpserver.NewServerWithSpeech(db, config.Required("LEDGER_INDEX_URL"), calendar, speech)
 		handler := webcors.AllowExact(mcpserver.HTTPHandler(server, db, publicURL), "/mcp")
 		if err := config.Serve(":8081", handler); err != nil && err != http.ErrServerClosed {
 			log.Fatal(err)

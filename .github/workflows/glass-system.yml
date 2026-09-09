@@ -46,7 +46,7 @@ jobs:
       - name: Install native simulator and browser prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends xvfb xauth dbus-x11 libwebkit2gtk-4.1-0 libgtk-3-0 libasound2t64 libxdo3 libegl1 libgl1-mesa-dri libglx-mesa0 pulseaudio pulseaudio-utils ca-certificates openssl libnss3-tools
+          sudo apt-get install -y --no-install-recommends xvfb xauth xdotool dbus-x11 libwebkit2gtk-4.1-0 libgtk-3-0 libasound2t64 libxdo3 libegl1 libgl1-mesa-dri libglx-mesa0 pulseaudio pulseaudio-utils ca-certificates openssl libnss3-tools
       - name: Install application and system-test dependencies from lockfiles
         run: |
           npm --prefix evenhub ci --no-audit --no-fund

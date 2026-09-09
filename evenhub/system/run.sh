@@ -11,6 +11,8 @@ chmod 700 "$GLASS_RUNTIME_DIR"
 export COMPOSE_PROJECT_NAME="ledger-glass-system-${GLASS_TARGET:-web}"
 export LEDGER_PUBLIC_URL=https://localhost:8443
 export LEDGER_SERVER="$LEDGER_PUBLIC_URL"
+export GLASS_PROVIDER_TOKEN="$(openssl rand -hex 24)"
+export TZ=Europe/Bucharest
 export LEDGER_POSTGRES_PASSWORD="$(openssl rand -hex 24)"
 export GLASS_OWNER_PASSWORD="$(openssl rand -hex 24)"
 export LEDGER_CALENDAR_ENCRYPTION_KEY="$(openssl rand -hex 32)"
@@ -37,7 +39,7 @@ export LEDGER_ADMIN_PASSWORD_HASH="$(printf '%s\n' "$GLASS_OWNER_PASSWORD" | "${
 export LEDGER_PASSWORD_HASH="$LEDGER_ADMIN_PASSWORD_HASH"
 openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 1 \
   -keyout "$GLASS_CERT_DIR/localhost.key" -out "$GLASS_CERT_DIR/localhost.crt" \
-  -subj /CN=localhost -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' >/dev/null 2>&1
+  -subj /CN=localhost -addext 'subjectAltName=DNS:localhost,DNS:glass-provider,IP:127.0.0.1' >/dev/null 2>&1
 sudo install -m 644 "$GLASS_CERT_DIR/localhost.crt" "/usr/local/share/ca-certificates/$GLASS_CA_NAME.crt"
 sudo update-ca-certificates >/dev/null
 mkdir -p "$HOME/.pki/nssdb"

@@ -1,11 +1,13 @@
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { createDeadlineFetch } from './network'
+import type { CaptureDraft, ChangePage, EntrySource, SearchResult, CalendarEvent } from './features'
 import type { ProjectDetail, ProjectListResult, ProjectTier } from './types'
 
 export class LedgerMCP {
   private client: Client | null = null
   private transport: StreamableHTTPClientTransport | null = null
   private token = ''
+  private fetchTimeout = 8_000
 
   constructor(private readonly server: string) {}
 
@@ -16,6 +18,18 @@ export class LedgerMCP {
   async getProject(accessToken: string, slug: string, entries = 5): Promise<ProjectDetail> {
     return this.call<ProjectDetail>(accessToken, 'get_project', { slug, entries })
   }
+
+  async append(token: string, draft: CaptureDraft): Promise<{ id: number | string; created_at: string }> {
+    return this.call(token, 'append_entry', { slug: draft.slug, kind: draft.kind, body: draft.body, idempotency_key: draft.key })
+  }
+  async search(token: string, query: string): Promise<SearchResult> { return this.call(token, 'search', { q: query, limit: 10 }) }
+  async entry(token: string, id: string): Promise<EntrySource> { return this.call(token, 'get_entry', { id }) }
+  async changes(token: string, after?: string, through?: string): Promise<ChangePage> {
+    return this.call(token, 'list_changes', { reader: 'glass', limit: 18, ...(after ? { after } : {}), ...(through ? { through } : {}) })
+  }
+  async acknowledge(token: string, through: string): Promise<{ checkpoint: string }> { return this.call(token, 'ack_changes', { reader: 'glass', through }) }
+  async events(token: string, start: string, end: string): Promise<{ events: CalendarEvent[] }> { return this.call(token, 'list_calendar_events', { start, end }) }
+  async transcribe(token: string, wav: string, language = '', signal?: AbortSignal): Promise<{ text: string }> { return this.call(token, 'transcribe_audio', { wav_base64: wav, language }, 30_000, signal) }
 
   async close(): Promise<void> {
     const client = this.client
@@ -36,12 +50,15 @@ export class LedgerMCP {
     }
   }
 
-  private async call<T>(accessToken: string, name: string, args: Record<string, unknown>): Promise<T> {
+  private async call<T>(accessToken: string, name: string, args: Record<string, unknown>, timeout = 12_000, signal?: AbortSignal): Promise<T> {
     await this.connect(accessToken)
     if (!this.client) throw new Error('Ledger MCP client is not connected')
 
-    const result = await this.client.callTool({ name, arguments: args }, { timeout: 12_000 })
-    return parseToolResult<T>(result)
+    this.fetchTimeout = name === 'transcribe_audio' ? 28_000 : 8_000
+    try {
+      const result = await this.client.callTool({ name, arguments: args }, { timeout, signal })
+      return parseToolResult<T>(result)
+    } finally { this.fetchTimeout = 8_000 }
   }
 
   private async connect(accessToken: string): Promise<void> {
@@ -49,7 +66,7 @@ export class LedgerMCP {
     await this.close()
 
     const transport = new StreamableHTTPClientTransport(new URL(`${this.server}/mcp`), {
-      fetch: createDeadlineFetch(),
+      fetch: (input, init) => createDeadlineFetch(this.fetchTimeout)(input, init),
       requestInit: {
         credentials: 'omit',
         redirect: 'error',

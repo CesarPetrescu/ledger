@@ -10,17 +10,33 @@
     <main class="phone-shell">
       <section class="card">
         <p class="eyebrow">Ledger Glass</p>
-        <h1>G2 client</h1>
+        <h1>Daily companion</h1>
         <p id="phone-status" class="status">Starting…</p>
         <dl>
           <div><dt>Server</dt><dd id="server-value">—</dd></div>
-          <div><dt>Access</dt><dd>Read-only project memory</dd></div>
+          <div><dt>Access</dt><dd>Read first; approve additional features when needed</dd></div>
         </dl>
         <section id="pairing" class="pairing" hidden>
           <p>Approve this device in Ledger:</p>
           <strong id="pairing-code"></strong>
           <p id="pairing-uri" class="mono"></p>
         </section>
+        <form id="phone-editor" hidden>
+          <label id="editor-label" for="phone-text">Capture text</label>
+          <textarea id="phone-text" rows="6" maxlength="4000"></textarea>
+          <p>Ctrl+Enter sends this text to the glasses for review. Saving requires confirmation.</p>
+          <button type="submit">Review / search on glasses</button>
+          <button id="voice-action" type="button">Record speech</button>
+        </form>
+        <button id="cancel-action" type="button">Cancel current action</button>
+        <details>
+          <summary>Preferences</summary>
+          <label for="time-zone">Display time zone</label><input id="time-zone" placeholder="Europe/Bucharest" />
+          <label for="speech-language">Speech language</label>
+          <select id="speech-language"><option value="">Automatic / mixed</option><option value="ro">Romanian</option><option value="en">English</option></select>
+          <button id="reload-app" type="button">Reload app</button>
+          <p>Reload keyboard shortcut: Ctrl+Alt+R. Pending confirmed captures are retained, never automatically resubmitted.</p>
+        </details>
         <button id="reconnect" type="button">Reconnect</button>
       </section>
     </main>

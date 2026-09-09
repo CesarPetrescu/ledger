@@ -79,7 +79,21 @@ describe('Real OAuth with only the host-storage boundary doubled', () => {
     await new LedgerAuth(server, storage).refreshNow(async prompt => { approvals++; await approve(prompt) })
     const current = JSON.parse(await storage.getLocalStorage(key))
     assert.equal(approvals, 1)
-    assert(current.clientId !== previous.clientId, 'Revoked identity was reused')
+    assert(current.clientId === previous.clientId, 'Device identity changed and would orphan pending receipts/checkpoints')
+  })
+  it('upgrades permissions only after explicit approval, without changing device identity', async () => {
+    const previous = JSON.parse(await storage.getLocalStorage(key))
+    let approvals = 0
+    const auth = new LedgerAuth(server, storage)
+    await auth.requireScopes(['ledger:write', 'calendar:read'], async prompt => {
+      approvals++
+      assert.deepEqual([...prompt.scopes].sort(), ['calendar:read','ledger:read','ledger:write'])
+      await approve(prompt)
+    })
+    const current = JSON.parse(await storage.getLocalStorage(key))
+    assert(current.clientId === previous.clientId)
+    assert.equal(approvals, 1)
+    await auth.requireScopes(['ledger:write'], () => { throw new Error('Existing grant prompted again') })
   })
   it('rejects a host refusal to persist a freshly issued real grant', async () => {
     const refusing = new HostStorageDouble()

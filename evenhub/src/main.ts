@@ -4,6 +4,7 @@ import {
   MenuContainerProperty, MenuItemProperty, OsEventTypeList, RebuildPageContainer,
   TextContainerProperty, waitForEvenAppBridge,
 } from '@evenrealities/even_hub_sdk'
+import { DailyFeatures, type DailyMode } from './daily'
 import { LedgerAuth, type PairingPrompt } from './auth'
 import { normalizeServer } from './config'
 import { chooseNowProject, formatError, formatNow, formatProject, projectListLabel, sortProjects } from './format'
@@ -24,18 +25,30 @@ let screen: 'now' | 'projects' | 'project' | 'pairing' | 'error' = 'now'
 let queue = Promise.resolve()
 let stopped = false
 
+const daily = new DailyFeatures({ bridge, auth, ledger, server, menu, text: showText, read, pairing: showPairing,
+  home: showNow, run: task => { void enqueue(task).catch(fail) }, observe: observed, defaultProject: () => selected?.slug,
+})
+
 await createInitialPage('LEDGER GLASS\n\nConnecting to Ledger…')
 const unsubscribe = bridge.onEvenHubEvent(event => {
   if (stopped) return
+  if (event.sysEvent?.eventType === OsEventTypeList.DOUBLE_CLICK_EVENT && (daily.active || screen === 'pairing')) daily.interrupt()
+  daily.audio(event)
+  if (event.audioEvent) return
+  if (event.sysEvent?.eventType === OsEventTypeList.ABNORMAL_EXIT_EVENT || event.sysEvent?.eventType === OsEventTypeList.SYSTEM_EXIT_EVENT) daily.leave()
   void enqueue(async () => {
     const menuID = event.menuItemClickEvent?.itemID
     if (menuID !== undefined) {
+      if (menuID >= 5 && menuID <= 8) { await daily.open((['capture','recall','brief','next'] as DailyMode[])[menuID-5]); return }
+      if (menuID === 3 && daily.active) { await daily.refresh(); return }
+      daily.leave()
       if (menuID === 1) await showNow()
       else if (menuID === 2) { page = 0; await showProjects() }
       else if (menuID === 3) await refreshCurrent()
       else if (menuID === 4) await reconnect()
       return
     }
+    if (await daily.handle(event)) return
     if (event.listEvent) {
       if ((event.listEvent.eventType ?? OsEventTypeList.CLICK_EVENT) !== OsEventTypeList.CLICK_EVENT) return
       const index = event.listEvent.currentSelectItemIndex ?? 0
@@ -60,7 +73,7 @@ const unsubscribe = bridge.onEvenHubEvent(event => {
       observed('exit')
     }
     // Menu foreground transitions must not navigate or rebuild under the overlay.
-  }).catch(reportFailure)
+  }).catch(fail)
 })
 phone.reconnect.addEventListener('click', () => { void enqueue(reconnect).catch(reportFailure) })
 await enqueue(showNow)
@@ -158,12 +171,13 @@ async function reconnect(): Promise<void> {
 }
 async function showPairing(prompt: PairingPrompt): Promise<void> {
   phone.showPairing(prompt)
-  await showText(`LEDGER GLASS\n\nApprove device:\n${prompt.userCode}\n\n${shortHost(prompt.verificationUri)}\n\nRead-only access`)
+  await showText(`LEDGER GLASS\n\nApprove device:\n${prompt.userCode}\n\n${shortHost(prompt.verificationUri)}\n\n${(prompt.scopes ?? ['ledger:read']).join(' + ')}`)
   screen = 'pairing'
   phone.setStatus('Waiting for Ledger device approval…')
   observed(screen)
 }
 async function fail(error: unknown): Promise<void> {
+  daily.leave()
   screen = 'error'
   phone.setStatus(error instanceof Error ? error.message : String(error))
   await showText(formatError(error))
@@ -193,7 +207,7 @@ function textContainer(content: string): TextContainerProperty {
   })
 }
 function menu(): MenuContainerProperty {
-  return new MenuContainerProperty({ menuItems: ['Now', 'Projects', 'Refresh', 'Reconnect'].map((itemName, index) => new MenuItemProperty({ itemName, itemID: index + 1 })) })
+  return new MenuContainerProperty({ menuItems: ['Now', 'Projects', 'Refresh', 'Reconnect', 'Capture', 'Recall', 'Brief', 'Next'].map((itemName, index) => new MenuItemProperty({ itemName, itemID: index + 1 })) })
 }
 function enqueue<T>(task: () => Promise<T>): Promise<T> {
   const next = queue.then(task, task)

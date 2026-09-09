@@ -20,3 +20,9 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; color: #b7c0c9; }
 button { border: 1px solid #3a424c; border-radius: 10px; padding: 10px 14px; background: #20262d; color: inherit; cursor: pointer; }
 button:hover { background: #29313a; }
+
+[hidden] { display: none !important; }
+textarea, input, select { box-sizing: border-box; width: 100%; margin: 8px 0 16px; padding: 12px; font: inherit; color: inherit; background: transparent; border: 1px solid #777; border-radius: 6px; }
+label { display: block; }
+button { margin: 6px 8px 6px 0; }
+details { margin: 20px 0; }

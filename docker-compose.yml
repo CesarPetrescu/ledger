@@ -55,6 +55,9 @@ services:
       <<: *common-env
       LEDGER_CALENDAR_ENCRYPTION_KEY: ${LEDGER_CALENDAR_ENCRYPTION_KEY:?set LEDGER_CALENDAR_ENCRYPTION_KEY}
       LEDGER_INDEX_URL: http://ledger-index:8083
+      LEDGER_STT_URL: ${LEDGER_STT_URL:-}
+      LEDGER_STT_API_KEY: ${LEDGER_STT_API_KEY:-}
+      LEDGER_STT_MODEL: ${LEDGER_STT_MODEL:-}
     depends_on:
       postgres: *postgres-ready
       ledger-index:

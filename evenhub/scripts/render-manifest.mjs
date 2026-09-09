@@ -19,9 +19,10 @@ const manifest = {
   min_sdk_version: '0.0.15',
   entrypoint: 'index.html',
   permissions: [
+    { name: 'g2-microphone', desc: 'User-initiated speech capture and search; no background recording.' },
     {
       name: 'network',
-      desc: 'Connects to the configured Ledger server for read-only project memory.',
+      desc: 'Connects to the configured Ledger server for project memory, confirmed capture, search and selected calendars.',
       whitelist: [origin],
     },
   ],

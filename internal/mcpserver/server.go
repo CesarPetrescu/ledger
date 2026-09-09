@@ -14,6 +14,7 @@ import (
 	"github.com/cesarpetrescu/ledger/internal/oauth"
 	"github.com/cesarpetrescu/ledger/internal/retrieval"
 	"github.com/cesarpetrescu/ledger/internal/store"
+	"github.com/cesarpetrescu/ledger/internal/transcription"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -28,12 +29,16 @@ type identity struct {
 type identityKey struct{}
 
 func NewServer(db *store.DB, indexURL string, services ...*calendarapi.Service) *mcp.Server {
-	server := mcp.NewServer(&mcp.Implementation{Name: "ledger", Version: "7"}, nil)
-	client := retrieval.NewClient(indexURL)
 	var calendar *calendarapi.Service
 	if len(services) > 0 {
 		calendar = services[0]
 	}
+	return NewServerWithSpeech(db, indexURL, calendar, nil)
+}
+
+func NewServerWithSpeech(db *store.DB, indexURL string, calendar *calendarapi.Service, speech *transcription.Client) *mcp.Server {
+	server := mcp.NewServer(&mcp.Implementation{Name: "ledger", Version: "8"}, nil)
+	client := retrieval.NewClient(indexURL)
 	read := &mcp.ToolAnnotations{ReadOnlyHint: true}
 	write := &mcp.ToolAnnotations{ReadOnlyHint: false}
 	calendarRead := &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: boolPointer(true)}
@@ -138,9 +143,10 @@ func NewServer(db *store.DB, indexURL string, services ...*calendarapi.Service) 
 		})
 
 	type appendInput struct {
-		Slug string `json:"slug" jsonschema:"project slug, 2 to 64 lowercase letters, digits, or hyphens"`
-		Kind string `json:"kind" jsonschema:"decision, note, todo, or status"`
-		Body string `json:"body" jsonschema:"entry body, 1 to 4000 characters"`
+		Slug           string `json:"slug" jsonschema:"project slug, 2 to 64 lowercase letters, digits, or hyphens"`
+		Kind           string `json:"kind" jsonschema:"decision, note, todo, or status"`
+		Body           string `json:"body" jsonschema:"entry body, 1 to 4000 characters"`
+		IdempotencyKey string `json:"idempotency_key,omitempty" jsonschema:"optional unique request key; reuse only for identical retries"`
 	}
 	mcp.AddTool(server, &mcp.Tool{Name: "append_entry", OutputSchema: outputSchema[entryReceipt](), Description: "Append an immutable entry to a project. " + DescriptionSuffix, Annotations: write},
 		func(ctx context.Context, request *mcp.CallToolRequest, input appendInput) (*mcp.CallToolResult, any, error) {
@@ -158,10 +164,18 @@ func NewServer(db *store.DB, indexURL string, services ...*calendarapi.Service) 
 			if err := store.ValidateContextHeader("MCP clientInfo.name", info.Name, true); err != nil {
 				return nil, nil, err
 			}
-			entry, err := db.AppendEntry(ctx, input.Slug, input.Kind, input.Body, info.Name, id.ClientID)
+			var entry store.Entry
+			var err error
+			if input.IdempotencyKey != "" {
+				entry, err = db.AppendEntryOnce(ctx, input.Slug, input.Kind, input.Body, info.Name, id.ClientID, input.IdempotencyKey)
+			} else {
+				entry, err = db.AppendEntry(ctx, input.Slug, input.Kind, input.Body, info.Name, id.ClientID)
+			}
 			return nil, map[string]any{"id": entry.ID, "created_at": entry.CreatedAt}, err
 		})
 
+	addGlassTools(server, db)
+	addSpeechTool(server, speech)
 	addHandoffTools(server, db)
 
 	mcp.AddTool(server, &mcp.Tool{Name: "list_calendars", OutputSchema: outputSchema[calendarList](), Description: "List the Nextcloud calendars explicitly selected by the owner. " + CalendarDescriptionSuffix, Annotations: calendarRead},

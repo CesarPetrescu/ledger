@@ -45,6 +45,7 @@ export interface PairingPrompt {
   userCode: string
   verificationUri: string
   expiresAt: number
+  scopes?: string[]
 }
 
 export type PairingCallback = (prompt: PairingPrompt) => void | Promise<void>
@@ -62,6 +63,8 @@ export class OAuthError extends Error {
 export class LedgerAuth {
   readonly server: string
   private session: StoredSession | null | undefined
+  private registrationId: string | undefined
+  private pairing: AbortController | undefined
 
   constructor(
     server: string,
@@ -79,7 +82,8 @@ export class LedgerAuth {
         return (await this.refresh(session)).accessToken
       } catch (error) {
         if (!(error instanceof OAuthError) || error.code !== 'invalid_grant') throw error
-        await this.clear()
+        // Reauthorize the same registered device so confirmed retry keys and
+        // reader checkpoints survive token revocation. Owner approval is still required.
       }
     }
 
@@ -93,10 +97,23 @@ export class LedgerAuth {
       return (await this.refresh(session)).accessToken
     } catch (error) {
       if (!(error instanceof OAuthError) || error.code !== 'invalid_grant') throw error
-      await this.clear()
-      return (await this.pair(onPairing)).accessToken
+      return (await this.pair(onPairing, session.scope)).accessToken
     }
   }
+
+  async requireScopes(scopes: string[], onPairing?: PairingCallback): Promise<string> {
+    if (scopes.some(scope => !['ledger:read', 'ledger:write', 'calendar:read'].includes(scope))) throw new Error('Unsupported Glass scope')
+    await this.accessToken(onPairing)
+    const session = await this.load()
+    if (!session) throw new Error('No Ledger session')
+    const requested = [...new Set([...session.scope.split(/\s+/), ...scopes])].sort().join(' ')
+    if (scopes.every(scope => session.scope.split(/\s+/).includes(scope))) return session.accessToken
+    return (await this.pair(onPairing, requested)).accessToken
+  }
+
+  async clientId(): Promise<string> { return (await this.load())?.clientId ?? '' }
+  async grantedScopes(): Promise<string[]> { return (await this.load())?.scope.split(/\s+/) ?? [] }
+  cancelPairing(): void { this.pairing?.abort(new DOMException('Pairing cancelled', 'AbortError')) }
 
   async reconnect(onPairing?: PairingCallback): Promise<string> {
     await this.revokeCurrent()
@@ -106,6 +123,7 @@ export class LedgerAuth {
   async revokeCurrent(): Promise<void> {
     const session = await this.load()
     if (session) {
+      this.registrationId = session.clientId
       try {
         await this.postForm<unknown>(
           '/oauth/revoke',
@@ -120,7 +138,7 @@ export class LedgerAuth {
 
   async clear(): Promise<void> {
     this.session = null
-    await this.storage.setLocalStorage(STORAGE_KEY, '')
+    if (!await this.storage.setLocalStorage(STORAGE_KEY, '')) throw new Error('Even App refused to clear Ledger credentials')
   }
 
   private async load(): Promise<StoredSession | null> {
@@ -136,11 +154,13 @@ export class LedgerAuth {
         typeof parsed.clientId !== 'string' ||
         typeof parsed.accessToken !== 'string' ||
         typeof parsed.refreshToken !== 'string' ||
-        typeof parsed.expiresAt !== 'number'
+        typeof parsed.expiresAt !== 'number' || !Number.isFinite(parsed.expiresAt) ||
+        typeof parsed.scope !== 'string' || !parsed.scope.split(/\s+/).includes('ledger:read')
       ) {
         await this.clear()
         return null
       }
+      this.registrationId = parsed.clientId
       this.session = parsed as StoredSession
       return this.session
     } catch {
@@ -156,63 +176,52 @@ export class LedgerAuth {
       refresh_token: session.refreshToken,
     })
     const token = await this.postForm<TokenResponse>('/oauth/token', form)
-    return this.saveToken(session.clientId, token)
+    return this.saveToken(session.clientId, token, session.scope)
   }
 
-  private async pair(onPairing?: PairingCallback): Promise<StoredSession> {
-    const registration = await this.fetchJSON<{ client_id: string }>('/oauth/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        client_name: 'Ledger Glass',
-        grant_types: [DEVICE_GRANT, 'refresh_token'],
-      }),
-    })
-    if (!registration.client_id) throw new Error('Ledger returned an empty OAuth client ID')
-
-    const device = await this.postForm<DeviceAuthorizationResponse>(
-      '/oauth/device',
-      new URLSearchParams({
-        client_id: registration.client_id,
-        scope: REQUESTED_SCOPE,
-        resource: `${this.server}/mcp`,
-      }),
-    )
-    this.validateDeviceResponse(device)
-
-    const intervalSeconds = Math.max(1, device.interval ?? 5)
-    const expiresAt = Date.now() + device.expires_in * 1000
-    await onPairing?.({ userCode: device.user_code, verificationUri: device.verification_uri, expiresAt })
-
-    let waitSeconds = intervalSeconds
-    while (Date.now() < expiresAt) {
-      await sleep(waitSeconds * 1000)
-      try {
-        const token = await this.postForm<TokenResponse>(
-          '/oauth/token',
-          new URLSearchParams({
-            grant_type: DEVICE_GRANT,
-            client_id: registration.client_id,
-            device_code: device.device_code,
-          }),
-        )
-        return this.saveToken(registration.client_id, token)
-      } catch (error) {
-        if (!(error instanceof OAuthError)) throw error
-        if (error.code === 'authorization_pending') continue
-        if (error.code === 'slow_down') {
-          waitSeconds += 5
-          continue
-        }
-        throw error
+  private async pair(onPairing?: PairingCallback, requested = this.session?.scope ?? REQUESTED_SCOPE): Promise<StoredSession> {
+    const controller = new AbortController()
+    this.pairing = controller
+    try {
+      let clientId = this.registrationId ?? this.session?.clientId
+      if (!clientId) {
+        const registration = await this.fetchJSON<{ client_id: string }>('/oauth/register', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ client_name: 'Ledger Glass', grant_types: [DEVICE_GRANT, 'refresh_token'] }),
+        })
+        if (!registration.client_id) throw new Error('Ledger returned an empty OAuth client ID')
+        clientId = registration.client_id
+        this.registrationId = clientId
       }
-    }
-
-    throw new OAuthError('expired_token', 'Ledger device approval expired')
+      const device = await this.postForm<DeviceAuthorizationResponse>('/oauth/device', new URLSearchParams({
+        client_id: clientId, scope: requested, resource: `${this.server}/mcp`,
+      }))
+      this.validateDeviceResponse(device)
+      const expiresAt = Date.now() + device.expires_in * 1000
+      await onPairing?.({ userCode: device.user_code, verificationUri: device.verification_uri, expiresAt, scopes: requested.split(/\s+/) })
+      let waitSeconds = Math.max(1, device.interval ?? 5)
+      while (Date.now() < expiresAt) {
+        await sleep(Math.min(waitSeconds * 1000, Math.max(0, expiresAt - Date.now())), controller.signal)
+        if (Date.now() >= expiresAt) break
+        try {
+          const token = await this.postForm<TokenResponse>('/oauth/token', new URLSearchParams({
+            grant_type: DEVICE_GRANT, client_id: clientId, device_code: device.device_code,
+          }))
+          return await this.saveToken(clientId, token, requested)
+        } catch (error) {
+          if (!(error instanceof OAuthError)) throw error
+          if (error.code === 'authorization_pending') continue
+          if (error.code === 'slow_down') { waitSeconds = Math.min(60, waitSeconds + 5); continue }
+          throw error
+        }
+      }
+      throw new OAuthError('expired_token', 'Ledger device approval expired')
+    } finally { if (this.pairing === controller) this.pairing = undefined }
   }
 
   private validateDeviceResponse(device: DeviceAuthorizationResponse): void {
-    if (!device.device_code || !device.user_code || !device.verification_uri || device.expires_in <= 0) {
+    if (!device.device_code || !device.user_code || !device.verification_uri || !Number.isFinite(device.expires_in) || device.expires_in <= 0 || device.expires_in > 600 ||
+        (device.interval !== undefined && (!Number.isFinite(device.interval) || device.interval < 1 || device.interval > 60))) {
       throw new Error('Ledger returned an invalid device authorization response')
     }
     const verificationURL = new URL(device.verification_uri)
@@ -221,11 +230,11 @@ export class LedgerAuth {
     }
   }
 
-  private async saveToken(clientId: string, token: TokenResponse): Promise<StoredSession> {
+  private async saveToken(clientId: string, token: TokenResponse, requested = REQUESTED_SCOPE): Promise<StoredSession> {
     if (
       !token.access_token ||
       !token.refresh_token ||
-      token.token_type.toLowerCase() !== 'bearer' ||
+      typeof token.token_type !== 'string' || token.token_type.toLowerCase() !== 'bearer' ||
       token.expires_in <= 0 ||
       token.expires_in > 86_400
     ) {
@@ -239,10 +248,10 @@ export class LedgerAuth {
       accessToken: token.access_token,
       refreshToken: token.refresh_token,
       expiresAt: Date.now() + token.expires_in * 1000,
-      scope: token.scope ?? REQUESTED_SCOPE,
+      scope: token.scope ?? requested,
     }
-    if (!session.scope.split(/\s+/).includes('ledger:read')) {
-      throw new Error('Ledger token is missing ledger:read scope')
+    if (requested.split(/\s+/).some(scope => !session.scope.split(/\s+/).includes(scope))) {
+      throw new Error('Ledger token is missing requested permissions')
     }
 
     const saved = await this.storage.setLocalStorage(STORAGE_KEY, JSON.stringify(session))
@@ -260,39 +269,44 @@ export class LedgerAuth {
   }
 
   private async fetchJSON<T>(path: string, init: RequestInit): Promise<T> {
-    const response = await fetch(new URL(path, this.server), {
-      ...init,
-      credentials: 'omit',
-      redirect: 'error',
-      headers: {
-        Accept: 'application/json',
-        ...init.headers,
-      },
-    })
-
-    const text = await response.text()
-    let body: unknown = null
-    if (text) {
-      try {
-        body = JSON.parse(text)
-      } catch {
-        if (!response.ok) throw new OAuthError(`http_${response.status}`, `Ledger OAuth returned HTTP ${response.status}`, response.status)
-        throw new Error('Ledger OAuth returned invalid JSON')
+    const controller = new AbortController()
+    const upstream = this.pairing?.signal
+    const cancel = () => controller.abort(upstream?.reason)
+    if (upstream?.aborted) cancel()
+    else upstream?.addEventListener('abort', cancel, { once: true })
+    const timer = setTimeout(() => controller.abort(new DOMException('Ledger OAuth timed out', 'TimeoutError')), 8_000)
+    try {
+      const response = await fetch(new URL(path, this.server), {
+        ...init, signal: controller.signal, credentials: 'omit', redirect: 'error',
+        headers: { Accept: 'application/json', ...init.headers },
+      })
+      const text = await response.text()
+      if (text.length > 65_536) throw new Error('Oversized OAuth response')
+      let body: unknown = null
+      if (text) {
+        try { body = JSON.parse(text) }
+        catch {
+          if (!response.ok) throw new OAuthError(`http_${response.status}`, `Ledger OAuth returned HTTP ${response.status}`, response.status)
+          throw new Error('Ledger OAuth returned invalid JSON')
+        }
       }
+      if (!response.ok) {
+        const oauth = (body ?? {}) as OAuthErrorBody
+        throw new OAuthError(oauth.error ?? `http_${response.status}`, oauth.error_description ?? `Ledger OAuth returned HTTP ${response.status}`, response.status)
+      }
+      return body as T
+    } finally {
+      clearTimeout(timer)
+      upstream?.removeEventListener('abort', cancel)
     }
-
-    if (!response.ok) {
-      const oauth = (body ?? {}) as OAuthErrorBody
-      throw new OAuthError(
-        oauth.error ?? `http_${response.status}`,
-        oauth.error_description ?? `Ledger OAuth returned HTTP ${response.status}`,
-        response.status,
-      )
-    }
-    return body as T
   }
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) { reject(signal.reason); return }
+    const cancel = () => { clearTimeout(timer); signal.removeEventListener('abort', cancel); reject(signal.reason) }
+    const timer = setTimeout(() => { signal.removeEventListener('abort', cancel); resolve() }, ms)
+    signal.addEventListener('abort', cancel, { once: true })
+  })
 }

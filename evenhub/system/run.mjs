@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { runFullApp, requiredJourneys } from './full-app.mjs'
 import { spawn, execFileSync } from 'node:child_process'
 import { createWriteStream } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
@@ -17,7 +18,8 @@ const control = 'http://127.0.0.1:9898'
 assert(out && runtime && process.env.GLASS_OWNER_PASSWORD, 'Run through system/run.sh, not against production')
 const dc = ['compose', '-f', 'docker-compose.yml', '-f', 'evenhub/system/compose.yml']
 const planned = ['security.tls-cors', 'owner.login', 'pairing.approve-empty', 'now.real-data', 'navigation.first-and-second', 'navigation.pagination', 'refresh.real-entry', 'menu.roundtrip', 'session.cold-restart', 'scope.write-denied', 'network.outage-recovery', 'session.revocation', 'pairing.deny', 'exit.bridge-request']
-const fullAppRequired = ['capture.confirm', 'capture.cancel', 'capture.retry-idempotency', 'recall.sources', 'recall.degraded', 'brief.all-pages', 'brief.checkpoint-restart', 'calendar.selected', 'calendar.timezones']
+const fullAppRequired = requiredJourneys
+planned.push(...requiredJourneys)
 const results = []
 const shots = []
 let sim, simOutput, browser, context, page, csrf = '', boot = 0, lastId = 0
@@ -156,7 +158,7 @@ async function stopSim() {
   if (!sim) return
   try {
     const entries = await logs()
-    await writeFile(join(out, `console-${boot}.json`), JSON.stringify(entries.filter(e => !/access[_-]?token|refresh[_-]?token|authorization|cookie|csrf|setlocalstorage|device_code/i.test(e.message)), null, 2))
+    await writeFile(join(out, `console-${boot}.json`), JSON.stringify(entries.filter(e => !/access[_-]?token|refresh[_-]?token|authorization|cookie|csrf|setlocalstorage|device_code|audioPcm|wav_base64|AudioEvent/i.test(e.message)), null, 2))
     const screenshot = await request('/api/screenshot/webview')
     if (screenshot.ok) await writeFile(join(out, `webview-${boot}.png`), Buffer.from(await screenshot.arrayBuffer()))
   } catch {}
@@ -181,13 +183,17 @@ async function admin(path, method = 'GET', data) {
   assert(response.ok(), `Owner API ${method} ${path}: ${response.status()}`)
   return response.status() === 204 ? undefined : response.json()
 }
-async function decide(code, action = 'approve') {
+async function decide(code, action = 'approve', expectedScopes) {
+  const pending = await pendingDevice()
+  assert.equal(pending.user_code, code)
+  const scopes = expectedScopes ?? pending.scope.split(/\s+/)
   await page.goto(`${server}/admin/connect`)
   await page.getByLabel('Connection code').fill(code)
   await page.getByRole('button', { name: 'Review connection', exact: true }).click()
   await page.getByRole('heading', { name: 'Approve this machine?' }).waitFor()
-  assert.equal(await page.getByText('Read project memory', { exact: true }).count(), 1)
-  assert.equal(await page.getByText('Add and update project memory', { exact: true }).count(), 0)
+  for (const [scope, label] of Object.entries({ 'ledger:read': 'Read project memory', 'ledger:write': 'Add and update project memory', 'calendar:read': 'Read selected calendars', 'calendar:write': 'Change selected calendars' })) {
+    assert.equal(await page.getByText(label, { exact: true }).count(), scopes.includes(scope) ? 1 : 0, `Permission review: ${scope}`)
+  }
   await page.screenshot({ path: join(out, `owner-approval-${boot}-${action}.png`), fullPage: true })
   await page.getByRole('button', { name: action === 'approve' ? 'Approve machine' : 'Deny', exact: true }).click()
   await page.locator('p[role=status]').filter({ hasText: action === 'approve' ? 'Machine approved.' : 'Connection denied.' }).waitFor()
@@ -320,6 +326,7 @@ try {
     assert(restored.equals(before), 'Closing the OS menu preserves the rendered page')
     await safeConsole()
   })
+  await runFullApp({ step, input, menu, view, capture, admin, sql, until, pendingDevice, decide, marker: () => lastId })
   await step('session.cold-restart', async () => {
     const count = sql('SELECT count(*) FROM oauth_client')
     const previousClientId = activeGlassClientId
@@ -436,9 +443,9 @@ try {
     target, tested_commit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
     tests: results, screenshots: shots, observations, platform_observations: platformObservations,
     full_app_complete: !failed && missingFullApp.length === 0, missing_full_app_journeys: missingFullApp,
-    real_components: ['production-built plugin; package generation validated separately', 'official native simulator and SDK', 'HTTPS with trusted CI CA', 'production nginx routes', 'all four Ledger Go services', 'production React owner UI in Chromium', 'PostgreSQL/pgvector with real migrations', 'real OAuth approval/token/revoke', 'MCP over real HTTP'],
-    substitutes: ['Vendor simulator replaces physical G2/R1/BLE', 'Virtual silent audio input; no speech-recognition claim', 'Separate persistence-contract suite doubles ONLY the host-storage methods; real OAuth/backend'],
-    not_covered: ['physical OS exit-confirmation and cancellation', 'native EHPK installation/loader (0.9.5 URL probe failed)', 'physical R1 event-source identity', 'BLE timing/battery/optical quality', 'Android host permissions and OS process eviction', 'STT accuracy', 'Capture/Recall/Brief/Calendar UI: not implemented yet', 'connected Nextcloud provider and real embedding/reranking model'],
+    real_components: ['production-built plugin; package generation validated separately', 'official native simulator and SDK', 'HTTPS with trusted CI CA', 'production nginx routes', 'all four Ledger Go services', 'production React owner UI in Chromium', 'PostgreSQL/pgvector with real migrations', 'real OAuth approval/token/revoke', 'MCP over real HTTP including confirmed capture, source recall, commit-ordered change feed, acknowledgements and actual calendar adapter'],
+    substitutes: ['Vendor simulator replaces physical G2/R1/BLE', 'PulseAudio signal replaces physical G2 microphone; deterministic external STT and Nextcloud protocol fixtures', 'Separate persistence-contract suite doubles ONLY the host-storage methods; real OAuth/backend'],
+    not_covered: ['physical OS exit-confirmation and cancellation', 'native EHPK installation/loader (0.9.5 URL probe failed)', 'physical R1 event-source identity', 'BLE timing/battery/optical quality', 'Android host permissions and OS process eviction', 'STT accuracy', 'production Nextcloud and speech-provider accuracy; real embedding/reranking model'],
   }
   await writeFile(join(out, 'screenshots.html'), `<!doctype html><meta charset="utf-8"><title>Ledger Glass — simulator evidence</title><h1>Official simulator captures</h1><p>Black previews composite the untouched RGBA frames; these are not hardware photographs.</p>${shots.map(shot => `<figure><img width="576" height="288" src="${shot.preview}"><figcaption>${shot.file}</figcaption></figure>`).join('')}`)
   await writeFile(join(out, 'report.json'), JSON.stringify(report, null, 2))
