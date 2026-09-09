@@ -5,6 +5,7 @@ import {
   ListItemContainerProperty,
   MenuContainerProperty,
   MenuItemProperty,
+  OsEventTypeList,
   RebuildPageContainer,
   TextContainerProperty,
   waitForEvenAppBridge,
@@ -59,16 +60,25 @@ function registerInput(): void {
         return
       }
 
-      // Contextual-menu open/close also emits foreground lifecycle events.
-      // Do not turn those lifecycle signals into navigation.
-      const eventType = event.sysEvent?.eventType ?? 0
-      if (event.sysEvent && eventType === 3) {
+      if (!event.sysEvent) return
+      // CLICK_EVENT is protobuf value 0 and therefore commonly arrives as undefined.
+      const eventType = event.sysEvent.eventType ?? OsEventTypeList.CLICK_EVENT
+      if (eventType === OsEventTypeList.CLICK_EVENT) {
+        if (currentScreen === 'now' || currentScreen === 'project') await showProjects()
+        return
+      }
+      if (eventType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
         await bridge.shutDownPageContainer(1)
         return
       }
-      if (event.sysEvent && (eventType === 6 || eventType === 7)) {
+      if (
+        eventType === OsEventTypeList.ABNORMAL_EXIT_EVENT ||
+        eventType === OsEventTypeList.SYSTEM_EXIT_EVENT
+      ) {
         await ledger.close()
       }
+      // FOREGROUND_ENTER_EVENT / FOREGROUND_EXIT_EVENT are lifecycle-only here.
+      // Rebuilding on them would make opening/closing system UI change screens.
     })
   })
 }
