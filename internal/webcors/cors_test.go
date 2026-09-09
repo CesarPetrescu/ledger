@@ -3,6 +3,7 @@ package webcors
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -26,8 +27,10 @@ func TestAllowExactPreflight(t *testing.T) {
 	if got := res.Header().Get("Access-Control-Allow-Origin"); got != "*" {
 		t.Fatalf("allow origin = %q", got)
 	}
-	if got := res.Header().Get("Access-Control-Allow-Headers"); got == "" {
-		t.Fatal("allow headers missing")
+	for _, required := range []string{"authorization", "mcp-method", "mcp-name", "mcp-protocol-version"} {
+		if !strings.Contains(strings.ToLower(res.Header().Get("Access-Control-Allow-Headers")), required) {
+			t.Errorf("missing modern protocol preflight header %q", required)
+		}
 	}
 	if got := res.Header().Get("Access-Control-Allow-Credentials"); got != "" {
 		t.Fatalf("credentialed CORS unexpectedly enabled: %q", got)

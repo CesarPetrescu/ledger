@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { beforeAll, afterAll, describe, it } from 'vitest'
 import { LedgerAuth } from '../src/auth'
+import { LedgerMCP } from '../src/ledger'
 
 // ONLY TEST DOUBLE: the two Even host-storage methods. Every OAuth/admin
 // request below uses the actual disposable Ledger stack and database.
@@ -94,6 +95,22 @@ describe('Real OAuth with only the host-storage boundary doubled', () => {
     assert(current.clientId === previous.clientId)
     assert.equal(approvals, 1)
     await auth.requireScopes(['ledger:write'], () => { throw new Error('Existing grant prompted again') })
+  })
+  it('preserves real SDK client identity across stateless MCP writes and retries', async () => {
+    await owner('/projects/ci-contract', 'PUT', { name: 'Protocol contract', tier: 'park', hours_wk: 0 })
+    const auth = new LedgerAuth(server, storage)
+    const token = await auth.accessToken(approve)
+    const client = new LedgerMCP(server)
+    try {
+      const draft = { key: 'protocol-contract-0001', slug: 'ci-contract', kind: 'note', body: 'Real stateless TypeScript client identity', confirmed: true, clientId: await auth.clientId() }
+      const first = await client.append(token, draft)
+      const retry = await client.append(token, draft)
+      assert.equal(String(first.id), String(retry.id))
+      const entry = await client.entry(token, String(first.id))
+      assert.equal(entry.source, 'ledger-glass')
+      assert.equal(entry.body, draft.body)
+      assert.equal((await owner('/projects/ci-contract')).entries.length, 1)
+    } finally { await client.close() }
   })
   it('rejects a host refusal to persist a freshly issued real grant', async () => {
     const refusing = new HostStorageDouble()

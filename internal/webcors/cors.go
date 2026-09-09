@@ -4,7 +4,7 @@ import "net/http"
 
 const (
 	allowMethods  = "GET, POST, DELETE, OPTIONS"
-	allowHeaders  = "Authorization, Content-Type, Accept, Last-Event-ID, Mcp-Method, Mcp-Protocol-Version, Mcp-Session-Id"
+	allowHeaders  = "Authorization, Content-Type, Accept, Last-Event-ID, Mcp-Method, Mcp-Name, Mcp-Protocol-Version, Mcp-Session-Id"
 	exposeHeaders = "Mcp-Session-Id"
 )
 

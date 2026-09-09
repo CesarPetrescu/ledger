@@ -75,7 +75,11 @@ export class LedgerMCP {
         },
       },
     })
-    const client = new Client({ name: 'ledger-glass', version: '0.1.0' })
+    // The Go server is stateless. The legacy initialize-only identity is lost
+    // between requests; modern MCP carries clientInfo in every request.
+    const client = new Client({ name: 'ledger-glass', version: '0.1.0' }, {
+      versionNegotiation: { mode: { pin: '2026-07-28' } },
+    })
     try {
       await client.connect(transport, { timeout: 12_000 })
     } catch (error) {
