@@ -98,7 +98,7 @@ jobs:
             sleep 10
           done
       - name: Upload Ledger Glass package and lockfile
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ledger-glass-ci
           path: |
@@ -154,7 +154,7 @@ jobs:
         working-directory: android
         run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
       - name: Upload development APK
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ledger-android-debug-api-${{ matrix.api }}
           path: android/app/build/outputs/apk/debug/app-debug.apk
@@ -190,7 +190,7 @@ jobs:
 
       - name: Upload Android test reports
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: android-reports-api-${{ matrix.api }}
           path: |
@@ -231,7 +231,7 @@ jobs:
         run: ./scripts/test-wine.sh 2>&1 | tee "$RUNNER_TEMP/wine-tests.log"
       - name: Upload Wine test log
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: wine-test-log
           path: ${{ runner.temp }}/wine-tests.log
