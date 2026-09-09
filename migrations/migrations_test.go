@@ -79,7 +79,7 @@ func TestAdminSessionMigrationStoresHashesOnly(t *testing.T) {
 	for _, entry := range entries {
 		names = append(names, entry.Name())
 	}
-	if len(names) != 6 || names[0] != "0001_init.sql" || names[1] != "0002_admin_session.sql" || names[2] != "0003_admin_events.sql" || names[3] != "0004_calendar.sql" || names[4] != "0005_handoffs.sql" || names[5] != "0006_device_auth.sql" {
+	if len(names) != 7 || names[0] != "0001_init.sql" || names[1] != "0002_admin_session.sql" || names[2] != "0003_admin_events.sql" || names[3] != "0004_calendar.sql" || names[4] != "0005_handoffs.sql" || names[5] != "0006_device_auth.sql" || names[6] != "0007_glass.sql" {
 		t.Fatalf("migration files = %v, want strictly numbered sequence", names)
 	}
 }
@@ -131,6 +131,30 @@ func TestHandoffMigrationEnforcesMessagesAndFiles(t *testing.T) {
 	} {
 		if !strings.Contains(sql, required) {
 			t.Errorf("handoff migration missing %q", required)
+		}
+	}
+}
+
+func TestGlassMigrationOrdersChangesAndIsolatesReaders(t *testing.T) {
+	body, err := Files.ReadFile("0007_glass.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToLower(string(body))
+	for _, required := range []string{
+		"lock table entry in share row exclusive mode",
+		"create table entry_write_receipt",
+		"primary key (client_id, request_id)",
+		"octet_length(payload_hash) = 32",
+		"create table entry_change",
+		"pg_advisory_xact_lock(7103376)",
+		"after insert on entry",
+		"create table glass_reader",
+		"delivered >= checkpoint",
+		"primary key(client_id, reader)",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Errorf("glass migration missing %q", required)
 		}
 	}
 }
