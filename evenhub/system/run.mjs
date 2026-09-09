@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn, execFileSync } from 'node:child_process'
 import { createWriteStream } from 'node:fs'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { chromium } from 'playwright'
@@ -16,7 +16,7 @@ const target = process.env.GLASS_TARGET === 'package' ? 'https://localhost:9443/
 const control = 'http://127.0.0.1:9898'
 assert(out && runtime && process.env.GLASS_OWNER_PASSWORD, 'Run through system/run.sh, not against production')
 const dc = ['compose', '-f', 'docker-compose.yml', '-f', 'evenhub/system/compose.yml']
-const planned = ['security.tls-cors', 'owner.login', 'pairing.approve-empty', 'now.real-data', 'navigation.first-and-second', 'navigation.pagination', 'refresh.real-entry', 'menu.roundtrip', 'session.cold-restart', 'scope.write-denied', 'network.outage-recovery', 'session.revocation', 'pairing.deny', 'exit.dialog']
+const planned = ['security.tls-cors', 'owner.login', 'pairing.approve-empty', 'now.real-data', 'navigation.first-and-second', 'navigation.pagination', 'refresh.real-entry', 'menu.roundtrip', 'session.cold-restart', 'scope.write-denied', 'network.outage-recovery', 'session.revocation', 'pairing.deny', 'exit.bridge-request']
 const fullAppRequired = ['capture.confirm', 'capture.cancel', 'capture.retry-idempotency', 'recall.sources', 'recall.degraded', 'brief.all-pages', 'brief.checkpoint-restart', 'calendar.selected', 'calendar.timezones']
 const results = []
 const shots = []
@@ -98,7 +98,7 @@ function alpha(png) {
   for (let i = 0; i < result.length; i++) result[i] = png.data[i * 4 + 3]
   return result
 }
-async function capture(name) {
+async function capture(name, allowBlank = false) {
   // Keep the genuine RGBA frame, and wait for native animations to settle.
   let bytes, png, mask, previous, stable = 0
   const deadline = Date.now() + 5000
@@ -126,7 +126,7 @@ async function capture(name) {
   await writeFile(join(out, `preview-${filename}`), PNG.sync.write(preview))
   shots.push({ file: filename, preview: `preview-${filename}`, lit_pixels: lit, source: 'official simulator LVGL RGBA framebuffer' })
   assert(stable >= 3, 'Native framebuffer did not settle; final frame saved')
-  assert(lit > 100 && lit < mask.length * 0.95, `Blank/solid native framebuffer: ${lit} lit pixels`)
+  assert((allowBlank && lit === 0) || (lit > 100 && lit < mask.length * 0.95), `Blank/solid native framebuffer: ${lit} lit pixels`)
   return mask
 }
 function changed(a, b) {
@@ -409,11 +409,17 @@ try {
     await capture('approval-denied')
     await safeConsole()
   })
-  await step('exit.dialog', async () => {
-    const before = await capture('before-exit-dialog')
+  await step('exit.bridge-request', async () => {
+    const before = await capture('before-exit-request')
+    const nativeLog = join(runtime, `simulator-${boot}.log`)
+    const offset = (await readFile(nativeLog, 'utf8')).length
     await input('double_click')
-    await delay(500)
-    changed(before, await capture('system-exit-dialog'))
+    await until(async () => (await readFile(nativeLog, 'utf8')).slice(offset).includes('ShutDownPageContainer'), 'native shutdown request received')
+    // 0.9.5 clears the page for this request; it does not render the physical
+    // Even OS confirmation dialog. Blank is allowed ONLY for this exit probe.
+    const after = await capture('native-exit-response', true)
+    changed(before, after)
+    platformObservations.push({ case: 'exit', bridge_request_received: true, framebuffer_cleared: after.every(value => value === 0), confirmation_dialog_verified: false, limitation: 'Native simulator received shutdown; physical OS confirmation/cancel still requires hardware testing' })
     await safeConsole()
   })
 } catch (error) {
@@ -432,7 +438,7 @@ try {
     full_app_complete: !failed && missingFullApp.length === 0, missing_full_app_journeys: missingFullApp,
     real_components: ['production-built plugin; package generation validated separately', 'official native simulator and SDK', 'HTTPS with trusted CI CA', 'production nginx routes', 'all four Ledger Go services', 'production React owner UI in Chromium', 'PostgreSQL/pgvector with real migrations', 'real OAuth approval/token/revoke', 'MCP over real HTTP'],
     substitutes: ['Vendor simulator replaces physical G2/R1/BLE', 'Virtual silent audio input; no speech-recognition claim', 'Separate persistence-contract suite doubles ONLY the host-storage methods; real OAuth/backend'],
-    not_covered: ['native EHPK installation/loader (0.9.5 URL probe failed)', 'physical R1 event-source identity', 'BLE timing/battery/optical quality', 'Android host permissions and OS process eviction', 'STT accuracy', 'Capture/Recall/Brief/Calendar UI: not implemented yet', 'connected Nextcloud provider and real embedding/reranking model'],
+    not_covered: ['physical OS exit-confirmation and cancellation', 'native EHPK installation/loader (0.9.5 URL probe failed)', 'physical R1 event-source identity', 'BLE timing/battery/optical quality', 'Android host permissions and OS process eviction', 'STT accuracy', 'Capture/Recall/Brief/Calendar UI: not implemented yet', 'connected Nextcloud provider and real embedding/reranking model'],
   }
   await writeFile(join(out, 'screenshots.html'), `<!doctype html><meta charset="utf-8"><title>Ledger Glass — simulator evidence</title><h1>Official simulator captures</h1><p>Black previews composite the untouched RGBA frames; these are not hardware photographs.</p>${shots.map(shot => `<figure><img width="576" height="288" src="${shot.preview}"><figcaption>${shot.file}</figcaption></figure>`).join('')}`)
   await writeFile(join(out, 'report.json'), JSON.stringify(report, null, 2))

@@ -49,7 +49,7 @@ afterAll(async () => {
   }
 })
 
-describe.sequential('Real OAuth with only the host-storage boundary doubled', () => {
+describe('Real OAuth with only the host-storage boundary doubled', () => {
   const storage = new HostStorageDouble()
   let firstToken
   it('reuses a real grant after reconstructing the application client', async () => {

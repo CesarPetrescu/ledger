@@ -16,7 +16,9 @@ Playwright Chromium -> production React owner console -> real device approval
 
 The index service is also running, but actual model retrieval and the unimplemented Recall UI are not claimed as covered. The native suite has no mocked HTTP replies, Vite proxy, injected access token, SQLite substitute, or TLS bypass. Fictional data is written through the actual owner API. SQL only observes user-visible pending codes and client counts, never creates credentials or approves a device. Outage testing stops/restarts the real MCP container.
 
-Fourteen journeys exercise HTTPS/CORS and anonymous rejection; browser login/CSRF; read-only approval; empty registry; real NOW data; first-item selection; 25-project pagination; external entry writes followed by Refresh; menu preservation; forced restart recovery; denied writes; real service outage/recovery; revocation; denied approval; and exit-dialog rendering. Native input waits for the actual context-menu close event, and screenshots wait for settled framebuffers.
+Fourteen journeys exercise HTTPS/CORS and anonymous rejection; browser login/CSRF; read-only approval; empty registry; real NOW data; first-item selection; 25-project pagination; external entry writes followed by Refresh; menu preservation; forced restart recovery; denied writes; real service outage/recovery; revocation; denied approval; and receipt of the native exit request. Native input waits for the actual context-menu close event, and screenshots wait for settled framebuffers.
+
+The exit probe independently requires the native process to log `ShutDownPageContainer` and the framebuffer to change. Simulator 0.9.5 clears the page rather than showing the physical OS confirmation dialog; blank output is allowed only for this explicitly labelled exit probe. Confirmation/cancellation remains unverified, not counted as a successful dialog test.
 
 ## Host-storage contract suite — one narrowly scoped double
 
@@ -46,7 +48,7 @@ Failures upload evidence with `if: always()`. Credentials, cookies, private keys
 
 ## Remaining hardware/provider limits
 
-Physical R1 source identity, BLE timing/loss, optical readability, battery use, Android host permissions/eviction, and actual Even App storage/package installation remain unverified here. Virtual silent audio only allows native simulator startup; it does not prove microphone or STT accuracy. Actual Nextcloud and speech/model providers should be tested with disposable instances/recorded audio when their app features are implemented in this same PR.
+Physical R1 source identity, BLE timing/loss, optical readability, battery use, Android host permissions/eviction, OS exit-confirmation/cancellation, and actual Even App storage/package installation remain unverified here. Virtual silent audio only allows native simulator startup; it does not prove microphone or STT accuracy. Actual Nextcloud and speech/model providers should be tested with disposable instances/recorded audio when their app features are implemented in this same PR.
 
 ## Reproduce
 
