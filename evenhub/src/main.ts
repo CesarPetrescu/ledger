@@ -59,6 +59,8 @@ function registerInput(): void {
         return
       }
 
+      // Contextual-menu open/close also emits foreground lifecycle events.
+      // Do not turn those lifecycle signals into navigation.
       const eventType = event.sysEvent?.eventType ?? 0
       if (event.sysEvent && eventType === 3) {
         await bridge.shutDownPageContainer(1)
@@ -66,10 +68,6 @@ function registerInput(): void {
       }
       if (event.sysEvent && (eventType === 6 || eventType === 7)) {
         await ledger.close()
-        return
-      }
-      if (event.sysEvent && eventType === 0) {
-        if (currentScreen === 'now' || currentScreen === 'project') await showProjects()
       }
     })
   })
