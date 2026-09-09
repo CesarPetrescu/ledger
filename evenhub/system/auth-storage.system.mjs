@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { setTimeout as delay } from 'node:timers/promises'
 import { beforeAll, afterAll, describe, it } from 'vitest'
 import { LedgerAuth } from '../src/auth'
 import { LedgerMCP } from '../src/ledger'
@@ -53,8 +54,10 @@ afterAll(async () => {
 describe('Real OAuth with only the host-storage boundary doubled', () => {
   const storage = new HostStorageDouble()
   let firstToken
+  let firstGrantAt
   it('reuses a real grant after reconstructing the application client', async () => {
     firstToken = await new LedgerAuth(server, storage).accessToken(approve)
+    firstGrantAt = Date.now()
     assert(firstToken, 'Real OAuth did not issue an access token')
     const count = (await owner('/oauth/clients')).clients.length
     const restored = await new LedgerAuth(server, storage).accessToken(() => { throw new Error('Stored session unexpectedly prompted for approval') })
@@ -130,7 +133,12 @@ describe('Real OAuth with only the host-storage boundary doubled', () => {
       assert.equal((await owner('/projects/ci-contract')).entries.length,1)
     } finally { await client.close() }
   })
-  it('rejects a host refusal to persist a freshly issued real grant', async () => {
+  it('rejects a host refusal to persist a freshly issued real grant', { timeout: 75_000 }, async () => {
+    // This is the sixth device authorization. Respect the real five/minute
+    // limit; do not reset the server or weaken production throttling. Start
+    // beyond the first completed grant's minute so setup time cannot race it.
+    assert(Number.isFinite(firstGrantAt))
+    await delay(Math.max(0, 61_000 - (Date.now() - firstGrantAt)))
     const refusing = new HostStorageDouble()
     refusing.refuseWrites = true
     await assert.rejects(() => new LedgerAuth(server, refusing).accessToken(approve), /refused to persist/)
