@@ -1,68 +1,66 @@
 # Ledger Glass system tests
 
-The required CI job drives the **official native Even Hub simulator** against the production Ledger Compose deployment. It stays in PR #34. It is not a handwritten imitation of the glasses.
+PR #34 adds two required suites. Each builds its own disposable **production Ledger Compose stack**, keeping authentication, database behaviour and rate limits real.
 
-## Real path under test
+## Native system suite
 
 ```text
-Official simulator: native WebView + SDK + LVGL renderer
+Official Even Hub simulator: native WebView + SDK + LVGL
     -> production-built Ledger Glass, HTTPS :9443
     -> HTTPS :8443 -> CI TLS edge -> production nginx
-    -> real ledger-auth / ledger-mcp / ledger-admin / ledger-index
+    -> real Ledger OAuth / MCP / admin services
     -> PostgreSQL + pgvector + production migrations
 
-Playwright Chromium -> production React owner UI -> real OAuth device approval
+Playwright Chromium -> production React owner console -> real device approval
 ```
 
-Different HTTPS origins exercise actual WebView CORS. There is no Vite proxy, Playwright response interception, fake MCP response, injected access token, SQLite substitute, or disabled TLS verification. Fictional data is created through the real owner API. SQL only observes pending user-visible codes and client counts; it never inserts credentials or approves a device. Failure injection stops and restarts the actual MCP container.
+The index service is also running, but actual model retrieval and the unimplemented Recall UI are not claimed as covered. The native suite has no mocked HTTP replies, Vite proxy, injected access token, SQLite substitute, or TLS bypass. Fictional data is written through the actual owner API. SQL only observes user-visible pending codes and client counts, never creates credentials or approves a device. Outage testing stops/restarts the real MCP container.
 
-## Coverage
+Fourteen journeys exercise HTTPS/CORS and anonymous rejection; browser login/CSRF; read-only approval; empty registry; real NOW data; first-item selection; 25-project pagination; external entry writes followed by Refresh; menu preservation; forced restart recovery; denied writes; real service outage/recovery; revocation; denied approval; and exit-dialog rendering. Native input waits for the actual context-menu close event, and screenshots wait for settled framebuffers.
 
-Fourteen executable journeys cover TLS/CORS/auth rejection; actual owner login and CSRF; read-only device approval; empty registry; live project data; first-item selection; 25-project pagination; another client's entry followed by Refresh; context-menu round trips; cold restart; write-scope denial; real service outage/recovery; revocation; approval denial; and native exit-dialog rendering.
+## Host-storage contract suite — one narrowly scoped double
 
-The harness waits for the native menu-close event rather than sending clicks into its closing animation. Screenshots wait for a settled framebuffer. Tests combine post-bridge-ACK observations, actual API/database receipts, decoded 576x288 alpha-channel assertions, and native gestures. A failed prerequisite leaves dependent journeys **not_run**, never passed.
+The observed simulator 0.9.5 session was lost after forced process termination. The native test **does not inject a replacement token**: it verifies real re-approval and recovery and records `native_session_restored: false` in the platform observations. This does not establish what a physical Even App host will do.
 
-Capture, Recall, Brief, and Calendar UI journeys are not implemented yet. They remain explicit missing coverage rather than success mocks. `client-checks` includes this suite; review-ready PRs and main/release CI enable the full-app gate, which fails until those journeys are implemented and pass. Physical acceptance is separate and cannot be proved by a CI checkbox.
+A separate suite imports the real application `LedgerAuth` class. **Only `getLocalStorage` and `setLocalStorage` are doubled.** All login, device authorization, access/refresh issuance, rotation and revocation go through the real HTTPS server and PostgreSQL. Four cases cover restored grant reuse without new registration, real token rotation with coherent persistence, re-approval after owner revocation, and refusal to claim success when host persistence fails.
 
-## Packaging: supported checks versus installation
+These are storage-boundary contract tests, not proof of native persistent storage or encryption. Each suite gets a separate real deployment so tests do not bypass or reset production rate limits.
 
-Every run builds an actual `.ehpk` with official CLI 0.1.14, validates its EHPK magic/nonempty output, records the manifest, SHA-256 of the package and every build input, and checks that the official packer rejects a missing entrypoint and invalid package ID without leaving output.
+## Packaging boundary
 
-**Native EHPK installation is not claimed.** Direct EHPK-URL trials on simulator 0.9.5 produced a blank WebView, although the documentation's example mentions EHPK URLs. The installed wrapper passes the URL to the native executable; the official packer exports creation, not an unpack API. The required runtime test therefore uses the exact production build supplied to the official packer. It does not replace the package loader with an invented implementation.
+Every run builds an actual `.ehpk` with official CLI 0.1.14, checks EHPK magic/nonempty output, records manifest and SHA-256 hashes of package/build inputs, and requires the official packer to reject missing entrypoints and invalid package IDs without producing output.
 
-The unsupported URL probe is retained for reproduction via manual workflow input `simulator_target=package` or `GLASS_TARGET=package`. It fails if no real application starts; it is not labelled a successful package test. Actual package installation remains a device acceptance item.
+**Native package installation is not claimed.** Direct EHPK-URL trials on simulator 0.9.5 produced a blank WebView; the installed CLI exports creation, not an unpack API. Runtime tests use the exact production build supplied to the official packer, not an invented package loader. The unsupported URL probe remains available through manual workflow input `simulator_target=package` and fails when no application starts. Actual Even App installation remains a hardware acceptance item.
 
-## Evidence and privacy
+## Required gates and missing features
 
-Artifacts contain raw native RGBA frames, black-composited previews and an HTML gallery, owner-console screenshots, JSON/JUnit outcomes, sanitised logs, dependency versions, tested commit, package/input checksums, and the actual CI package. Raw frames are preserved for alpha assertions; previews are a display conversion, not simulated designs.
+`client-checks` includes both suites. Draft PRs test implemented flows. Review-ready PRs and main/release CI also require executable Capture, Recall, Brief and Calendar journeys. Those UIs are not implemented yet: missing journeys explicitly fail the full-app gate and are never replaced by success mocks. Hardware acceptance remains separate.
 
-Failures upload evidence with `if: always()`. Private keys, tokens, cookies, and simulator credential storage are excluded. Per-run random credentials, loopback ports and disposable data avoid production. Cleanup removes containers, volumes, temporary OS/NSS certificate trust entries and the private runtime directory.
+Failed prerequisites leave dependent native cases `not_run`, never passed. Reports identify the exact tested merge commit, actual component coverage, substitutions, and limitations. Contract-suite reports are separate from native framebuffer reports.
 
-## Explicit boundaries
+## Artifacts and privacy
 
-| Component | Real in this suite | Still requires other tests |
-| --- | --- | --- |
-| Glasses platform | Official SDK, native renderer, supported gestures/menu | Physical R1 event-source identity, BLE timing/loss, optics, battery |
-| Server | Production proxy, four Go services, PostgreSQL, migrations, OAuth, owner UI, MCP | Production environment and deployment configuration |
-| Persistence | Cold restart of the actual simulator | Android permissions, host eviction, physical phone locking |
-| Audio | Virtual silent input only for native startup | Actual microphone/acoustics and STT accuracy; Capture remains unimplemented |
-| Inference/calendar | Real server components, inference deliberately unavailable | Recall UI, actual model, Calendar UI and connected Nextcloud provider |
-| Packaging | Official packer and validated build inputs/output | Native EHPK loader/installation on Even App |
+Each run uploads JSON/JUnit reports, sanitised logs, version/commit receipts, package hashes and the actual CI package. The native suite adds raw 576x288 RGBA screenshots, black-composited previews, an HTML gallery, and owner-console screenshots. Preview conversion is not a design mock; raw frames are retained for alpha-channel assertions.
 
-Future unsupported hardware events should use narrowly labelled bridge-contract tests, not fake the backend. Capture/Calendar should add recorded-audio/disposable-provider tests in this same PR. A production account or microphone recording is not needed for the current system suite.
+Failures upload evidence with `if: always()`. Credentials, cookies, private keys and simulator storage are excluded. Credentials are generated per run; exposed ports bind to loopback; production is never contacted. Cleanup removes containers, volumes, temporary OS/NSS certificate trust entries and private runtime data.
+
+## Remaining hardware/provider limits
+
+Physical R1 source identity, BLE timing/loss, optical readability, battery use, Android host permissions/eviction, and actual Even App storage/package installation remain unverified here. Virtual silent audio only allows native simulator startup; it does not prove microphone or STT accuracy. Actual Nextcloud and speech/model providers should be tested with disposable instances/recorded audio when their app features are implemented in this same PR.
 
 ## Reproduce
 
-Use a disposable Ubuntu 24.04 machine with Docker Compose and the prerequisites in `.github/workflows/glass-system.yml`. The script temporarily installs then removes a uniquely named local CI certificate; do not run on production.
+Use a disposable Ubuntu 24.04 machine with Docker Compose and prerequisites from `.github/workflows/glass-system.yml`. The script temporarily installs and removes a uniquely named local certificate; do not run on production.
 
 ```sh
 npm --prefix evenhub ci
 npm --prefix evenhub/system ci
 (cd evenhub/system && npx playwright install --with-deps chromium)
-GLASS_TARGET=web bash evenhub/system/run.sh
-# Strict complete-app gate (blocked until missing journeys are implemented):
-GLASS_TARGET=web GLASS_REQUIRE_FULL_APP=true bash evenhub/system/run.sh
-# Optional reproduction of the vendor package-URL compatibility failure:
+GLASS_SUITE=native GLASS_TARGET=web bash evenhub/system/run.sh
+GLASS_SUITE=host-contract GLASS_TARGET=web bash evenhub/system/run.sh
+# Complete-app gate (blocked until the missing journeys are implemented):
+GLASS_REQUIRE_FULL_APP=true GLASS_TARGET=web bash evenhub/system/run.sh
+# Optional vendor package-URL failure diagnostic:
 GLASS_TARGET=package bash evenhub/system/run.sh
 ```
 

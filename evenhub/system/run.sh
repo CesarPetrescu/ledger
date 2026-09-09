@@ -53,10 +53,22 @@ node --version >> "$GLASS_ARTIFACT_DIR/versions.txt"
 npm --prefix evenhub ls --depth=0 >> "$GLASS_ARTIFACT_DIR/versions.txt"
 git archive --format=tar HEAD evenhub .github/workflows > "$GLASS_ARTIFACT_DIR/tested-source.tar"
 "${DC[@]}" up -d > "$GLASS_RUNTIME_DIR/start.log" 2>&1 || { cat "$GLASS_RUNTIME_DIR/start.log"; exit 1; }
-pulseaudio --start --exit-idle-time=-1
-pactl load-module module-null-sink sink_name=glassci >/dev/null
-pactl set-default-source glassci.monitor
-export LIBGL_ALWAYS_SOFTWARE=1
-export WEBKIT_DISABLE_DMABUF_RENDERER=1
-export GDK_BACKEND=x11
-xvfb-run -a -s '-screen 0 1280x1024x24' dbus-run-session -- node evenhub/system/run.mjs
+# Separate jobs use separate real deployments, preserving production rate limits.
+if [[ "${GLASS_SUITE:-native}" == host-contract ]]; then
+  healthy=0
+  for attempt in $(seq 1 60); do
+    status=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 3 "$LEDGER_PUBLIC_URL/admin/api/session" || true)
+    if [[ "$status" == 401 ]]; then healthy=1; break; fi
+    sleep 1
+  done
+  test "$healthy" -eq 1
+  (cd evenhub && npx vitest run --config system/vitest.config.mjs)
+else
+  pulseaudio --start --exit-idle-time=-1
+  pactl load-module module-null-sink sink_name=glassci >/dev/null
+  pactl set-default-source glassci.monitor
+  export LIBGL_ALWAYS_SOFTWARE=1
+  export WEBKIT_DISABLE_DMABUF_RENDERER=1
+  export GDK_BACKEND=x11
+  xvfb-run -a -s '-screen 0 1280x1024x24' dbus-run-session -- node evenhub/system/run.mjs
+fi
