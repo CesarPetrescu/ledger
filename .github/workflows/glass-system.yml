@@ -47,12 +47,14 @@ jobs:
           npm --prefix evenhub/system ci --no-audit --no-fund
           cd evenhub/system
           npx playwright install --with-deps chromium
-      - name: Record official tooling capabilities for reproducible diagnostics
+      - name: Record installed tooling source for reproducible diagnostics
         run: |
           mkdir -p evenhub/system/artifacts
           evenhub/node_modules/.bin/evenhub --help > evenhub/system/artifacts/cli-help.txt
-          evenhub/node_modules/.bin/evenhub-simulator --help > evenhub/system/artifacts/simulator-help.txt
-          find evenhub/node_modules/@evenrealities/evenhub-cli evenhub/node_modules/@evenrealities/evenhub-simulator evenhub/node_modules/@modelcontextprotocol/client -type f \( -name '*.js' -o -name '*.mjs' -o -name 'package.json' \) -print0 | tar --null -czf evenhub/system/artifacts/tooling-diagnostics.tar.gz -T -
+          # Native simulator initialises GTK even with --help. Its normal launch
+          # is inside Xvfb in run.sh; do not launch it outside that environment.
+          # Include JS declarations/source only, never native binaries or fonts.
+          find evenhub/node_modules/@evenrealities/evenhub-cli evenhub/node_modules/@evenrealities/evenhub-simulator evenhub/node_modules/@modelcontextprotocol/client -type f \( -name '*.js' -o -name '*.mjs' -o -name '*.ts' -o -name 'package.json' \) -print0 | tar --null -czf evenhub/system/artifacts/tooling-diagnostics.tar.gz -T -
       - name: Real deployment and official simulator journeys
         run: bash evenhub/system/run.sh
       - name: Upload system evidence, including failures
