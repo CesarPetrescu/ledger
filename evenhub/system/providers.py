@@ -18,6 +18,7 @@ import threading
 import wave
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
@@ -45,9 +46,12 @@ def event(uid, title, start, end, date=False, tz=None):
 def fixtures():
     tomorrow = datetime.now(timezone.utc).date() + timedelta(days=1)
     next_day = tomorrow + timedelta(days=1)
+    instant = datetime(tomorrow.year, tomorrow.month, tomorrow.day, 23, 30, tzinfo=timezone.utc)
+    local_start = instant.astimezone(ZoneInfo('Europe/Bucharest')).strftime('%Y%m%dT%H%M%S')
+    local_end = (instant + timedelta(hours=1)).astimezone(ZoneInfo('Europe/Bucharest')).strftime('%Y%m%dT%H%M%S')
     return [
         ('utc.ics', event('utc@fixture', 'UTC midnight boundary', tomorrow.strftime('%Y%m%d')+'T233000Z', next_day.strftime('%Y%m%d')+'T003000Z')),
-        ('bucharest.ics', event('bucharest@fixture', 'Bucharest same instant', next_day.strftime('%Y%m%d')+'T023000', next_day.strftime('%Y%m%d')+'T033000', tz='Europe/Bucharest')),
+        ('bucharest.ics', event('bucharest@fixture', 'Bucharest same instant', local_start, local_end, tz='Europe/Bucharest')),
         ('all-day.ics', event('day@fixture', 'All-day planning', tomorrow.strftime('%Y%m%d'), next_day.strftime('%Y%m%d'), date=True)),
     ]
 

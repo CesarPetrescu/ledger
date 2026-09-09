@@ -6,8 +6,9 @@ import { setTimeout as delay } from 'node:timers/promises'
 
 export const requiredJourneys = [
   'capture.confirm', 'capture.cancel', 'capture.retry-idempotency', 'capture.voice',
-  'recall.sources', 'recall.degraded', 'brief.all-pages', 'brief.checkpoint-restart',
-  'calendar.selected', 'calendar.timezones',
+  'capture.review-selection', 'capture.cancel-recording',
+  'recall.sources', 'recall.degraded', 'recall.empty', 'brief.all-pages', 'brief.checkpoint-restart',
+  'calendar.selected', 'calendar.timezones', 'calendar.empty',
 ]
 
 export async function runFullApp(h) {
@@ -126,6 +127,54 @@ export async function runFullApp(h) {
     assert.equal(sql(`SELECT body FROM entry WHERE id=${saved.id}`), 'Amber telescope voice capture for Atlas.')
     await capture('voice-capture-confirmed')
   })
+  await step('capture.review-selection', async () => {
+    await draftText('Amber telescope selection review.')
+    let after = marker()
+    await input('down',1); await input('click')
+    await view('capture-project', () => true, after)
+    await input('click') // first actual project: ci-focus
+    await view('capture-review', v => v.slug === 'ci-focus', after)
+    await input('click'); await view('capture-actions', () => true, after)
+    after = marker()
+    await input('down',2); await input('click')
+    await view('capture-kind', () => true, after)
+    await input('down',1); await input('click') // todo
+    await view('capture-review', v => v.kind === 'todo', after)
+    await input('click'); await view('capture-actions', () => true, after)
+    after = marker()
+    await input('down',3); await input('click') // edit on phone
+    await view('capture-input', () => true, after)
+    const body = 'Amber telescope long review. '.repeat(24).trim()
+    const before = sql('SELECT count(*) FROM entry')
+    await typeOnPhone(body)
+    const reviewed = await view('capture-review', () => true, after)
+    assert(reviewed.pages > 1)
+    for (let index=0;index<reviewed.pages;index++) {
+      after = marker(); await input('click')
+      if (index+1 < reviewed.pages) await view('capture-review', v => v.page === index+1, after)
+      else await view('capture-actions', () => true, after)
+      assert.equal(sql('SELECT count(*) FROM entry'),before,'Review navigation submitted a write')
+    }
+    await capture('long-review-confirmation-actions')
+    after = marker(); await input('click')
+    const saved = await view('capture-saved', () => true, after)
+    const row = JSON.parse(sql(`SELECT json_build_object('body',body,'slug',slug,'kind',kind) FROM entry WHERE id=${saved.id}`))
+    assert.deepEqual(row,{body,slug:'ci-focus',kind:'todo'})
+    await capture('selected-project-todo-saved')
+  })
+  await step('capture.cancel-recording', async () => {
+    const before = sql('SELECT count(*) FROM entry')
+    const requests = (await provider()).speech_requests.length
+    const after = marker()
+    await menu(4); await view('capture-input', () => true, after)
+    await input('click'); await view('recording', () => true, after)
+    await delay(300)
+    await input('double_click')
+    await view('now', () => true, after)
+    assert.equal(sql('SELECT count(*) FROM entry'),before)
+    assert.equal((await provider()).speech_requests.length,requests,'Cancelled recording was transcribed')
+    await capture('recording-cancelled-without-write')
+  })
   await step('recall.sources', async () => {
     // Wait for the real indexer to process the captured entry, not a seeded chunk.
     await until(() => Number(sql(`SELECT count(*) FROM chunk WHERE ref='entry:${capturedId}'`)) > 0, 'real captured entry indexed', 60000)
@@ -150,6 +199,13 @@ export async function runFullApp(h) {
     assert(result.degraded.includes('vector'), 'Inference-unavailable state was not reported')
     assert(result.refs.includes(`entry:${capturedId}`), 'Lexical fallback lost the real source')
     await capture('recall-lexical-fallback')
+  })
+  await step('recall.empty', async () => {
+    const after = marker()
+    await menu(5); await view('recall-input', () => true, after)
+    await typeOnPhone('zzqvxbnmpwljk nonexistentsource')
+    await view('recall-empty', () => true, after)
+    await capture('recall-no-matching-source')
   })
   await step('brief.all-pages', async () => {
     for (let i=0;i<35;i++) await admin('/projects/ci-focus/entries','POST',{kind:'note',body:`Brief real entry ${i}`})
@@ -235,5 +291,14 @@ export async function runFullApp(h) {
     await writeFile(join(process.env.GLASS_ARTIFACT_DIR,'provider-contract-receipt.json'),JSON.stringify(receipt,null,2))
     // Leave a normal foundation page for the existing restart/outage journeys.
     const after = marker(); await menu(0); await view('now', () => true, after)
+  })
+  await step('calendar.empty', async () => {
+    await admin('/calendar/calendars','PUT',{ids:[]})
+    const queries = (await provider()).caldav_queries.length
+    const after = marker()
+    await menu(7); await view('calendar-empty', () => true, after)
+    assert.equal((await provider()).caldav_queries.length,queries,'Unselected calendars were queried')
+    await capture('next-no-selected-events')
+    const beforeHome = marker(); await menu(0); await view('now', () => true, beforeHome)
   })
 }

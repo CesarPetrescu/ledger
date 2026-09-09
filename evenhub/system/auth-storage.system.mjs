@@ -112,6 +112,24 @@ describe('Real OAuth with only the host-storage boundary doubled', () => {
       assert.equal((await owner('/projects/ci-contract')).entries.length, 1)
     } finally { await client.close() }
   })
+  it('retains read-only access when an owner denies a write-scope upgrade', async () => {
+    const readStorage = new HostStorageDouble()
+    const auth = new LedgerAuth(server, readStorage)
+    await auth.accessToken(approve)
+    const identity = await auth.clientId()
+    await assert.rejects(() => auth.requireScopes(['ledger:write'], async prompt => {
+      await owner('/oauth/device', 'POST', { user_code: prompt.userCode, action: 'deny' })
+    }), error => error.code === 'access_denied')
+    assert.equal(await auth.clientId(),identity)
+    assert.deepEqual(await auth.grantedScopes(),['ledger:read'])
+    const token = await auth.accessToken(() => { throw new Error('Denial destroyed the prior read grant') })
+    const client = new LedgerMCP(server)
+    try {
+      assert((await client.listProjects(token)).projects.length > 0)
+      await assert.rejects(() => client.append(token,{ key:'denied-write-0001',slug:'ci-contract',kind:'note',body:'Never written',confirmed:true,clientId:identity }), /insufficient_scope/)
+      assert.equal((await owner('/projects/ci-contract')).entries.length,1)
+    } finally { await client.close() }
+  })
   it('rejects a host refusal to persist a freshly issued real grant', async () => {
     const refusing = new HostStorageDouble()
     refusing.refuseWrites = true

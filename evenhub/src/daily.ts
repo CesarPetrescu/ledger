@@ -92,6 +92,7 @@ export class DailyFeatures {
     clearTimeout(this.timer)
     if (this.recording) void this.d.bridge.audioControl(false).catch(() => {})
     this.recording = undefined
+    el('voice-action').textContent = 'Record speech'
     this.pcm = []; this.pcmBytes = 0
   }
   leave(): void {
@@ -142,6 +143,7 @@ export class DailyFeatures {
   }
 
   private async list(screen: string, title: string, names: string[], actions: Action[], metadata: Record<string, unknown> = {}): Promise<void> {
+    el('pairing').hidden = true
     this.actions = actions; this.press = undefined
     const ok = await this.d.bridge.rebuildPageContainer(new RebuildPageContainer({
       containerTotalNum: 2,
@@ -155,6 +157,7 @@ export class DailyFeatures {
     this.d.observe(screen, metadata)
   }
   private async document(screen: string, title: string, body: string, done: Action, metadata: Record<string, unknown> = {}): Promise<void> {
+    el('pairing').hidden = true
     const pages = textPages(body)
     const render = async (index: number): Promise<void> => {
       await this.d.text(`${title}\n\n${pages[index]}\n\n${index+1}/${pages.length} · Press: ${index+1 === pages.length ? 'actions' : 'next page'}`)

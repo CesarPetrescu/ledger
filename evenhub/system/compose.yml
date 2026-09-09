@@ -23,6 +23,7 @@ services:
       GLASS_PROVIDER_TOKEN: ${GLASS_PROVIDER_TOKEN}
     volumes:
       - ./evenhub/system/providers.py:/fixture/providers.py:ro
+      - /usr/share/zoneinfo:/usr/share/zoneinfo:ro
       - ${GLASS_CERT_DIR}:/certs:ro
     ports:
       - "127.0.0.1:10443:9444"

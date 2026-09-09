@@ -18,7 +18,7 @@ export class CaptureOutbox {
     let draft: CaptureDraft
     try { draft = JSON.parse(raw) }
     catch { throw new Error('Stored capture is unreadable; it has not been deleted') }
-    if (!draft || !/^[a-zA-Z0-9_-]{8,80}$/.test(draft.key) || typeof draft.slug !== 'string' || !['note','todo','decision','status'].includes(draft.kind) || typeof draft.body !== 'string' || [...draft.body].length > 4000 || typeof draft.confirmed !== 'boolean' || (draft.confirmed && !draft.clientId)) throw new Error('Stored capture is invalid; it has not been deleted')
+    if (!draft || typeof draft.key !== 'string' || !/^[a-zA-Z0-9_-]{8,80}$/.test(draft.key) || typeof draft.slug !== 'string' || !/^[a-z0-9][a-z0-9-]{1,63}$/.test(draft.slug) || !['note','todo','decision','status'].includes(draft.kind) || typeof draft.body !== 'string' || [...draft.body].length > 4000 || typeof draft.confirmed !== 'boolean' || (draft.confirmed && (typeof draft.clientId !== 'string' || !draft.clientId))) throw new Error('Stored capture is invalid; it has not been deleted')
     return draft
   }
   async save(draft: CaptureDraft): Promise<void> {
@@ -32,14 +32,14 @@ export class CaptureOutbox {
     if (draft.clientId !== clientId) throw new Error('Pending capture belongs to another device authorization. Check Ledger before resubmitting; automatic replay is blocked.')
     await this.save(draft) // Persist before crossing the write boundary.
     const receipt = await write(draft)
-    if (!receipt || !/^[1-9][0-9]*$/.test(String(receipt.id))) throw new Error('Ledger did not acknowledge this capture; retry with the same request key')
+    if (!receipt || (typeof receipt.id === 'number' && !Number.isSafeInteger(receipt.id)) || !/^[1-9][0-9]*$/.test(String(receipt.id))) throw new Error('Ledger did not acknowledge this capture; retry with the same request key')
     // Clearing may fail; retaining the identical confirmed key still makes retries safe.
     await this.discard()
     return receipt
   }
 }
 
-export function textPages(content: string, columns = 42, rows = 7): string[] {
+export function textPages(content: string, columns = 42, rows = 5): string[] {
   const lines: string[] = []
   for (const paragraph of content.replace(/\r/g, '').split('\n')) {
     if (!paragraph) { lines.push(''); continue }

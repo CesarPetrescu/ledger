@@ -34,6 +34,7 @@ await createInitialPage('LEDGER GLASS\n\nConnecting to Ledger…')
 const unsubscribe = bridge.onEvenHubEvent(event => {
   if (stopped) return
   if (event.sysEvent?.eventType === OsEventTypeList.DOUBLE_CLICK_EVENT && (daily.active || screen === 'pairing')) daily.interrupt()
+  if (event.menuItemClickEvent) daily.interrupt()
   daily.audio(event)
   if (event.audioEvent) return
   if (event.sysEvent?.eventType === OsEventTypeList.ABNORMAL_EXIT_EVENT || event.sysEvent?.eventType === OsEventTypeList.SYSTEM_EXIT_EVENT) daily.leave()
@@ -76,7 +77,7 @@ const unsubscribe = bridge.onEvenHubEvent(event => {
     // Menu foreground transitions must not navigate or rebuild under the overlay.
   }).catch(fail)
 })
-phone.reconnect.addEventListener('click', () => { void enqueue(reconnect).catch(reportFailure) })
+phone.reconnect.addEventListener('click', () => { daily.interrupt(); void enqueue(reconnect).catch(fail) })
 await enqueue(showNow)
 
 async function read<T>(operation: (token: string) => Promise<T>): Promise<T> {
@@ -165,6 +166,7 @@ async function refreshCurrent(): Promise<void> {
   else await showNow()
 }
 async function reconnect(): Promise<void> {
+  daily.leave()
   phone.hidePairing()
   await ledger.close()
   try { await auth.reconnect(showPairing); await showNow() }
@@ -183,9 +185,6 @@ async function fail(error: unknown): Promise<void> {
   phone.setStatus(error instanceof Error ? error.message : String(error))
   await showText(formatError(error))
   observed(screen)
-}
-function reportFailure(): void {
-  console.error('[ledger-glass] input/render operation failed')
 }
 async function createInitialPage(content: string): Promise<void> {
   const result = await initializePage(bridge, new CreateStartUpPageContainer({

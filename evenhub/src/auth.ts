@@ -232,15 +232,16 @@ export class LedgerAuth {
 
   private async saveToken(clientId: string, token: TokenResponse, requested = REQUESTED_SCOPE): Promise<StoredSession> {
     if (
-      !token.access_token ||
-      !token.refresh_token ||
+      typeof token.access_token !== 'string' || !token.access_token || token.access_token.length > 4096 ||
+      typeof token.refresh_token !== 'string' || !token.refresh_token || token.refresh_token.length > 4096 ||
       typeof token.token_type !== 'string' || token.token_type.toLowerCase() !== 'bearer' ||
-      token.expires_in <= 0 ||
+      !Number.isFinite(token.expires_in) || token.expires_in <= 0 ||
       token.expires_in > 86_400
     ) {
       throw new Error('Ledger returned an invalid OAuth token response')
     }
 
+    if (token.scope !== undefined && typeof token.scope !== 'string') throw new Error('Invalid granted scope')
     const session: StoredSession = {
       version: 1,
       server: this.server,

@@ -45,6 +45,21 @@ describe('Capture durable intent', () => {
     expect(await outbox.load()).toEqual(pending)
     expect(await new CaptureOutbox(storage,'https://other.example.com').load()).toBeNull()
   })
+  it('fails closed on corrupt host state instead of dropping retry protection', async () => {
+    const storage = new StorageBoundary(); const outbox = new CaptureOutbox(storage,'https://example.com')
+    await outbox.save(draft())
+    const key = [...storage.values.keys()][0]
+    const malformed = { ...draft(), key: undefined }
+    storage.values.set(key, JSON.stringify(malformed))
+    await expect(outbox.load()).rejects.toThrow('invalid')
+    expect(storage.values.get(key)).toBe(JSON.stringify(malformed))
+  })
+  it('rejects a lossy numeric receipt rather than showing the wrong source ID', async () => {
+    const outbox = new CaptureOutbox(new StorageBoundary(),'https://example.com')
+    const pending = { ...draft(), confirmed: true, clientId: 'device' }
+    await expect(outbox.submit(pending,'device',async()=>({id:9007199254740992}))).rejects.toThrow('did not acknowledge')
+    expect(await outbox.load()).toEqual(pending)
+  })
   it('cancels an unconfirmed draft without writing anything', async () => {
     const outbox=new CaptureOutbox(new StorageBoundary(),'https://example.com')
     await outbox.save(draft()); await outbox.discard();expect(await outbox.load()).toBeNull()
