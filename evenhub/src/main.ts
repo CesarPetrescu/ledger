@@ -4,6 +4,7 @@ import {
   MenuContainerProperty, MenuItemProperty, OsEventTypeList, RebuildPageContainer,
   TextContainerProperty, waitForEvenAppBridge,
 } from '@evenrealities/even_hub_sdk'
+import { initializePage } from './startup'
 import { DailyFeatures, type DailyMode } from './daily'
 import { LedgerAuth, type PairingPrompt } from './auth'
 import { normalizeServer } from './config'
@@ -187,11 +188,10 @@ function reportFailure(): void {
   console.error('[ledger-glass] input/render operation failed')
 }
 async function createInitialPage(content: string): Promise<void> {
-  const result = await bridge.createStartUpPageContainer(new CreateStartUpPageContainer({
+  const result = await initializePage(bridge, new CreateStartUpPageContainer({
     containerTotalNum: 1, textObject: [textContainer(content)], menuObject: menu(),
   }))
-  if (result !== 0) throw new Error(`Even Hub startup page failed with code ${result}`)
-  observed('ready')
+  observed('ready', { startup: result })
 }
 async function showText(content: string): Promise<void> {
   const ok = await bridge.rebuildPageContainer(new RebuildPageContainer({
