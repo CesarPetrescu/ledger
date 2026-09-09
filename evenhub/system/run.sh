@@ -45,6 +45,7 @@ if [[ ! -f "$HOME/.pki/nssdb/cert9.db" ]]; then certutil -N -d "sql:$HOME/.pki/n
 certutil -A -d "sql:$HOME/.pki/nssdb" -n "$GLASS_CA_NAME" -t C,, -i "$GLASS_CERT_DIR/localhost.crt"
 export NODE_EXTRA_CA_CERTS="$GLASS_CERT_DIR/localhost.crt"
 (cd evenhub && npm run pack) > "$GLASS_RUNTIME_DIR/package.log" 2>&1 || { cat "$GLASS_RUNTIME_DIR/package.log"; exit 1; }
+node evenhub/system/validate-package.mjs
 cp evenhub/ledger-glass.ehpk "$GLASS_ARTIFACT_DIR/ledger-glass-ci.ehpk"
 git rev-parse HEAD > "$GLASS_ARTIFACT_DIR/tested-commit.txt"
 docker compose version > "$GLASS_ARTIFACT_DIR/versions.txt"

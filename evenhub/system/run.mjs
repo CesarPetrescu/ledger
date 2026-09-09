@@ -80,7 +80,16 @@ async function menu(index) {
   await input('context_menu')
   await delay(400)
   await input('down', index)
+  // Item selection starts an OS close animation. App render ACK can arrive
+  // before the overlay releases input. Wait for the actual close event.
+  await logs()
+  const beforeClose = lastId
   await input('click')
+  await until(async () => (await logs()).some(entry => {
+    if (entry.id <= beforeClose || !entry.message.includes('EvenHub event:')) return false
+    try { return JSON.parse(entry.message.slice(entry.message.indexOf('{'))).sysEvent?.eventType === 5 }
+    catch { return false }
+  }), 'native contextual menu closed', 5000)
 }
 function alpha(png) {
   const result = Buffer.alloc(png.width * png.height)
@@ -88,17 +97,33 @@ function alpha(png) {
   return result
 }
 async function capture(name) {
-  const response = await request('/api/screenshot/glasses')
-  assert(response.ok, 'Native framebuffer capture failed')
-  const bytes = Buffer.from(await response.arrayBuffer())
-  const png = PNG.sync.read(bytes)
-  assert.equal(png.width, 576)
-  assert.equal(png.height, 288)
-  const mask = alpha(png)
+  // Keep the genuine RGBA frame, and wait for native animations to settle.
+  let bytes, png, mask, previous, stable = 0
+  const deadline = Date.now() + 5000
+  do {
+    const response = await request('/api/screenshot/glasses')
+    assert(response.ok, 'Native framebuffer capture failed')
+    bytes = Buffer.from(await response.arrayBuffer())
+    png = PNG.sync.read(bytes)
+    assert.equal(png.width, 576)
+    assert.equal(png.height, 288)
+    mask = alpha(png)
+    stable = previous?.equals(mask) ? stable + 1 : 0
+    previous = mask
+    if (stable >= 3) break
+    await delay(120)
+  } while (Date.now() < deadline)
   const lit = mask.filter(v => v > 0).length
   const filename = `${String(shots.length + 1).padStart(2, '0')}-${name}.png`
   await writeFile(join(out, filename), bytes)
-  shots.push({ file: filename, lit_pixels: lit, source: 'official simulator LVGL RGBA framebuffer' })
+  const preview = new PNG({ width: png.width, height: png.height })
+  for (let i = 0; i < mask.length; i++) {
+    for (let c = 0; c < 3; c++) preview.data[4*i+c] = Math.round(png.data[4*i+c] * mask[i] / 255)
+    preview.data[4*i+3] = 255
+  }
+  await writeFile(join(out, `preview-${filename}`), PNG.sync.write(preview))
+  shots.push({ file: filename, preview: `preview-${filename}`, lit_pixels: lit, source: 'official simulator LVGL RGBA framebuffer' })
+  assert(stable >= 3, 'Native framebuffer did not settle; final frame saved')
   assert(lit > 100 && lit < mask.length * 0.95, `Blank/solid native framebuffer: ${lit} lit pixels`)
   return mask
 }
@@ -367,15 +392,17 @@ try {
   await browser?.close()
   const missing = planned.filter(id => !results.some(r => r.id === id))
   for (const id of missing) results.push({ id, status: 'not_run', seconds: 0 })
+  if (missing.length) failed = true
   const missingFullApp = fullAppRequired.filter(id => !results.some(r => r.id === id && r.status === 'passed'))
   const report = {
     target, tested_commit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
     tests: results, screenshots: shots, observations,
     full_app_complete: !failed && missingFullApp.length === 0, missing_full_app_journeys: missingFullApp,
-    real_components: ['packaged/built plugin', 'official native simulator and SDK', 'HTTPS with trusted CI CA', 'production nginx routes', 'all four Ledger Go services', 'production React owner UI in Chromium', 'PostgreSQL/pgvector with real migrations', 'real OAuth approval/token/revoke', 'MCP over real HTTP'],
+    real_components: ['production-built plugin; package generation validated separately', 'official native simulator and SDK', 'HTTPS with trusted CI CA', 'production nginx routes', 'all four Ledger Go services', 'production React owner UI in Chromium', 'PostgreSQL/pgvector with real migrations', 'real OAuth approval/token/revoke', 'MCP over real HTTP'],
     substitutes: ['Vendor simulator replaces physical G2/R1/BLE', 'Virtual silent audio input; no speech-recognition claim'],
-    not_covered: ['physical R1 event-source identity', 'BLE timing/battery/optical quality', 'Android host permissions and OS process eviction', 'STT accuracy', 'Capture/Recall/Brief/Calendar UI: not implemented yet', 'connected Nextcloud provider and real embedding/reranking model'],
+    not_covered: ['native EHPK installation/loader (0.9.5 URL probe failed)', 'physical R1 event-source identity', 'BLE timing/battery/optical quality', 'Android host permissions and OS process eviction', 'STT accuracy', 'Capture/Recall/Brief/Calendar UI: not implemented yet', 'connected Nextcloud provider and real embedding/reranking model'],
   }
+  await writeFile(join(out, 'screenshots.html'), `<!doctype html><meta charset="utf-8"><title>Ledger Glass — simulator evidence</title><h1>Official simulator captures</h1><p>Black previews composite the untouched RGBA frames; these are not hardware photographs.</p>${shots.map(shot => `<figure><img width="576" height="288" src="${shot.preview}"><figcaption>${shot.file}</figcaption></figure>`).join('')}`)
   await writeFile(join(out, 'report.json'), JSON.stringify(report, null, 2))
   const escape = s => String(s).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;')
   await writeFile(join(out, 'junit.xml'), `<testsuite name="glass-system" tests="${results.length}" failures="${results.filter(r => r.status === 'failed').length}" skipped="${missing.length}">${results.map(r => `<testcase classname="${process.env.GLASS_TARGET}" name="${r.id}" time="${r.seconds}">${r.status === 'failed' ? `<failure message="${escape(r.error)}"/>` : r.status === 'not_run' ? '<skipped message="Earlier prerequisite failed"/>' : ''}</testcase>`).join('')}</testsuite>`)

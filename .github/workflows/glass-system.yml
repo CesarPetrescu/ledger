@@ -11,6 +11,11 @@ on:
         description: Fail unless every planned app journey has executable coverage
         type: boolean
         default: false
+      simulator_target:
+        description: The package URL is an unsupported-capability diagnostic, not the required app test
+        type: choice
+        options: [web, package]
+        default: web
 permissions:
   contents: read
 concurrency:
@@ -18,15 +23,11 @@ concurrency:
   cancel-in-progress: true
 jobs:
   simulator:
-    name: simulator (${{ matrix.target }})
+    name: native simulator
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [web, package]
     env:
-      GLASS_TARGET: ${{ matrix.target }}
+      GLASS_TARGET: ${{ inputs.simulator_target || 'web' }}
       GLASS_REQUIRE_FULL_APP: ${{ inputs.require_full_app || false }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -51,17 +52,16 @@ jobs:
         run: |
           mkdir -p evenhub/system/artifacts
           evenhub/node_modules/.bin/evenhub --help > evenhub/system/artifacts/cli-help.txt
-          # Native simulator initialises GTK even with --help. Its normal launch
-          # is inside Xvfb in run.sh; do not launch it outside that environment.
-          # Include JS declarations/source only, never native binaries or fonts.
+          # Native simulator startup must be inside Xvfb, including --help.
+          # Archive JS declarations/source only, never native binaries or fonts.
           find evenhub/node_modules/@evenrealities/evenhub-cli evenhub/node_modules/@evenrealities/evenhub-simulator evenhub/node_modules/@modelcontextprotocol/client -type f \( -name '*.js' -o -name '*.mjs' -o -name '*.ts' -o -name 'package.json' \) -print0 | tar --null -czf evenhub/system/artifacts/tooling-diagnostics.tar.gz -T -
-      - name: Real deployment and official simulator journeys
+      - name: Real deployment, official packaging and native simulator journeys
         run: bash evenhub/system/run.sh
       - name: Upload system evidence, including failures
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: glass-system-${{ matrix.target }}
+          name: glass-system-${{ inputs.simulator_target || 'web' }}
           path: |
             evenhub/system/artifacts/
             evenhub/package-lock.json
