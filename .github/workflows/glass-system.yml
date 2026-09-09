@@ -1,0 +1,77 @@
+name: Ledger Glass system tests
+on:
+  workflow_call:
+    inputs:
+      require_full_app:
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      require_full_app:
+        description: Fail unless every planned app journey has executable coverage
+        type: boolean
+        default: false
+      simulator_target:
+        description: The package URL is an unsupported-capability diagnostic, not the required app test
+        type: choice
+        options: [web, package]
+        default: web
+permissions:
+  contents: read
+concurrency:
+  group: glass-system-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  simulator:
+    name: system (${{ matrix.suite }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [native, host-contract]
+    env:
+      GLASS_SUITE: ${{ matrix.suite }}
+      GLASS_TARGET: ${{ inputs.simulator_target || 'web' }}
+      GLASS_REQUIRE_FULL_APP: ${{ inputs.require_full_app || false }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            evenhub/package-lock.json
+            evenhub/system/package-lock.json
+      - name: Install native simulator and browser prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb xauth xdotool dbus-x11 libwebkit2gtk-4.1-0 libgtk-3-0 libasound2t64 libxdo3 libegl1 libgl1-mesa-dri libglx-mesa0 pulseaudio pulseaudio-utils ca-certificates openssl libnss3-tools
+      - name: Install application and system-test dependencies from lockfiles
+        run: |
+          npm --prefix evenhub ci --no-audit --no-fund
+          npm --prefix evenhub/system ci --no-audit --no-fund
+          if [ "$GLASS_SUITE" = native ]; then
+            cd evenhub/system
+            npx playwright install --with-deps chromium
+          fi
+      - name: Record installed tooling source for reproducible diagnostics
+        run: |
+          mkdir -p evenhub/system/artifacts
+          evenhub/node_modules/.bin/evenhub --help > evenhub/system/artifacts/cli-help.txt
+          # Native simulator startup must be inside Xvfb, including --help.
+          # Archive JS declarations/source only, never native binaries or fonts.
+          find evenhub/node_modules/@evenrealities/evenhub-cli evenhub/node_modules/@evenrealities/evenhub-simulator evenhub/node_modules/@modelcontextprotocol/client -type f \( -name '*.js' -o -name '*.mjs' -o -name '*.ts' -o -name 'package.json' \) -print0 | tar --null -czf evenhub/system/artifacts/tooling-diagnostics.tar.gz -T -
+      - name: Real deployment, official packaging and system journeys
+        run: bash evenhub/system/run.sh
+      - name: Upload system evidence, including failures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: glass-system-${{ matrix.suite }}-${{ inputs.simulator_target || 'web' }}
+          path: |
+            evenhub/system/artifacts/
+            evenhub/package-lock.json
+            evenhub/system/package-lock.json
+          if-no-files-found: error
+          retention-days: 14

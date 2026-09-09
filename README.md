@@ -35,6 +35,7 @@ Ledger is a self-hosted [MCP](https://modelcontextprotocol.io) server that gives
 | Connect Codex on Windows, Linux, or WSL | [Install the CLI](#install-the-ledger-client) |
 | Connect Claude, ChatGPT, or another MCP client | [Use the MCP endpoint](#connect-another-assistant) |
 | Manage Ledger from my phone | [Install the Android app](#android-app) |
+| Develop/test Ledger on Even Realities G2/R1 | [Ledger Glass](#ledger-glass-g2r1) |
 | Run my own Ledger server | [Self-hosting guide](docs/hosting.md#quick-start) |
 
 Clients need an existing **HTTPS Ledger server**. Use its base address, such as `https://ledger.example.com`, for the CLI and Android app. MCP clients use the same address with `/mcp` appended.
@@ -103,6 +104,12 @@ Download the signed **`ledger-android-vX.Y.Z.apk`** from [the latest release](ht
 
 Enter your server's base HTTPS URL and sign in with the **owner password** used by the web console. You can manage projects, search, handoffs, calendars, and device approvals. See [Android setup and builds](android/README.md).
 
+### Ledger Glass (G2/R1)
+
+`evenhub/` contains the Even Realities G2/R1 client. The first version is intentionally read-only: it pairs through Ledger's OAuth device flow, shows the current highest-priority project, and lets you browse project state without introducing a second data store.
+
+The package is bound to one HTTPS Ledger origin at build time because Even Hub requires outbound network destinations to be declared in the app manifest. See [Ledger Glass setup, security, and hardware checks](evenhub/README.md).
+
 ## Self-host Ledger
 
 The Docker Compose stack includes four Go services, the web console, and PostgreSQL. Put it behind an HTTPS reverse proxy.
@@ -121,6 +128,7 @@ Follow the **[complete setup guide](docs/hosting.md#quick-start)** for commands 
 | [Self-hosting](docs/hosting.md) | Deployment, configuration, console access, backups, and recovery |
 | [How Ledger works](docs/reference.md) | Architecture, all 17 MCP tools, handoffs, calendars, and security model |
 | [Android](android/README.md) | App usage, builds, signing, and session security |
+| [Ledger Glass](evenhub/README.md) | Even Realities G2/R1 setup, pairing, interaction model, and hardware acceptance |
 | [Development](docs/development.md) | Local checks, repository layout, CI coverage, and releases |
 
 ## Contributing

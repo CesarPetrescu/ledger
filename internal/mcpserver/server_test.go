@@ -12,6 +12,7 @@ import (
 	calendarapi "github.com/cesarpetrescu/ledger/internal/calendar"
 	"github.com/cesarpetrescu/ledger/internal/retrieval"
 	"github.com/cesarpetrescu/ledger/internal/store"
+	"github.com/cesarpetrescu/ledger/internal/transcription"
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -36,6 +37,7 @@ func TestToolsListIsExactAndAnnotated(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]bool{
+		"get_entry": true, "list_changes": false, "ack_changes": false, "transcribe_audio": true,
 		"list_projects": true, "get_project": true, "search": true, "upsert_project": false, "append_entry": false,
 		"list_calendars": true, "list_calendar_events": true, "create_calendar_event": false, "update_calendar_event": false, "delete_calendar_event": false,
 		"list_handoffs": true, "get_handoff": true, "create_handoff": false, "append_handoff_message": false,
@@ -51,6 +53,10 @@ func TestToolsListIsExactAndAnnotated(t *testing.T) {
 	cursor := int64(2)
 	page := handoffDetailOutput(store.HandoffDetail{NextBefore: &cursor})
 	samples := map[string][]any{
+		"get_entry":              {store.EntryView{}},
+		"list_changes":           {store.ChangePage{Entries: []store.Change{}}},
+		"ack_changes":            {store.ReadReceipt{Checkpoint: "0"}},
+		"transcribe_audio":       {transcription.Result{Text: "Atlas note"}},
 		"list_projects":          {[]any{}, []any{map[string]any{"slug": "atlas", "name": "Atlas", "tier": "focus", "hours_wk": 8, "goal": "Ship", "deadline": "", "last_entry_at": nil}}, []any{map[string]any{"slug": "atlas", "name": "Atlas", "tier": "focus", "hours_wk": 8, "goal": "Ship", "deadline": "", "last_entry_at": now}}},
 		"get_project":            {store.ProjectWithEntries{Entries: []store.Entry{}}},
 		"search":                 {retrieval.SearchResult{Hits: []retrieval.Ranked{}, Degraded: []string{}}, retrieval.SearchResult{Hits: []retrieval.Ranked{{Ref: "entry:1", Score: 0.5}}, Degraded: []string{"rerank"}}},
