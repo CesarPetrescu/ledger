@@ -1,4 +1,5 @@
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
+import { createDeadlineFetch } from './network'
 import type { ProjectDetail, ProjectListResult, ProjectTier } from './types'
 
 export class LedgerMCP {
@@ -39,7 +40,7 @@ export class LedgerMCP {
     await this.connect(accessToken)
     if (!this.client) throw new Error('Ledger MCP client is not connected')
 
-    const result = await this.client.callTool({ name, arguments: args })
+    const result = await this.client.callTool({ name, arguments: args }, { timeout: 12_000 })
     return parseToolResult<T>(result)
   }
 
@@ -48,6 +49,7 @@ export class LedgerMCP {
     await this.close()
 
     const transport = new StreamableHTTPClientTransport(new URL(`${this.server}/mcp`), {
+      fetch: createDeadlineFetch(),
       requestInit: {
         credentials: 'omit',
         redirect: 'error',
@@ -57,7 +59,12 @@ export class LedgerMCP {
       },
     })
     const client = new Client({ name: 'ledger-glass', version: '0.1.0' })
-    await client.connect(transport)
+    try {
+      await client.connect(transport, { timeout: 12_000 })
+    } catch (error) {
+      await client.close().catch(() => {})
+      throw error
+    }
 
     this.transport = transport
     this.client = client
