@@ -39,6 +39,7 @@ async function step(id, fn) {
   catch (e) {
     results.push({ id, status: 'failed', seconds: (Date.now() - start) / 1000, error: e.message })
     await capture('failure').catch(() => {})
+    if (page) await page.screenshot({ path: join(out, 'owner-failure.png'), fullPage: true }).catch(() => {})
     throw e
   }
 }
@@ -95,10 +96,11 @@ async function capture(name) {
   assert.equal(png.height, 288)
   const mask = alpha(png)
   const lit = mask.filter(v => v > 0).length
-  assert(lit > 100 && lit < mask.length * 0.95, `Blank/solid native framebuffer: ${lit} lit pixels`)
   const filename = `${String(shots.length + 1).padStart(2, '0')}-${name}.png`
+  // Preserve even blank frames so a failure is diagnosable.
   await writeFile(join(out, filename), bytes)
   shots.push({ file: filename, lit_pixels: lit, source: 'official simulator LVGL RGBA framebuffer' })
+  assert(lit > 100 && lit < mask.length * 0.95, `Blank/solid native framebuffer: ${lit} lit pixels`)
   return mask
 }
 function changed(a, b) {
@@ -129,6 +131,8 @@ async function stopSim() {
   try {
     const entries = await logs()
     await writeFile(join(out, `console-${boot}.json`), JSON.stringify(entries.filter(e => !/access[_-]?token|refresh[_-]?token|authorization|cookie|csrf|setlocalstorage|device_code/i.test(e.message)), null, 2))
+    const screenshot = await request('/api/screenshot/webview')
+    if (screenshot.ok) await writeFile(join(out, `webview-${boot}.png`), Buffer.from(await screenshot.arrayBuffer()))
   } catch {}
   try { process.kill(-sim.pid, 'SIGTERM') } catch {}
   await until(() => sim.exitCode !== null || sim.signalCode !== null, 'simulator exit', 5000).catch(() => { try { process.kill(-sim.pid, 'SIGKILL') } catch {} })
@@ -152,7 +156,6 @@ async function admin(path, method = 'GET', data) {
   return response.status() === 204 ? undefined : response.json()
 }
 async function decide(code, action = 'approve') {
-  // An actual browser operates the production owner console; no token seeding.
   await page.goto(`${server}/admin/connect`)
   await page.getByLabel('Connection code').fill(code)
   await page.getByRole('button', { name: 'Review connection', exact: true }).click()
@@ -172,7 +175,12 @@ async function safeConsole() {
 try {
   await mkdir(out, { recursive: true })
   await step('security.tls-cors', async () => {
-    await until(async () => (await fetch(`${server}/admin/api/session`, { signal: AbortSignal.timeout(3000) })).ok, 'HTTPS production stack', 90000)
+    // This protected endpoint MUST reject an anonymous request, even when healthy.
+    await until(async () => {
+      const res = await fetch(`${server}/admin/api/session`, { signal: AbortSignal.timeout(3000) })
+      assert.equal(res.status, 401, `Anonymous session endpoint returned ${res.status}`)
+      return true
+    }, 'HTTPS production stack (anonymous session must be 401)', 90000)
     const unauth = await fetch(`${server}/mcp`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
     assert.equal(unauth.status, 401)
     for (const path of ['/mcp', '/oauth/device', '/oauth/token', '/oauth/register', '/oauth/revoke']) {
@@ -182,6 +190,7 @@ try {
       assert.equal(res.headers.get('access-control-allow-credentials'), null, path)
     }
     const privateAPI = await fetch(`${server}/admin/api/session`, { headers: { Origin: 'https://localhost:9443' } })
+    assert.equal(privateAPI.status, 401)
     assert.equal(privateAPI.headers.get('access-control-allow-origin'), null)
   })
   await step('owner.login', async () => {
