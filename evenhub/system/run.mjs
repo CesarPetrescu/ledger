@@ -97,7 +97,6 @@ async function capture(name) {
   const mask = alpha(png)
   const lit = mask.filter(v => v > 0).length
   const filename = `${String(shots.length + 1).padStart(2, '0')}-${name}.png`
-  // Preserve even blank frames so a failure is diagnosable.
   await writeFile(join(out, filename), bytes)
   shots.push({ file: filename, lit_pixels: lit, source: 'official simulator LVGL RGBA framebuffer' })
   assert(lit > 100 && lit < mask.length * 0.95, `Blank/solid native framebuffer: ${lit} lit pixels`)
@@ -164,7 +163,7 @@ async function decide(code, action = 'approve') {
   assert.equal(await page.getByText('Add and update project memory', { exact: true }).count(), 0)
   await page.screenshot({ path: join(out, `owner-approval-${boot}-${action}.png`), fullPage: true })
   await page.getByRole('button', { name: action === 'approve' ? 'Approve machine' : 'Deny', exact: true }).click()
-  await page.getByRole('status').waitFor()
+  await page.locator('p[role=status]').filter({ hasText: action === 'approve' ? 'Machine approved.' : 'Connection denied.' }).waitFor()
 }
 async function safeConsole() {
   const entries = await logs()
@@ -175,7 +174,6 @@ async function safeConsole() {
 try {
   await mkdir(out, { recursive: true })
   await step('security.tls-cors', async () => {
-    // This protected endpoint MUST reject an anonymous request, even when healthy.
     await until(async () => {
       const res = await fetch(`${server}/admin/api/session`, { signal: AbortSignal.timeout(3000) })
       assert.equal(res.status, 401, `Anonymous session endpoint returned ${res.status}`)

@@ -1,7 +1,10 @@
 name: Ledger Glass system tests
 on:
-  pull_request:
   workflow_call:
+    inputs:
+      require_full_app:
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       require_full_app:
@@ -30,16 +33,26 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            evenhub/package-lock.json
+            evenhub/system/package-lock.json
       - name: Install native simulator and browser prerequisites
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends xvfb xauth dbus-x11 libwebkit2gtk-4.1-0 libgtk-3-0 libasound2t64 libxdo3 libegl1 libgl1-mesa-dri libglx-mesa0 pulseaudio pulseaudio-utils ca-certificates openssl libnss3-tools
-      - name: Install pinned application and system-test dependencies
+      - name: Install application and system-test dependencies from lockfiles
         run: |
-          npm --prefix evenhub install --no-audit --no-fund
-          npm --prefix evenhub/system install --no-audit --no-fund
+          npm --prefix evenhub ci --no-audit --no-fund
+          npm --prefix evenhub/system ci --no-audit --no-fund
           cd evenhub/system
           npx playwright install --with-deps chromium
+      - name: Record official tooling capabilities for reproducible diagnostics
+        run: |
+          mkdir -p evenhub/system/artifacts
+          evenhub/node_modules/.bin/evenhub --help > evenhub/system/artifacts/cli-help.txt
+          evenhub/node_modules/.bin/evenhub-simulator --help > evenhub/system/artifacts/simulator-help.txt
+          find evenhub/node_modules/@evenrealities/evenhub-cli evenhub/node_modules/@evenrealities/evenhub-simulator evenhub/node_modules/@modelcontextprotocol/client -type f \( -name '*.js' -o -name '*.mjs' -o -name 'package.json' \) -print0 | tar --null -czf evenhub/system/artifacts/tooling-diagnostics.tar.gz -T -
       - name: Real deployment and official simulator journeys
         run: bash evenhub/system/run.sh
       - name: Upload system evidence, including failures

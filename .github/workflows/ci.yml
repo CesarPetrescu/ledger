@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   workflow_call:
   workflow_dispatch:
 
@@ -83,8 +84,8 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
-      - name: Resolve dependencies
-        run: npm install --no-audit --no-fund
+      - name: Install from committed lockfile
+        run: npm ci --no-audit --no-fund
       - name: Tests
         run: npm test
       - name: Build and package
@@ -96,7 +97,7 @@ jobs:
             test "$attempt" -eq 3 && exit 1
             sleep 10
           done
-      - name: Upload Ledger Glass package and generated lockfile
+      - name: Upload Ledger Glass package and lockfile
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ledger-glass-ci
@@ -236,9 +237,14 @@ jobs:
           path: ${{ runner.temp }}/wine-tests.log
           retention-days: 14
 
+  glass-system:
+    uses: ./.github/workflows/glass-system.yml
+    with:
+      require_full_app: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+
   client-checks:
     if: always()
-    needs: [linux, windows, wine, android, frontend, evenhub]
+    needs: [linux, windows, wine, android, frontend, evenhub, glass-system]
     runs-on: ubuntu-latest
     steps:
       - name: Require every client test job to pass
