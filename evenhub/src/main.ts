@@ -1,5 +1,14 @@
 import './style.css'
-import { waitForEvenAppBridge } from '@evenrealities/even_hub_sdk'
+import {
+  CreateStartUpPageContainer,
+  ListContainerProperty,
+  ListItemContainerProperty,
+  MenuContainerProperty,
+  MenuItemProperty,
+  RebuildPageContainer,
+  TextContainerProperty,
+  waitForEvenAppBridge,
+} from '@evenrealities/even_hub_sdk'
 import { LedgerAuth, type PairingPrompt } from './auth'
 import { normalizeServer } from './config'
 import { chooseNowProject, formatError, formatNow, formatProject, projectListLabel, sortProjects } from './format'
@@ -99,29 +108,33 @@ async function showProjects(): Promise<void> {
       await showText('PROJECTS\n\nNo projects are registered.')
       return
     }
-    const ok = await bridge.rebuildPageContainer({
-      containerTotalNum: 1,
-      listObject: [{
-        xPosition: 0,
-        yPosition: 0,
-        width: 576,
-        height: 288,
-        borderWidth: 0,
-        borderColor: 5,
-        borderRadius: 0,
-        paddingLength: 8,
-        containerID: LIST_ID,
-        containerName: LIST_NAME,
-        isEventCapture: 1,
-        itemContainer: {
-          itemCount: projects.length,
-          itemWidth: 0,
-          isItemSelectBorderEn: 1,
-          itemName: projects.map(projectListLabel),
-        },
-      }],
-      menuObject: menu(),
-    })
+    const ok = await bridge.rebuildPageContainer(
+      new RebuildPageContainer({
+        containerTotalNum: 1,
+        listObject: [
+          new ListContainerProperty({
+            xPosition: 0,
+            yPosition: 0,
+            width: 576,
+            height: 288,
+            borderWidth: 0,
+            borderColor: 5,
+            borderRadius: 0,
+            paddingLength: 8,
+            containerID: LIST_ID,
+            containerName: LIST_NAME,
+            isEventCapture: 1,
+            itemContainer: new ListItemContainerProperty({
+              itemCount: projects.length,
+              itemWidth: 0,
+              isItemSelectBorderEn: 1,
+              itemName: projects.map(projectListLabel),
+            }),
+          }),
+        ],
+        menuObject: menu(),
+      }),
+    )
     if (!ok) throw new Error('Even Hub rejected the project list layout')
     phone.setStatus(`Connected. ${projects.length} projects loaded.`)
     phone.hidePairing()
@@ -168,14 +181,10 @@ async function token(): Promise<string> {
 async function withRefresh<T>(operation: (token: string) => Promise<T>, accessToken: string): Promise<T> {
   try {
     return await operation(accessToken)
-  } catch (firstError) {
+  } catch {
     await ledger.close()
-    try {
-      const refreshed = await auth.refreshNow(showPairing)
-      return await operation(refreshed)
-    } catch {
-      throw firstError
-    }
+    const refreshed = await auth.refreshNow(showPairing)
+    return operation(refreshed)
   }
 }
 
@@ -193,26 +202,30 @@ async function fail(error: unknown): Promise<void> {
 }
 
 async function createInitialPage(content: string): Promise<void> {
-  const result = await bridge.createStartUpPageContainer({
-    containerTotalNum: 1,
-    textObject: [textContainer(content)],
-    menuObject: menu(),
-  })
+  const result = await bridge.createStartUpPageContainer(
+    new CreateStartUpPageContainer({
+      containerTotalNum: 1,
+      textObject: [textContainer(content)],
+      menuObject: menu(),
+    }),
+  )
   if (result !== 0) throw new Error(`Even Hub startup page failed with code ${result}`)
 }
 
 async function showText(content: string): Promise<void> {
   if (!started) return createInitialPage(content)
-  const ok = await bridge.rebuildPageContainer({
-    containerTotalNum: 1,
-    textObject: [textContainer(content)],
-    menuObject: menu(),
-  })
+  const ok = await bridge.rebuildPageContainer(
+    new RebuildPageContainer({
+      containerTotalNum: 1,
+      textObject: [textContainer(content)],
+      menuObject: menu(),
+    }),
+  )
   if (!ok) throw new Error('Even Hub rejected the page layout')
 }
 
-function textContainer(content: string) {
-  return {
+function textContainer(content: string): TextContainerProperty {
+  return new TextContainerProperty({
     xPosition: 0,
     yPosition: 0,
     width: 576,
@@ -226,18 +239,18 @@ function textContainer(content: string) {
     isEventCapture: 1,
     textColor: 4,
     content,
-  }
+  })
 }
 
-function menu() {
-  return {
+function menu(): MenuContainerProperty {
+  return new MenuContainerProperty({
     menuItems: [
-      { itemName: 'Now', itemID: MENU_NOW },
-      { itemName: 'Projects', itemID: MENU_PROJECTS },
-      { itemName: 'Refresh', itemID: MENU_REFRESH },
-      { itemName: 'Reconnect', itemID: MENU_RECONNECT },
+      new MenuItemProperty({ itemName: 'Now', itemID: MENU_NOW }),
+      new MenuItemProperty({ itemName: 'Projects', itemID: MENU_PROJECTS }),
+      new MenuItemProperty({ itemName: 'Refresh', itemID: MENU_REFRESH }),
+      new MenuItemProperty({ itemName: 'Reconnect', itemID: MENU_RECONNECT }),
     ],
-  }
+  })
 }
 
 function enqueue<T>(task: () => Promise<T>): Promise<T> {
