@@ -70,6 +70,42 @@ jobs:
             sleep 10
           done
 
+  evenhub:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: evenhub
+    env:
+      LEDGER_SERVER: https://ledger.example.com
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+      - name: Resolve dependencies
+        run: npm install --no-audit --no-fund
+      - name: Tests
+        run: npm test
+      - name: Build and package
+        run: npm run pack
+      - name: Audit
+        run: |
+          for attempt in 1 2 3; do
+            npm audit --audit-level=high --fetch-retries=0 --fetch-timeout=30000 && exit 0
+            test "$attempt" -eq 3 && exit 1
+            sleep 10
+          done
+      - name: Upload Ledger Glass package and generated lockfile
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ledger-glass-ci
+          path: |
+            evenhub/ledger-glass.ehpk
+            evenhub/package-lock.json
+          if-no-files-found: error
+          retention-days: 14
+
   containers:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -202,7 +238,7 @@ jobs:
 
   client-checks:
     if: always()
-    needs: [linux, windows, wine, android, frontend]
+    needs: [linux, windows, wine, android, frontend, evenhub]
     runs-on: ubuntu-latest
     steps:
       - name: Require every client test job to pass

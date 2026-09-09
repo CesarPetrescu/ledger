@@ -12,6 +12,7 @@ import (
 	"github.com/cesarpetrescu/ledger/internal/config"
 	"github.com/cesarpetrescu/ledger/internal/mcpserver"
 	"github.com/cesarpetrescu/ledger/internal/store"
+	"github.com/cesarpetrescu/ledger/internal/webcors"
 )
 
 func main() {
@@ -29,7 +30,8 @@ func main() {
 			log.Fatal(err)
 		}
 		server := mcpserver.NewServer(db, config.Required("LEDGER_INDEX_URL"), calendar)
-		if err := config.Serve(":8081", mcpserver.HTTPHandler(server, db, publicURL)); err != nil && err != http.ErrServerClosed {
+		handler := webcors.AllowExact(mcpserver.HTTPHandler(server, db, publicURL), "/mcp")
+		if err := config.Serve(":8081", handler); err != nil && err != http.ErrServerClosed {
 			log.Fatal(err)
 		}
 	case "seed":

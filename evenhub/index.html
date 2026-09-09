@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <title>Ledger Glass</title>
+  </head>
+  <body>
+    <main class="phone-shell">
+      <section class="card">
+        <p class="eyebrow">Ledger Glass</p>
+        <h1>G2 client</h1>
+        <p id="phone-status" class="status">Starting…</p>
+        <dl>
+          <div><dt>Server</dt><dd id="server-value">—</dd></div>
+          <div><dt>Access</dt><dd>Read-only project memory</dd></div>
+        </dl>
+        <section id="pairing" class="pairing" hidden>
+          <p>Approve this device in Ledger:</p>
+          <strong id="pairing-code"></strong>
+          <p id="pairing-uri" class="mono"></p>
+        </section>
+        <button id="reconnect" type="button">Reconnect</button>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
