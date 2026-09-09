@@ -1,0 +1,55 @@
+name: Ledger Glass system tests
+on:
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      require_full_app:
+        description: Fail unless every planned app journey has executable coverage
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: glass-system-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  simulator:
+    name: simulator (${{ matrix.target }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [web, package]
+    env:
+      GLASS_TARGET: ${{ matrix.target }}
+      GLASS_REQUIRE_FULL_APP: ${{ inputs.require_full_app || false }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+      - name: Install native simulator and browser prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb xauth dbus-x11 libwebkit2gtk-4.1-0 libgtk-3-0 libasound2t64 libxdo3 libegl1 libgl1-mesa-dri libglx-mesa0 pulseaudio pulseaudio-utils ca-certificates openssl libnss3-tools
+      - name: Install pinned application and system-test dependencies
+        run: |
+          npm --prefix evenhub install --no-audit --no-fund
+          npm --prefix evenhub/system install --no-audit --no-fund
+          cd evenhub/system
+          npx playwright install --with-deps chromium
+      - name: Real deployment and official simulator journeys
+        run: bash evenhub/system/run.sh
+      - name: Upload system evidence, including failures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: glass-system-${{ matrix.target }}
+          path: |
+            evenhub/system/artifacts/
+            evenhub/package-lock.json
+            evenhub/system/package-lock.json
+          if-no-files-found: error
+          retention-days: 14
