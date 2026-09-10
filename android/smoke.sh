@@ -27,3 +27,11 @@ fixture_pid=$!
 adb reverse tcp:8443 tcp:8443
 ./gradlew --no-daemon -PtestCaDir="$smoke_dir/res" \
   -Pandroid.testInstrumentationRunnerArguments.fixture=true connectedDebugAndroidTest
+
+# OwnerFlowTest captures the real Overview screen after a successful fixture
+# login. Export it into the normal CI report artifact so README visuals can be
+# refreshed from an actual emulator rather than a hand-made mockup.
+mkdir -p app/build/reports/readme
+adb exec-out run-as com.cesarpetrescu.ledger cat files/readme-overview.png \
+  > app/build/reports/readme/android-overview.png
+test -s app/build/reports/readme/android-overview.png
