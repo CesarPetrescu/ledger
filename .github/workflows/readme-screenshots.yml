@@ -1,0 +1,18 @@
+name: README screenshots
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Test the image integrity validator
+        run: python3 -m unittest discover -s scripts -p 'test_readme_screenshots.py' -v
+      - name: Validate published images, provenance and README references
+        run: python3 scripts/readme-screenshots.py check

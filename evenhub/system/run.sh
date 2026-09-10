@@ -73,4 +73,6 @@ else
   export WEBKIT_DISABLE_DMABUF_RENDERER=1
   export GDK_BACKEND=x11
   xvfb-run -a -s '-screen 0 1280x1024x24' dbus-run-session -- node evenhub/system/run.mjs
+  # Reuse the still-running disposable server only after every native test passes.
+  node evenhub/system/readme-web.mjs
 fi

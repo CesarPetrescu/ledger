@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "repository": "CesarPetrescu/ledger",
+  "capture_run_id": 34451859800,
+  "capture_run_url": "https://github.com/CesarPetrescu/ledger/actions/runs/34451859800",
+  "pr_head_sha": "b6cef305bd95300c8ea70c0905e5f7a089ead4bf",
+  "tested_commit": "df1a8cadde976b7fe1107a7eda9acb0f430a253a",
+  "fixture_data": true,
+  "images": [
+    {
+      "file": "website.png",
+      "sha256": "333a0e8aa935aae9dea0b23b185459709af324830405a872e3aaae397b69ac48",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 93326,
+      "artifact": "glass-system-native-web",
+      "source_path_suffix": "system/artifacts/readme-website.png",
+      "description": "Chromium: real web UI and Ledger backend; fictional project records"
+    },
+    {
+      "file": "android.png",
+      "sha256": "26b8196ed7f39f631df80f4591bb3fad7beed30320ff5cdde4a867c70b8ae1d5",
+      "width": 1080,
+      "height": 1920,
+      "bytes": 128907,
+      "artifact": "android-reports-api-36",
+      "source_path_suffix": "android/app/build/reports/readme/android-overview.png",
+      "description": "Android API 36 emulator: real app; existing HTTPS fixture backend"
+    },
+    {
+      "file": "even-simulator.png",
+      "sha256": "20a54aae934d6a9d047395a0bc406a6cbc5eca4f5817383c8bfe4fac65aa34ce",
+      "width": 576,
+      "height": 288,
+      "bytes": 4680,
+      "artifact": "glass-system-native-web",
+      "source_path_suffix": "system/artifacts/preview-03-now-real-data.png",
+      "description": "Official Even Hub simulator: real app/backend; framebuffer composited onto black"
+    }
+  ]
+}
