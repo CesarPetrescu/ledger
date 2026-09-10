@@ -4,12 +4,13 @@ set -euo pipefail
 cd "$(dirname "$0")"
 smoke_dir=$(mktemp -d)
 fixture_pid=''
+screenshot=/data/local/tmp/ledger-readme-overview.png
 cleanup() {
   local result=$?
   if [[ "$result" != 0 && -f "$smoke_dir/server.log" ]]; then cat "$smoke_dir/server.log"; fi
   if [[ -n "$fixture_pid" ]]; then kill "$fixture_pid" 2>/dev/null || true; fi
   adb reverse --remove tcp:8443 >/dev/null 2>&1 || true
-  adb shell rm -f /sdcard/ledger-readme-overview.png >/dev/null 2>&1 || true
+  adb shell rm -f "$screenshot" >/dev/null 2>&1 || true
   rm -rf "$smoke_dir"
 }
 trap cleanup EXIT
@@ -26,14 +27,14 @@ XML
 python3 test/server.py --cert "$smoke_dir/res/raw/test_ca.pem" --key "$smoke_dir/server.key" > "$smoke_dir/server.log" 2>&1 &
 fixture_pid=$!
 adb reverse tcp:8443 tcp:8443
-adb shell rm -f /sdcard/ledger-readme-overview.png
+adb shell rm -f "$screenshot"
 ./gradlew --no-daemon -PtestCaDir="$smoke_dir/res" \
   -Pandroid.testInstrumentationRunnerArguments.fixture=true connectedDebugAndroidTest
 
-# ReadmeScreenshotTest moves the actual rendered Overview frame to shared
-# emulator storage before Gradle uninstalls the debug package.
+# The test writes directly as the shell user while the Overview is on screen.
+# /data/local/tmp survives APK teardown, unlike the app's private files directory.
 mkdir -p app/build/reports/readme
-adb pull /sdcard/ledger-readme-overview.png app/build/reports/readme/android-overview.png >/dev/null
+adb pull "$screenshot" app/build/reports/readme/android-overview.png >/dev/null
 python3 - <<'PY'
 from pathlib import Path
 p = Path('app/build/reports/readme/android-overview.png')
