@@ -2,6 +2,7 @@ package com.cesarpetrescu.ledger
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.os.ParcelFileDescriptor
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -31,6 +32,14 @@ class ReadmeScreenshotTest {
                     check(screenshot.compress(Bitmap.CompressFormat.PNG, 100, output))
                 }
                 screenshot.recycle()
+
+                // connectedDebugAndroidTest removes the APK before smoke.sh can
+                // run-as it. Copy the real framebuffer out while the package is
+                // still installed; reading to EOF waits for the shell command.
+                val command = instrumentation.uiAutomation.executeShellCommand(
+                    "sh -c 'run-as com.cesarpetrescu.ledger cat files/readme-overview.png > /sdcard/ledger-readme-overview.png'",
+                )
+                ParcelFileDescriptor.AutoCloseInputStream(command).use { it.readBytes() }
             }
         } finally {
             SessionStore(context).clear()
