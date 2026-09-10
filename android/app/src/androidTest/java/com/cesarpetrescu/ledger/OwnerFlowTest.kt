@@ -1,6 +1,7 @@
 package com.cesarpetrescu.ledger
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.view.inputmethod.InputMethodManager
 import java.io.OutputStream
 import androidx.compose.ui.test.*
@@ -69,6 +70,15 @@ class OwnerFlowTest {
         InstrumentationRegistry.getInstrumentation().waitForIdleSync()
         ui.waitForIdle()
     }
+    private fun captureReadmeOverview() {
+        ui.waitForIdle()
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val screenshot = instrumentation.uiAutomation.takeScreenshot()
+        context.openFileOutput("readme-overview.png", Context.MODE_PRIVATE).use {
+            check(screenshot.compress(Bitmap.CompressFormat.PNG, 100, it))
+        }
+        screenshot.recycle()
+    }
 
     @Test fun sessionStorageIsEncryptedAndTamperingFailsClosed() {
         val store = SessionStore(context)
@@ -121,6 +131,7 @@ class OwnerFlowTest {
             scrollTo("Sign in")
             tap("Sign in")
             awaitText("A clear view of your work.")
+            captureReadmeOverview()
             recreate(activity)
             awaitText("A clear view of your work.")
             tap("Projects")
