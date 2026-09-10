@@ -36,6 +36,17 @@ class OwnerFlowTest {
         ui.onNodeWithText(text).performClick()
         ui.waitForIdle()
     }
+    private fun fillField(label: String, value: String) {
+        awaitText(label)
+        // Request focus separately, then let IME/layout settle before resolving
+        // the editable node again. Combining both operations retained a stale
+        // lazy-list node on API 28 when keyboard insets changed its layout.
+        ui.onNodeWithText(label).performClick()
+        ui.waitForIdle()
+        ui.waitUntilExactlyOneExists(hasText(label) and isFocused(), 15_000)
+        ui.onNode(hasText(label) and isFocused()).performTextReplacement(value)
+        ui.waitForIdle()
+    }
     private fun scrollTo(text: String) {
         ui.waitForIdle()
         ui.runOnUiThread {
@@ -89,9 +100,9 @@ class OwnerFlowTest {
     @Test fun nativeSignInRejectsCleartext() {
         ActivityScenario.launch(MainActivity::class.java).use {
             awaitText("Server address")
-            ui.onNodeWithText("Server address").performTextInput("http://example.com")
+            fillField("Server address", "http://example.com")
             scrollTo("Owner password")
-            ui.onNodeWithText("Owner password").performTextInput("fixture-password")
+            fillField("Owner password", "fixture-password")
             scrollTo("Sign in")
             tap("Sign in")
             awaitText("Use an HTTPS server address without a path, password, or query.")
@@ -115,9 +126,9 @@ class OwnerFlowTest {
         assertEquals(100000, large.first().text("body").length)
         ActivityScenario.launch(MainActivity::class.java).use { activity ->
             awaitText("Server address")
-            ui.onNodeWithText("Server address").performTextInput("https://localhost:8443")
+            fillField("Server address", "https://localhost:8443")
             scrollTo("Owner password")
-            ui.onNodeWithText("Owner password").performTextInput("fixture-password")
+            fillField("Owner password", "fixture-password")
             scrollTo("Sign in")
             tap("Sign in")
             awaitText("A clear view of your work.")
@@ -126,7 +137,7 @@ class OwnerFlowTest {
             tap("Projects")
             tap("Atlas")
             tap("Add entry")
-            ui.onNodeWithText("Entry").performTextInput("Android verification note")
+            fillField("Entry", "Android verification note")
             recreate(activity)
             ui.onNodeWithText("Android verification note").assertExists()
             scrollTo("Add entry")
@@ -135,7 +146,7 @@ class OwnerFlowTest {
             ui.onNodeWithText("Android verification note").assertExists()
             tap("Add entry")
             awaitText("Session expired")
-            ui.onNodeWithText("Owner password").performTextInput("fixture-password")
+            fillField("Owner password", "fixture-password")
             tap("Sign in again")
             ui.waitUntilDoesNotExist(hasText("Session expired"), 15_000)
             ui.onNodeWithText("Android verification note").assertExists()
@@ -160,12 +171,12 @@ class OwnerFlowTest {
             tap("Calendar")
             tap("Plan the week")
             awaitText("Title")
-            ui.onNodeWithText("Title").performTextReplacement("Updated planning session")
+            fillField("Title", "Updated planning session")
             scrollTo("Save event")
             tap("Save event")
             awaitText("Updated planning session")
             tap("Search")
-            ui.onNodeWithText("Search your work").performTextInput("Atlas")
+            fillField("Search your work", "Atlas")
             ui.onNodeWithTag("search-submit").performClick()
             awaitText("Atlas search result")
             ui.onNodeWithContentDescription("Settings").performClick()

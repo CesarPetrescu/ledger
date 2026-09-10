@@ -1,0 +1,49 @@
+# Temporary, PR-40-only asset import. Removed after the three images are committed.
+name: Import inspected README screenshots
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+jobs:
+  import:
+    if: github.repository == 'CesarPetrescu/ledger' && github.event.pull_request.number == 40 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'docs/readme-product-screenshots'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Verify the exact capture revision and both source jobs
+        run: |
+          gh api repos/CesarPetrescu/ledger/actions/runs/34451859800 --jq '.head_sha' | grep -Fx b6cef305bd95300c8ea70c0905e5f7a089ead4bf
+          gh api repos/CesarPetrescu/ledger/actions/runs/34451859800/jobs --jq '.jobs' > "$RUNNER_TEMP/capture-jobs.json"
+          python3 - "$RUNNER_TEMP/capture-jobs.json" <<'PY'
+          import json, sys
+          jobs = json.load(open(sys.argv[1]))
+          for name in ('glass-system / system (native)', 'android (36)'):
+              matches = [j for j in jobs if j['name'] == name]
+              assert len(matches) == 1 and matches[0]['conclusion'] == 'success', name
+          # This verifies capture jobs, not the complete source workflow.
+          # The unrelated API-28 failure is fixed and retested in this PR.
+          PY
+      - name: Download inspected screenshots from their existing artifacts
+        run: |
+          gh run download 34451859800 --repo CesarPetrescu/ledger --name glass-system-native-web --dir "$RUNNER_TEMP/native-capture"
+          gh run download 34451859800 --repo CesarPetrescu/ledger --name android-reports-api-36 --dir "$RUNNER_TEMP/android-capture"
+          python3 scripts/readme-screenshots.py import --native "$RUNNER_TEMP/native-capture" --android "$RUNNER_TEMP/android-capture" --run-id 34451859800 --head-sha b6cef305bd95300c8ea70c0905e5f7a089ead4bf
+      - name: Commit only the three PNGs and their provenance to this PR
+        run: |
+          test "$(git ls-remote origin refs/heads/docs/readme-product-screenshots | cut -f1)" = "$EXPECTED_SHA"
+          git add -- assets/screenshots/website.png assets/screenshots/android.png assets/screenshots/even-simulator.png assets/screenshots/provenance.json
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'docs: import verified website, Android and simulator captures'
+          git push origin HEAD:refs/heads/docs/readme-product-screenshots
