@@ -239,7 +239,7 @@ func TestRealStackAcceptance(t *testing.T) {
 	ctx := context.Background()
 	readSession := connectMCP(t, s.base, readPair.Access, "stack-read")
 	tools, err := readSession.ListTools(ctx, nil)
-	if err != nil || len(tools.Tools) != 17 {
+	if err != nil || len(tools.Tools) != 21 {
 		t.Fatalf("tools = %#v, %v", tools, err)
 	}
 	denied, err := readSession.CallTool(ctx, &mcp.CallToolParams{Name: "append_entry", Arguments: map[string]any{"slug": "acceptance", "kind": "note", "body": "blocked"}})
