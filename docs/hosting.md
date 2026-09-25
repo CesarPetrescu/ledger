@@ -81,9 +81,10 @@ claude mcp add --transport http ledger https://ledger.example.com/mcp
 | `LEDGER_EMBED_MODEL` | no | Default `qwen3-embedding` |
 | `LEDGER_EMBED_DIM` | no | Default `4096` |
 | `LEDGER_RERANK_MODEL` | no | Default `qwen3-reranker` |
-| `LEDGER_CHAT_URL` | no | OpenAI-compatible chat endpoint with JSON-schema output (llama.cpp, vLLM). Enables the Table view's extracted titles, tags, priorities, and todo tracking. |
+| `LEDGER_CHAT_URL` | no | OpenAI-compatible chat endpoint with JSON-schema output (llama.cpp, vLLM). Enables the Table view's extracted titles, tags, priorities, todo tracking, tag merging, and weekly project digests. Repeat folding and related entries also use the `LEDGER_INFER_URL` embedding endpoint, and the reranker shortlists todo candidates. |
 | `LEDGER_CHAT_MODEL` | no | Model name to send; leave empty for single-model servers |
 | `LEDGER_CHAT_API_KEY` | no | Bearer key if the chat endpoint requires one |
+| `LEDGER_DUPLICATE_SIMILARITY` | no | Cosine similarity at which the Table folds an entry under an earlier one of the same kind and project. Default `0.9`, calibrated on Qwen3-Embedding-8B; lower it to fold more. |
 | `LEDGER_INTERNAL_SUBNET`, `LEDGER_NGINX_INTERNAL_IP` | no | Compose network overrides, change together if the default subnet collides |
 
 The example domain and inference hostname in `.env.example` are placeholders.

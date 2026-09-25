@@ -118,7 +118,7 @@ func (db *DB) ListEntries(ctx context.Context, f EntryFilter) ([]EntryWithProjec
 		limit = &f.Limit
 	}
 	rows, err := db.Pool.Query(ctx, `SELECT e.id,e.slug,e.kind,e.body,e.source,e.client_id,e.created_at,p.name,
- m.entry_id IS NOT NULL AND m.title<>'',COALESCE(m.title,''),COALESCE(m.tags,'{}'),COALESCE(m.priority,''),COALESCE(m.refs,'{}'),COALESCE(m.origin,''),
+ m.entry_id IS NOT NULL AND m.title<>'',COALESCE(m.title,''),COALESCE(m.tags,'{}'),COALESCE(m.priority,''),COALESCE(m.refs,'{}'),COALESCE(m.origin,''),m.duplicate_of,
  rb.entry_id,COALESCE(rb.origin,''),rb.created_at
 FROM entry e JOIN project p ON p.slug=e.slug
 LEFT JOIN entry_meta m ON m.entry_id=e.id
@@ -141,7 +141,7 @@ ORDER BY e.created_at DESC,e.id DESC LIMIT $8`, f.ProjectSlug, f.Kind, f.Source,
 		var resolution Resolution
 		var resolvedAt *time.Time
 		if err := rows.Scan(&e.ID, &e.Slug, &e.Kind, &e.Body, &e.Source, &e.ClientID, &e.CreatedAt, &e.ProjectName,
-			&hasMeta, &meta.Title, &meta.Tags, &meta.Priority, &meta.Refs, &meta.Origin, &resolverID, &resolution.Origin, &resolvedAt); err != nil {
+			&hasMeta, &meta.Title, &meta.Tags, &meta.Priority, &meta.Refs, &meta.Origin, &meta.DuplicateOf, &resolverID, &resolution.Origin, &resolvedAt); err != nil {
 			return nil, err
 		}
 		if hasMeta {

@@ -20,7 +20,7 @@ func main() {
 	defer db.Close()
 	infer := retrieval.NewInferClient(config.Required("LEDGER_INFER_URL"), config.Value("LEDGER_EMBED_MODEL", "qwen3-embedding"), config.Value("LEDGER_RERANK_MODEL", "qwen3-reranker"), config.Int("LEDGER_EMBED_DIM", 4096), os.Getenv("LEDGER_INFER_API_KEY"))
 	worker := retrieval.NewIndexer(db, infer)
-	extractor := retrieval.NewExtractor(db, os.Getenv("LEDGER_CHAT_URL"), os.Getenv("LEDGER_CHAT_MODEL"), os.Getenv("LEDGER_CHAT_API_KEY"))
+	extractor := retrieval.NewExtractor(db, os.Getenv("LEDGER_CHAT_URL"), os.Getenv("LEDGER_CHAT_MODEL"), os.Getenv("LEDGER_CHAT_API_KEY"), infer, config.Float("LEDGER_DUPLICATE_SIMILARITY", 0.9))
 	switch os.Args[1] {
 	case "serve":
 		workerCtx, cancel := context.WithCancel(ctx)

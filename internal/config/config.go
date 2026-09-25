@@ -35,6 +35,17 @@ func Int(name string, fallback int) int {
 	return fallback
 }
 
+func Float(name string, fallback float64) float64 {
+	if value := os.Getenv(name); value != "" {
+		parsed, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			panic(fmt.Sprintf("%s must be a number", name))
+		}
+		return parsed
+	}
+	return fallback
+}
+
 func OpenDB(ctx context.Context) *store.DB {
 	db, err := store.Open(ctx, Required("LEDGER_DATABASE_URL"))
 	if err != nil {

@@ -43,7 +43,7 @@ func TestExtractorLabelsEntriesAndLinksResolvedTodos(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": reply}}}})
 	}))
 	defer chat.Close()
-	x := NewExtractor(db, chat.URL, "", "")
+	x := NewExtractor(db, chat.URL, "", "", nil, 0.9)
 	if worked, err := x.ProcessOne(ctx); !worked || err != nil {
 		t.Fatalf("todo extraction = %v %v", worked, err)
 	}

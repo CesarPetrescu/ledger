@@ -64,6 +64,12 @@ export interface EntryMeta {
 export interface TableEntry extends RecentEntry {
   meta?: EntryMeta
   resolved_by?: { entry_id: string; origin: 'model' | 'owner'; created_at: string }
+  /** Set when this entry repeats an earlier one in the same project. */
+  duplicate_of?: string
+}
+
+export interface RelatedEntry extends TableEntry {
+  similarity: number
 }
 
 export interface EntryFilter {
@@ -96,6 +102,8 @@ export interface ProjectSummary {
   status_body: string
   status_at?: string
   status_source: string
+  digest: string
+  digest_at?: string
 }
 
 export interface ProjectSummaries {
@@ -387,6 +395,7 @@ export const api = {
   listEntries: (filter: EntryFilter, before?: string) => request<EntryTablePage>('GET', `/entries${entryQuery(filter, { limit: '200', ...(before ? { before } : {}) })}`),
   getProjectSummaries: () => request<ProjectSummaries>('GET', '/table/projects'),
   resolveTodo: (id: string) => request<Entry>('POST', `/entries/${encodeURIComponent(id)}/resolve`),
+  relatedEntries: (id: string) => request<{ related: RelatedEntry[] }>('GET', `/entries/${encodeURIComponent(id)}/related`).then((response) => response.related),
   reopenTodo: (id: string) => request<{ reopened: boolean }>('POST', `/entries/${encodeURIComponent(id)}/reopen`),
   entriesCsvUrl: (filter: EntryFilter) => `/admin/api/entries.csv${entryQuery(filter)}`,
   search: (input: SearchRequest) => request<SearchResponse>('POST', '/search', input),

@@ -95,6 +95,7 @@ func NewServer(config Config, db *store.DB) *Server {
 	s.mux.HandleFunc("GET /admin/api/entries.csv", s.exportEntries)
 	s.mux.HandleFunc("POST /admin/api/entries/{id}/resolve", s.resolveTodo)
 	s.mux.HandleFunc("POST /admin/api/entries/{id}/reopen", s.reopenTodo)
+	s.mux.HandleFunc("GET /admin/api/entries/{id}/related", s.relatedEntries)
 	s.mux.HandleFunc("GET /admin/api/table/projects", s.projectSummaries)
 	s.mux.HandleFunc("GET /admin/api/handoffs", s.listHandoffs)
 	s.mux.HandleFunc("POST /admin/api/handoffs", s.createHandoff)
@@ -573,6 +574,9 @@ func tableEntryResponse(entry store.EntryWithProject) map[string]any {
 	item["project_name"] = entry.ProjectName
 	if entry.Meta != nil {
 		item["meta"] = entry.Meta
+		if entry.Meta.DuplicateOf != nil {
+			item["duplicate_of"] = strconv.FormatInt(*entry.Meta.DuplicateOf, 10)
+		}
 	}
 	if entry.ResolvedBy != nil {
 		item["resolved_by"] = map[string]any{"entry_id": strconv.FormatInt(entry.ResolvedBy.EntryID, 10), "origin": entry.ResolvedBy.Origin, "created_at": entry.ResolvedBy.CreatedAt}
@@ -622,6 +626,28 @@ func (s *Server) reopenTodo(w http.ResponseWriter, r *http.Request) {
 	default:
 		s.internalError(w, r, err)
 	}
+}
+
+// relatedMinSimilarity hides weak matches; calibrated on Qwen3-Embedding-8B.
+const relatedMinSimilarity = 0.62
+
+func (s *Server) relatedEntries(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathEntryID(w, r)
+	if !ok {
+		return
+	}
+	related, err := s.db.RelatedEntries(r.Context(), id, relatedMinSimilarity, 3)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	rows := make([]map[string]any, 0, len(related))
+	for _, entry := range related {
+		item := tableEntryResponse(entry.EntryWithProject)
+		item["similarity"] = entry.Similarity
+		rows = append(rows, item)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"related": rows})
 }
 
 func (s *Server) projectSummaries(w http.ResponseWriter, r *http.Request) {

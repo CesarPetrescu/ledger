@@ -11,15 +11,16 @@ import (
 
 // EntryMeta is derived metadata for one entry. It never changes the entry.
 type EntryMeta struct {
-	Title    string   `json:"title"`
-	Tags     []string `json:"tags"`
-	Priority string   `json:"priority,omitempty"`
-	Refs     []string `json:"refs"`
-	Resolves *int64   `json:"-"`
-	Origin   string   `json:"origin"`
-	Model    string   `json:"-"`
-	Attempts int      `json:"-"`
-	Error    string   `json:"-"`
+	Title       string   `json:"title"`
+	Tags        []string `json:"tags"`
+	Priority    string   `json:"priority,omitempty"`
+	Refs        []string `json:"refs"`
+	Resolves    *int64   `json:"-"`
+	DuplicateOf *int64   `json:"-"`
+	Origin      string   `json:"origin"`
+	Model       string   `json:"-"`
+	Attempts    int      `json:"-"`
+	Error       string   `json:"-"`
 }
 
 // Resolution names the entry that closed a todo.
@@ -87,7 +88,8 @@ func (db *DB) SaveEntryMeta(ctx context.Context, entryID int64, m EntryMeta) err
 	_, err := db.Pool.Exec(ctx, `INSERT INTO entry_meta(entry_id,title,tags,priority,refs,resolves,origin,model,attempts,error)
 VALUES($1,$2,$3,$4,$5,$6,'model',$7,1,'')
 ON CONFLICT(entry_id) DO UPDATE SET title=EXCLUDED.title,tags=EXCLUDED.tags,priority=EXCLUDED.priority,refs=EXCLUDED.refs,
- resolves=EXCLUDED.resolves,model=EXCLUDED.model,attempts=entry_meta.attempts+1,error='',updated_at=now()
+ resolves=EXCLUDED.resolves,model=EXCLUDED.model,attempts=entry_meta.attempts+1,error='',updated_at=now(),
+ embedding=NULL,embed_model='',duplicate_of=NULL,duplicate_checked=false
 WHERE entry_meta.origin='model'`, entryID, m.Title, nonNil(m.Tags), m.Priority, nonNil(m.Refs), m.Resolves, m.Model)
 	return err
 }
@@ -178,6 +180,8 @@ type ProjectSummary struct {
 	StatusBody   string     `json:"status_body"`
 	StatusAt     *time.Time `json:"status_at,omitempty"`
 	StatusSource string     `json:"status_source"`
+	Digest       string     `json:"digest"`
+	DigestAt     *time.Time `json:"digest_at,omitempty"`
 }
 
 func (db *DB) ProjectSummaries(ctx context.Context) ([]ProjectSummary, error) {
@@ -186,8 +190,9 @@ func (db *DB) ProjectSummaries(ctx context.Context) ([]ProjectSummary, error) {
  (SELECT count(*) FROM entry t WHERE t.slug=p.slug AND t.kind='todo' AND NOT EXISTS (SELECT 1 FROM entry_meta r WHERE r.resolves=t.id)),
  (SELECT count(*) FROM entry WHERE slug=p.slug AND created_at>now()-interval '7 days'),
  COALESCE((SELECT array_agg(DISTINCT source ORDER BY source) FROM entry WHERE slug=p.slug AND created_at>now()-interval '7 days'),'{}'),
- s.id,COALESCE(sm.title,''),COALESCE(s.body,''),s.created_at,COALESCE(s.source,'')
+ s.id,COALESCE(sm.title,''),COALESCE(s.body,''),s.created_at,COALESCE(s.source,''),COALESCE(d.summary,''),d.generated_at
 FROM project p
+LEFT JOIN project_digest d ON d.slug=p.slug
 LEFT JOIN LATERAL (SELECT id,body,created_at,source FROM entry WHERE slug=p.slug AND kind='status' ORDER BY created_at DESC,id DESC LIMIT 1) s ON true
 LEFT JOIN entry_meta sm ON sm.entry_id=s.id
 ORDER BY 6 DESC NULLS LAST,p.slug`)
@@ -196,7 +201,7 @@ ORDER BY 6 DESC NULLS LAST,p.slug`)
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (ProjectSummary, error) {
 		var s ProjectSummary
-		return s, row.Scan(&s.Slug, &s.Name, &s.Tier, &s.Deadline, &s.NeedsMe, &s.LastEntryAt, &s.OpenTodos, &s.WeekEntries, &s.WeekAgents, &s.StatusID, &s.StatusTitle, &s.StatusBody, &s.StatusAt, &s.StatusSource)
+		return s, row.Scan(&s.Slug, &s.Name, &s.Tier, &s.Deadline, &s.NeedsMe, &s.LastEntryAt, &s.OpenTodos, &s.WeekEntries, &s.WeekAgents, &s.StatusID, &s.StatusTitle, &s.StatusBody, &s.StatusAt, &s.StatusSource, &s.Digest, &s.DigestAt)
 	})
 }
 

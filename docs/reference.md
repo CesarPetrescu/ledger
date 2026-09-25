@@ -68,6 +68,7 @@ nginx :8080 (only published port)
 - Cross-agent Handoffs inbox with append-only threads, per-message status, and up to 10 attachments per message
 - Optional Nextcloud calendar integration with owner-selected calendars and ETag-safe event updates
 - Responsive operator console with live WebSocket updates across projects, search, calendar, handoffs, files, and OAuth clients
+- Table view with per-project weekly digests, todos you can close or reopen, a decision log, and day-grouped activity; with an optional chat model, entries get short titles, merged tags, priorities, and automatic todo resolution, and embeddings fold repeated entries and suggest related ones. Derived data lives beside the entries and never changes them
 - Containerized deployment with non-root runtimes and a single published port
 
 ## MCP surface

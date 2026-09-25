@@ -681,6 +681,65 @@ func TestTodoResolutionAndProjectSummaries(t *testing.T) {
 	}
 }
 
+func TestRelatedEntriesDuplicatesAndDigestsThroughTheAPI(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
+	_, s := login(t, server, "correct horse", "")
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	axis := func(values ...float32) []float32 { v := make([]float32, 8); copy(v, values); return v }
+	ids := map[string]int64{}
+	for _, e := range []struct {
+		name, kind string
+		vector     []float32
+	}{
+		{"first", "status", axis(1)}, {"repeat", "status", axis(0.99, 0.1)}, {"cousin", "note", axis(0.7, 0.7)}, {"stranger", "note", axis(0, 0, 1)},
+	} {
+		entry, err := db.AppendEntry(ctx, "atlas", e.kind, e.name, "codex", "c")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids[e.name] = entry.ID
+		if err := db.SaveEntryMeta(ctx, entry.ID, store.EntryMeta{Title: e.name}); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.SaveEntryEmbedding(ctx, entry.ID, "embed", e.vector); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n, err := db.LinkDuplicates(ctx, "embed", 0.9, 50); err != nil || n != 4 {
+		t.Fatalf("link duplicates = %d %v", n, err)
+	}
+	if err := db.SaveDigest(ctx, "atlas", "Shipped things.", 4, ids["stranger"], "m"); err != nil {
+		t.Fatal(err)
+	}
+	entries := request(t, server, http.MethodGet, "/admin/api/entries", "", authed(s, false))
+	if !strings.Contains(entries.Body.String(), `"duplicate_of":"`+strconv.FormatInt(ids["first"], 10)+`"`) || strings.Count(entries.Body.String(), `"duplicate_of"`) != 1 {
+		t.Fatalf("entries = %s", entries.Body.String())
+	}
+	related := request(t, server, http.MethodGet, "/admin/api/entries/"+strconv.FormatInt(ids["cousin"], 10)+"/related", "", authed(s, false))
+	var body struct {
+		Related []struct {
+			Body       string  `json:"body"`
+			Similarity float64 `json:"similarity"`
+		} `json:"related"`
+	}
+	if err := json.Unmarshal(related.Body.Bytes(), &body); err != nil || related.Code != http.StatusOK || len(body.Related) != 1 || body.Related[0].Body != "first" || body.Related[0].Similarity < 0.7 {
+		t.Fatalf("related = %d %s", related.Code, related.Body.String())
+	}
+	if res := request(t, server, http.MethodGet, "/admin/api/entries/"+strconv.FormatInt(ids["first"], 10)+"/related", "", authed(s, false)); strings.Contains(res.Body.String(), `"body":"repeat"`) {
+		t.Fatalf("own duplicate listed as related: %s", res.Body.String())
+	}
+	if res := request(t, server, http.MethodGet, "/admin/api/entries/x/related", "", authed(s, false)); res.Code != http.StatusBadRequest {
+		t.Fatalf("bad id = %d", res.Code)
+	}
+	summary := request(t, server, http.MethodGet, "/admin/api/table/projects", "", authed(s, false))
+	if !strings.Contains(summary.Body.String(), `"digest":"Shipped things."`) || !strings.Contains(summary.Body.String(), `"digest_at":`) {
+		t.Fatalf("summary = %s", summary.Body.String())
+	}
+}
+
 func TestSearchAddsProvenanceFiltersAndDegradesGracefully(t *testing.T) {
 	db, ctx := testdb.Open(t)
 	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
