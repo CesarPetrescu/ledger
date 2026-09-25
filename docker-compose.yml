@@ -74,6 +74,9 @@ services:
       LEDGER_EMBED_DIM: ${LEDGER_EMBED_DIM:-4096}
       LEDGER_RERANK_MODEL: ${LEDGER_RERANK_MODEL:-qwen3-reranker}
       LEDGER_INFER_API_KEY: ${LEDGER_INFER_API_KEY:-}
+      LEDGER_CHAT_URL: ${LEDGER_CHAT_URL:-}
+      LEDGER_CHAT_MODEL: ${LEDGER_CHAT_MODEL:-}
+      LEDGER_CHAT_API_KEY: ${LEDGER_CHAT_API_KEY:-}
     depends_on:
       postgres: *postgres-ready
     networks:

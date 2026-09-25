@@ -10,6 +10,7 @@ import { ProjectsPage } from './pages/ProjectsPage'
 import { SearchPage } from './pages/SearchPage'
 import { CalendarPage } from './pages/CalendarPage'
 import { HandoffsPage } from './pages/HandoffsPage'
+import { TablePage } from './pages/TablePage'
 
 function resolve(path: string, query: URLSearchParams): { title: string; page: React.ReactNode } {
   if (path === '/') return { title: 'Overview', page: <OverviewPage /> }
@@ -18,6 +19,7 @@ function resolve(path: string, query: URLSearchParams): { title: string; page: R
   if (project?.[1]) return { title: 'Projects', page: <ProjectsPage slug={decodeURIComponent(project[1])} /> }
   const projectView = /^\/projects\/([^/]+)\/(handoffs|files)$/.exec(path)
   if (projectView?.[1] && projectView[2]) return { title: 'Projects', page: <ProjectsPage slug={decodeURIComponent(projectView[1])} view={projectView[2] as 'handoffs' | 'files'} /> }
+  if (path === '/table') return { title: 'Table', page: <TablePage /> }
   if (path === '/search') return { title: 'Search', page: <SearchPage /> }
   if (path === '/calendar') return { title: 'Calendar', page: <CalendarPage /> }
   if (path === '/handoffs') return { title: 'Handoffs', page: <HandoffsPage /> }

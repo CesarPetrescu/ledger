@@ -9,6 +9,7 @@ import { useLiveUpdates } from '../live'
 const NAV: { to: string; label: string; icon: IconName; match: (path: string) => boolean; mobileHidden?: boolean }[] = [
   { to: '/', label: 'Overview', icon: 'home', match: (path) => path === '/' },
   { to: '/projects', label: 'Projects', icon: 'projects', match: (path) => path.startsWith('/projects') },
+  { to: '/table', label: 'Table', icon: 'table', match: (path) => path === '/table' },
   { to: '/calendar', label: 'Calendar', icon: 'calendar', match: (path) => path === '/calendar' },
   { to: '/handoffs', label: 'Handoffs', icon: 'handoffs', match: (path) => path.startsWith('/handoffs') },
   { to: '/search', label: 'Search', icon: 'search', match: (path) => path === '/search', mobileHidden: true },

@@ -20,6 +20,7 @@ import {
   IconPaperclip,
   IconRefresh,
   IconSearch,
+  IconTable,
   IconWifi,
   IconWifiOff,
   IconTrash,
@@ -27,7 +28,7 @@ import {
   type IconProps,
 } from '@tabler/icons-react'
 
-export type IconName = 'eye' | 'eye-off' | 'menu' | 'close' | 'search' | 'arrow' | 'filter' | 'logout' | 'plus' | 'alert' | 'back' | 'refresh' | 'book' | 'home' | 'projects' | 'calendar' | 'handoffs' | 'copy' | 'paperclip' | 'clients' | 'external' | 'trash' | 'live' | 'offline'
+export type IconName = 'eye' | 'eye-off' | 'menu' | 'close' | 'search' | 'arrow' | 'filter' | 'logout' | 'plus' | 'alert' | 'back' | 'refresh' | 'book' | 'home' | 'projects' | 'calendar' | 'handoffs' | 'copy' | 'paperclip' | 'clients' | 'external' | 'trash' | 'live' | 'offline' | 'table'
 
 const icons: Record<IconName, ComponentType<IconProps>> = {
   eye: IconEye,
@@ -54,6 +55,7 @@ const icons: Record<IconName, ComponentType<IconProps>> = {
   trash: IconTrash,
   live: IconWifi,
   offline: IconWifiOff,
+  table: IconTable,
 }
 
 export function Icon({ name, ...props }: { name: IconName } & IconProps) {

@@ -134,10 +134,18 @@ func (c *InferClient) post(ctx context.Context, path string, payload, response a
 	defer res.Body.Close()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		_, _ = io.Copy(io.Discard, res.Body)
-		return fmt.Errorf("inference: HTTP %s", res.Status)
+		return &statusError{code: res.StatusCode, status: res.Status}
 	}
 	if err := json.NewDecoder(io.LimitReader(res.Body, 16<<20)).Decode(response); err != nil {
 		return fmt.Errorf("inference response: %w", err)
 	}
 	return nil
 }
+
+// statusError is a non-2xx inference response.
+type statusError struct {
+	code   int
+	status string
+}
+
+func (e *statusError) Error() string { return "inference: HTTP " + e.status }

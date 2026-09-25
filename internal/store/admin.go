@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // AdminSessionTTL is the absolute lifetime of an operator session.
@@ -84,11 +86,48 @@ func (db *DB) AdminCounts(ctx context.Context) (AdminCounts, error) {
 
 type EntryWithProject struct {
 	Entry
-	ProjectName string `json:"project_name"`
+	ProjectName string      `json:"project_name"`
+	Meta        *EntryMeta  `json:"meta,omitempty"`
+	ResolvedBy  *Resolution `json:"resolved_by,omitempty"`
 }
 
 func (db *DB) RecentEntries(ctx context.Context, limit int) ([]EntryWithProject, error) {
-	rows, err := db.Pool.Query(ctx, `SELECT e.id,e.slug,e.kind,e.body,e.source,e.client_id,e.created_at,p.name FROM entry e JOIN project p ON p.slug=e.slug ORDER BY e.created_at DESC,e.id DESC LIMIT $1`, limit)
+	return db.ListEntries(ctx, EntryFilter{Limit: limit})
+}
+
+// EntryFilter narrows the cross-project entry table. Empty fields match
+// everything; Query is a case-insensitive substring of the body or extracted
+// title. Status "open" or "done" keeps only todos in that state. Before is the
+// ID of the last entry already shown; Limit <= 0 returns every match.
+type EntryFilter struct {
+	ProjectSlug string
+	Kind        string
+	Source      string
+	Tag         string
+	Status      string
+	Query       string
+	Before      *int64
+	Limit       int
+}
+
+// ListEntries returns matching entries from every project, newest first,
+// with their extracted metadata and, for todos, the entry that resolved them.
+func (db *DB) ListEntries(ctx context.Context, f EntryFilter) ([]EntryWithProject, error) {
+	var limit *int
+	if f.Limit > 0 {
+		limit = &f.Limit
+	}
+	rows, err := db.Pool.Query(ctx, `SELECT e.id,e.slug,e.kind,e.body,e.source,e.client_id,e.created_at,p.name,
+ m.entry_id IS NOT NULL AND m.title<>'',COALESCE(m.title,''),COALESCE(m.tags,'{}'),COALESCE(m.priority,''),COALESCE(m.refs,'{}'),COALESCE(m.origin,''),
+ rb.entry_id,COALESCE(rb.origin,''),rb.created_at
+FROM entry e JOIN project p ON p.slug=e.slug
+LEFT JOIN entry_meta m ON m.entry_id=e.id
+LEFT JOIN LATERAL (SELECT r.entry_id,r.origin,re.created_at FROM entry_meta r JOIN entry re ON re.id=r.entry_id WHERE r.resolves=e.id ORDER BY re.created_at,re.id LIMIT 1) rb ON e.kind='todo'
+WHERE ($1='' OR e.slug=$1) AND ($2='' OR e.kind=$2) AND ($3='' OR e.source=$3) AND ($4='' OR m.tags @> ARRAY[$4])
+AND ($5='' OR (e.kind='todo' AND ($5='open')=(rb.entry_id IS NULL)))
+AND ($6='' OR strpos(lower(e.body),lower($6))>0 OR strpos(lower(COALESCE(m.title,'')),lower($6))>0)
+AND ($7::bigint IS NULL OR (e.created_at,e.id) < (SELECT created_at,id FROM entry WHERE id=$7))
+ORDER BY e.created_at DESC,e.id DESC LIMIT $8`, f.ProjectSlug, f.Kind, f.Source, f.Tag, f.Status, f.Query, f.Before, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -96,12 +135,43 @@ func (db *DB) RecentEntries(ctx context.Context, limit int) ([]EntryWithProject,
 	out := []EntryWithProject{}
 	for rows.Next() {
 		var e EntryWithProject
-		if err := rows.Scan(&e.ID, &e.Slug, &e.Kind, &e.Body, &e.Source, &e.ClientID, &e.CreatedAt, &e.ProjectName); err != nil {
+		var hasMeta bool
+		var meta EntryMeta
+		var resolverID *int64
+		var resolution Resolution
+		var resolvedAt *time.Time
+		if err := rows.Scan(&e.ID, &e.Slug, &e.Kind, &e.Body, &e.Source, &e.ClientID, &e.CreatedAt, &e.ProjectName,
+			&hasMeta, &meta.Title, &meta.Tags, &meta.Priority, &meta.Refs, &meta.Origin, &resolverID, &resolution.Origin, &resolvedAt); err != nil {
 			return nil, err
+		}
+		if hasMeta {
+			e.Meta = &meta
+		}
+		if resolverID != nil {
+			resolution.EntryID, resolution.CreatedAt = *resolverID, *resolvedAt
+			e.ResolvedBy = &resolution
 		}
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// EntryTags lists the tags in use, most frequent first, for the tag filter.
+func (db *DB) EntryTags(ctx context.Context, limit int) ([]string, error) {
+	rows, err := db.Pool.Query(ctx, `SELECT tag FROM entry_meta, unnest(tags) tag GROUP BY tag ORDER BY count(*) DESC,tag LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
+}
+
+// EntrySources lists every distinct writer name, for the table's agent filter.
+func (db *DB) EntrySources(ctx context.Context) ([]string, error) {
+	rows, err := db.Pool.Query(ctx, `SELECT DISTINCT source FROM entry ORDER BY source`)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
 func (db *DB) EntriesByID(ctx context.Context, ids []int64) (map[int64]EntryWithProject, error) {

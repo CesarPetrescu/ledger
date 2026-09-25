@@ -554,6 +554,133 @@ func TestProjectTimelineIsCursorPaginated(t *testing.T) {
 	}
 }
 
+func TestEntryTableFiltersPagesAndExportsCSV(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
+	_, s := login(t, server, "correct horse", "")
+	for _, p := range []store.Project{{Slug: "atlas", Name: "Atlas", Tier: "focus"}, {Slug: "beacon", Name: "Beacon", Tier: "park"}} {
+		if _, err := db.UpsertProject(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, e := range []struct{ slug, kind, body, source string }{
+		{"atlas", "decision", "Use Postgres", "claude-code"},
+		{"beacon", "todo", "=HYPERLINK(\"http://evil\")", "codex"},
+		{"atlas", "note", "Ship the TABLE view", "codex"},
+	} {
+		if _, err := db.AppendEntry(ctx, e.slug, e.kind, e.body, e.source, "client-1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	type page struct {
+		Entries []struct {
+			ID          string `json:"id"`
+			Body        string `json:"body"`
+			ProjectName string `json:"project_name"`
+		} `json:"entries"`
+		Sources    []string `json:"sources"`
+		NextBefore *string  `json:"next_before"`
+	}
+	get := func(path string) page {
+		t.Helper()
+		res := request(t, server, http.MethodGet, path, "", authed(s, false))
+		var body page
+		if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil || res.Code != http.StatusOK {
+			t.Fatalf("%s = %d %s", path, res.Code, res.Body.String())
+		}
+		return body
+	}
+	first := get("/admin/api/entries?limit=2")
+	if len(first.Entries) != 2 || first.Entries[0].Body != "Ship the TABLE view" || first.Entries[1].ProjectName != "Beacon" || first.NextBefore == nil || strings.Join(first.Sources, ",") != "claude-code,codex" {
+		t.Fatalf("first page = %+v", first)
+	}
+	if rest := get("/admin/api/entries?limit=2&before=" + *first.NextBefore); len(rest.Entries) != 1 || rest.Entries[0].Body != "Use Postgres" || rest.NextBefore != nil {
+		t.Fatalf("second page = %+v", rest)
+	}
+	for path, want := range map[string]string{
+		"/admin/api/entries?project=atlas&source=codex": "Ship the TABLE view",
+		"/admin/api/entries?kind=decision":              "Use Postgres",
+		"/admin/api/entries?q=table":                    "Ship the TABLE view",
+	} {
+		if got := get(path); len(got.Entries) != 1 || got.Entries[0].Body != want {
+			t.Errorf("%s = %+v", path, got)
+		}
+	}
+	for _, path := range []string{"/admin/api/entries?kind=idea", "/admin/api/entries?project=Bad%20Slug", "/admin/api/entries?limit=0", "/admin/api/entries?before=x", "/admin/api/entries.csv?source=a%0Ab"} {
+		if res := request(t, server, http.MethodGet, path, "", authed(s, false)); res.Code != http.StatusBadRequest {
+			t.Errorf("%s = %d", path, res.Code)
+		}
+	}
+
+	res := request(t, server, http.MethodGet, "/admin/api/entries.csv?project=beacon", "", authed(s, false))
+	if res.Code != http.StatusOK || !strings.HasPrefix(res.Header().Get("Content-Type"), "text/csv") || !strings.Contains(res.Header().Get("Content-Disposition"), "attachment") {
+		t.Fatalf("csv = %d %v", res.Code, res.Header())
+	}
+	lines := strings.Split(strings.TrimSpace(strings.TrimPrefix(res.Body.String(), "\ufeff")), "\n")
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], "Time (UTC),Project,") || !strings.Contains(lines[1], `,Beacon,beacon,todo,codex,,,,open,"'=HYPERLINK(""http://evil"")",`) {
+		t.Fatalf("csv body = %q", res.Body.String())
+	}
+}
+
+func TestTodoResolutionAndProjectSummaries(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
+	_, s := login(t, server, "correct horse", "")
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	todo, err := db.AppendEntry(ctx, "atlas", "todo", "Add CSV export", "codex", "c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	note, err := db.AppendEntry(ctx, "atlas", "note", "Kickoff", "claude-code", "c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SaveEntryMeta(ctx, todo.ID, store.EntryMeta{Title: "Add CSV export", Tags: []string{"export"}, Priority: "high"}); err != nil {
+		t.Fatal(err)
+	}
+	id := strconv.FormatInt(todo.ID, 10)
+	if res := request(t, server, http.MethodPost, "/admin/api/entries/"+id+"/resolve", "", authed(s, false)); res.Code != http.StatusForbidden {
+		t.Fatalf("resolve without CSRF = %d", res.Code)
+	}
+	if res := request(t, server, http.MethodPost, "/admin/api/entries/"+strconv.FormatInt(note.ID, 10)+"/resolve", "", authed(s, true)); res.Code != http.StatusBadRequest {
+		t.Fatalf("resolve note = %d", res.Code)
+	}
+	if res := request(t, server, http.MethodPost, "/admin/api/entries/999999/resolve", "", authed(s, true)); res.Code != http.StatusNotFound {
+		t.Fatalf("resolve missing = %d", res.Code)
+	}
+	if res := request(t, server, http.MethodPost, "/admin/api/entries/"+id+"/reopen", "", authed(s, true)); res.Code != http.StatusConflict {
+		t.Fatalf("reopen open todo = %d", res.Code)
+	}
+	summary := request(t, server, http.MethodGet, "/admin/api/table/projects", "", authed(s, false))
+	if summary.Code != http.StatusOK || !strings.Contains(summary.Body.String(), `"open_todos":1`) || !strings.Contains(summary.Body.String(), `"week_agents":["claude-code","codex"]`) || !strings.Contains(summary.Body.String(), `"metadata":{"total":2,"ready":1,"failed":0}`) {
+		t.Fatalf("summary = %d %s", summary.Code, summary.Body.String())
+	}
+
+	resolved := request(t, server, http.MethodPost, "/admin/api/entries/"+id+"/resolve", "", authed(s, true))
+	if resolved.Code != http.StatusCreated || !strings.Contains(resolved.Body.String(), `"body":"Done: Add CSV export"`) || !strings.Contains(resolved.Body.String(), `"kind":"status"`) {
+		t.Fatalf("resolve = %d %s", resolved.Code, resolved.Body.String())
+	}
+	if res := request(t, server, http.MethodPost, "/admin/api/entries/"+id+"/resolve", "", authed(s, true)); res.Code != http.StatusConflict {
+		t.Fatalf("resolve twice = %d", res.Code)
+	}
+	done := request(t, server, http.MethodGet, "/admin/api/entries?status=done&tag=export", "", authed(s, false))
+	if done.Code != http.StatusOK || !strings.Contains(done.Body.String(), `"resolved_by":{"created_at":`) || !strings.Contains(done.Body.String(), `"origin":"owner"`) || !strings.Contains(done.Body.String(), `"tags":["export"]`) || !strings.Contains(done.Body.String(), `"priority":"high"`) {
+		t.Fatalf("done todos = %s", done.Body.String())
+	}
+	if res := request(t, server, http.MethodGet, "/admin/api/entries?status=later", "", authed(s, false)); res.Code != http.StatusBadRequest {
+		t.Fatalf("bad status = %d", res.Code)
+	}
+	if res := request(t, server, http.MethodPost, "/admin/api/entries/"+id+"/reopen", "", authed(s, true)); res.Code != http.StatusOK {
+		t.Fatalf("reopen = %d %s", res.Code, res.Body.String())
+	}
+	open := request(t, server, http.MethodGet, "/admin/api/entries?status=open", "", authed(s, false))
+	if !strings.Contains(open.Body.String(), `"id":"`+id+`"`) || strings.Contains(open.Body.String(), "resolved_by") {
+		t.Fatalf("reopened = %s", open.Body.String())
+	}
+}
+
 func TestSearchAddsProvenanceFiltersAndDegradesGracefully(t *testing.T) {
 	db, ctx := testdb.Open(t)
 	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {

@@ -20,6 +20,7 @@ func main() {
 	defer db.Close()
 	infer := retrieval.NewInferClient(config.Required("LEDGER_INFER_URL"), config.Value("LEDGER_EMBED_MODEL", "qwen3-embedding"), config.Value("LEDGER_RERANK_MODEL", "qwen3-reranker"), config.Int("LEDGER_EMBED_DIM", 4096), os.Getenv("LEDGER_INFER_API_KEY"))
 	worker := retrieval.NewIndexer(db, infer)
+	extractor := retrieval.NewExtractor(db, os.Getenv("LEDGER_CHAT_URL"), os.Getenv("LEDGER_CHAT_MODEL"), os.Getenv("LEDGER_CHAT_API_KEY"))
 	switch os.Args[1] {
 	case "serve":
 		workerCtx, cancel := context.WithCancel(ctx)
@@ -29,6 +30,15 @@ func main() {
 				log.Printf("index worker stopped: %v", err)
 			}
 		}()
+		if extractor != nil {
+			go func() {
+				if err := extractor.Run(workerCtx); err != nil && workerCtx.Err() == nil {
+					log.Printf("metadata extractor stopped: %v", err)
+				}
+			}()
+		} else {
+			log.Print("LEDGER_CHAT_URL is not set; entry metadata extraction is disabled")
+		}
 		handler := retrieval.NewHTTPHandler(retrieval.NewSearcher(db, infer), worker)
 		if err := config.Serve(":8083", handler); err != nil && err != http.ErrServerClosed {
 			log.Fatal(err)
@@ -39,12 +49,18 @@ func main() {
 			log.Fatal(err)
 		}
 		fmt.Println(count)
+	case "reextract":
+		count, err := db.ClearModelMeta(ctx)
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println(count)
 	default:
 		usage()
 	}
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: ledger-index serve|reindex")
+	fmt.Fprintln(os.Stderr, "usage: ledger-index serve|reindex|reextract")
 	os.Exit(2)
 }
