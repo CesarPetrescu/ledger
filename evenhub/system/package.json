@@ -1,0 +1,8 @@
+{
+  "name": "ledger-glass-system-tests",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": { "test": "node run.mjs" },
+  "devDependencies": { "playwright": "1.63.0", "pngjs": "7.0.0" }
+}

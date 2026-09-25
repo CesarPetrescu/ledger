@@ -124,6 +124,12 @@ profile is `codex`; commands without `--profile` use that default.
   same connection command; the saved credentials are reused when valid.
 - **The `ledger` entry points to another server:** rename that old entry in
   Codex's configuration before reconnecting. Unrelated MCP entries are preserved.
+- **Codex reports missing credentials after connecting from the Codex desktop app
+  on Windows:** packaged apps see a private copy of `%APPDATA%`, so a login run
+  inside the app was stored under that package's storage while terminal Codex
+  looked in the real `%APPDATA%`. Run `ledger update`, then rerun the connection
+  command; the regenerated helper records the credential directory the login
+  used, so both the desktop app and terminal Codex find it.
 
 The CLI requests `ledger:read ledger:write`; calendar access is not requested.
 These are Ledger-wide memory permissions, not access restricted to a single
@@ -144,6 +150,11 @@ remove conflicting `.codex/config.toml` settings in projects where needed.
 `--profile` selects a local credential file; Codex's `ledger` entry points to the
 most recently configured profile. Repeating `connect` repairs setup and refreshes
 existing credentials; revoked or expired credentials trigger a new approval.
+`--credential-dir PATH` selects the absolute directory holding profiles; `connect`
+records the directory it used in the helper, so `auth headers` reads the same
+files even when Codex starts it from an environment with a different default.
+Pass the same option to `auth status` or `auth logout` to inspect that directory
+from elsewhere.
 `logout` revokes the token family on Ledger before deleting the local file. If
 revocation fails, credentials stay available so logout can be retried. You can
 also revoke the machine from the console's Agents page, including outstanding
@@ -152,7 +163,11 @@ device approvals.
 Credentials are stored under `$XDG_CONFIG_HOME/ledger` (default
 `~/.config/ledger`) on Linux, with a `0700` directory and `0600` files. On Windows
 they live in `%APPDATA%\ledger`, with private ACLs granting access only to the
-current Windows user and SYSTEM. Links and reparse points are rejected. Refresh and logout
+current Windows user and SYSTEM. When the client runs inside a packaged app such
+as the Codex desktop app, Windows redirects `%APPDATA%` to
+`%LOCALAPPDATA%\Packages\<PackageFamilyName>\LocalCache\Roaming`; the client
+resolves that redirected directory itself and records it in the Codex helper as
+`--credential-dir`. Links and reparse points are rejected. Refresh and logout
 use a file lock; rotated credentials are replaced atomically. The
 `ledger auth headers` command is intended for Codex: its stdout contains a bearer
 credential, so do not paste it into a chat or logs. Someone with shell access as

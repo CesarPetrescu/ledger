@@ -32,7 +32,7 @@ func main() {
 
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: ledger connect codex --server URL | auth headers|status|logout [--profile NAME] | update | version")
+		return errors.New("usage: ledger connect codex --server URL | auth headers|status|logout [--profile NAME] [--credential-dir PATH] | update | version")
 	}
 	if args[0] == "version" {
 		fmt.Println(version)
@@ -49,6 +49,7 @@ func run(ctx context.Context, args []string) error {
 	}
 	flags := flag.NewFlagSet("ledger "+strings.Join(args[:2], " "), flag.ContinueOnError)
 	profile := flags.String("profile", "codex", "local credential profile")
+	dir := flags.String("credential-dir", "", "absolute directory holding credential profiles; defaults to the user's configuration directory")
 	server := flags.String("server", "", "Ledger HTTPS origin")
 	label := flags.String("name", "Codex machine", "machine label shown during approval")
 	if err := flags.Parse(args[2:]); err != nil {
@@ -57,7 +58,7 @@ func run(ctx context.Context, args []string) error {
 	if flags.NArg() != 0 {
 		return errors.New("unexpected arguments")
 	}
-	path, err := credentialPath(*profile)
+	path, err := credentialPath(*dir, *profile)
 	if err != nil {
 		return err
 	}
@@ -66,7 +67,7 @@ func run(ctx context.Context, args []string) error {
 		if err = connect(ctx, path, *server, *label); err != nil {
 			return err
 		}
-		if err = configureCodex(*server, *profile); err != nil {
+		if err = configureCodex(*server, *profile, filepath.Dir(path)); err != nil {
 			return fmt.Errorf("credentials saved; Codex setup failed: %w", err)
 		}
 		fmt.Fprintln(os.Stderr, "Connected to Ledger. Configured Codex MCP server: ledger.")
@@ -270,16 +271,33 @@ func waitFor(ctx context.Context, d time.Duration) error {
 	}
 }
 
-func credentialPath(profile string) (string, error) {
+// credentialDir resolves the directory holding credential profiles. Codex may start
+// the helper from an environment whose default differs from the login's, so connect
+// records the resolved directory in the helper and every command accepts it explicitly.
+func credentialDir(explicit string) (string, error) {
+	dir := explicit
+	if dir == "" {
+		base, err := configDir()
+		if err != nil {
+			return "", err
+		}
+		dir = filepath.Join(base, "ledger")
+	} else if !filepath.IsAbs(dir) {
+		return "", errors.New("--credential-dir must be an absolute path")
+	}
+	dir = filepath.Clean(dir)
+	if err := privateDir(dir); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+func credentialPath(dir, profile string) (string, error) {
 	if profile == "" || len(profile) > 64 || strings.Trim(profile, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_") != "" {
 		return "", errors.New("profile must contain only letters, digits, hyphens or underscores")
 	}
-	base, err := os.UserConfigDir()
+	dir, err := credentialDir(dir)
 	if err != nil {
-		return "", err
-	}
-	dir := filepath.Join(base, "ledger")
-	if err = privateDir(dir); err != nil {
 		return "", err
 	}
 	return filepath.Join(dir, profile+".json"), nil

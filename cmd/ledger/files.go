@@ -107,7 +107,7 @@ func decodeResponse(res *http.Response, out any) error {
 	return nil
 }
 
-func configureCodex(rawServer, profile string) error {
+func configureCodex(rawServer, profile, dir string) error {
 	server, err := serverURL(rawServer)
 	if err != nil {
 		return err
@@ -139,7 +139,7 @@ func configureCodex(rawServer, profile string) error {
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		helper := headerHelper(exe, profile)
+		helper := headerHelper(exe, profile, dir)
 		body, _, err := codexConfig(original, server, helper)
 		if err != nil {
 			return err

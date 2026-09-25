@@ -42,6 +42,9 @@ backups/
 # Frontend tooling
 node_modules/
 /frontend/dist/
+/evenhub/dist/
+/evenhub/app.json
+/evenhub/*.ehpk
 
 # Go and tooling
 /vendor/

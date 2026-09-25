@@ -44,7 +44,7 @@ func TestConcurrentHeadersRefreshOnceAndLogoutRetainsOnFailure(t *testing.T) {
 	old := authHTTP
 	authHTTP = server.Client()
 	t.Cleanup(func() { authHTTP = old })
-	path, err := credentialPath("codex")
+	path, err := credentialPath("", "codex")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,11 +88,11 @@ func TestConcurrentHeadersRefreshOnceAndLogoutRetainsOnFailure(t *testing.T) {
 func TestCredentialProtectionAndLockDeadline(t *testing.T) {
 	isolateConfig(t)
 	for _, bad := range []string{"../x", "", "a/b", "x;command"} {
-		if _, err := credentialPath(bad); err == nil {
+		if _, err := credentialPath("", bad); err == nil {
 			t.Errorf("accepted profile %q", bad)
 		}
 	}
-	path, err := credentialPath("codex")
+	path, err := credentialPath("", "codex")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func TestDevicePollingBacksOffOnTimeout(t *testing.T) {
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
 	})}
 	t.Cleanup(func() { authHTTP = old })
-	path, err := credentialPath("codex")
+	path, err := credentialPath("", "codex")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,12 +269,115 @@ func TestDevicePollingBacksOffOnTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	profile, err := credentialPath("update-check")
+	profile, err := credentialPath("", "update-check")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if marker == profile {
 		t.Fatal("update marker overwrites a credential profile")
+	}
+}
+
+// fakeApproval answers the device flow immediately with fixture tokens.
+func fakeApproval(t *testing.T) {
+	t.Helper()
+	old := authHTTP
+	authHTTP = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body := ""
+		switch r.URL.Path {
+		case "/oauth/register":
+			body = `{"client_id":"machine"}`
+		case "/oauth/device":
+			body = `{"device_code":"private-code","user_code":"ABCD-2345","verification_uri":"https://ledger.example.com/admin/connect","expires_in":20,"interval":1}`
+		case "/oauth/token":
+			body = `{"access_token":"fixture-access","refresh_token":"fixture-refresh","token_type":"Bearer","expires_in":900}`
+		default:
+			t.Errorf("unexpected request %s", r.URL.Path)
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})}
+	t.Cleanup(func() { authHTTP = old })
+}
+
+// codexHelper returns the header helper that connect recorded in Codex's configuration.
+func codexHelper(t *testing.T) string {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join(os.Getenv("CODEX_HOME"), "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		Servers map[string]struct {
+			Helper string `toml:"http_headers_helper"`
+		} `toml:"mcp_servers"`
+	}
+	if err = toml.Unmarshal(body, &config); err != nil {
+		t.Fatal(err)
+	}
+	helper := config.Servers["ledger"].Helper
+	if helper == "" {
+		t.Fatal("helper missing from Codex configuration")
+	}
+	return helper
+}
+
+// helperHeaders runs a recorded helper the way Codex does, in the current environment.
+func helperHeaders(t *testing.T, helper string) map[string]string {
+	t.Helper()
+	out, err := helperCommand(t, helper).Output()
+	if err != nil {
+		t.Fatalf("header helper failed: %v", err)
+	}
+	var headers map[string]string
+	if err = json.Unmarshal(out, &headers); err != nil {
+		t.Fatal("header helper returned invalid headers")
+	}
+	return headers
+}
+
+func TestHelperRecordsCredentialDirectoryUsedByLogin(t *testing.T) {
+	isolateConfig(t)
+	t.Setenv("CODEX_HOME", t.TempDir())
+	fakeCodex(t)
+	fakeApproval(t)
+	ctx := context.Background()
+	if err := run(ctx, []string{"connect", "codex", "--server", "https://ledger.example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	path, err := credentialPath("", "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	helper := codexHelper(t)
+	// Codex may start the helper from an environment whose configuration directory differs from the login's.
+	isolateConfig(t)
+	other, err := credentialPath("", "codex")
+	if err != nil || other == path {
+		t.Fatalf("environments not isolated: %v", err)
+	}
+	if _, err = loadCredentials(other); err == nil {
+		t.Fatal("credentials visible without the login directory")
+	}
+	if explicit, err := credentialPath(filepath.Dir(path), "codex"); err != nil || explicit != path {
+		t.Fatalf("explicit directory did not select the login file: %v", err)
+	}
+	if err = run(ctx, []string{"auth", "status", "--credential-dir", "relative"}); err == nil {
+		t.Fatal("accepted a relative credential directory")
+	}
+	if headers := helperHeaders(t, helper); headers["Authorization"] != "Bearer fixture-access" {
+		t.Fatalf("helper headers=%v", headers)
+	}
+	// An explicit directory is used by login and recorded for the helper, whatever its quoting needs.
+	dir := filepath.Join(t.TempDir(), "Atlas's credentials")
+	if err = run(ctx, []string{"connect", "codex", "--server", "https://ledger.example.com", "--credential-dir", dir}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = loadCredentials(filepath.Join(dir, "codex.json")); err != nil {
+		t.Fatal(err)
+	}
+	isolateConfig(t)
+	if headers := helperHeaders(t, codexHelper(t)); headers["Authorization"] != "Bearer fixture-access" {
+		t.Fatalf("helper headers=%v", headers)
 	}
 }
 

@@ -87,18 +87,18 @@ func TestConfigureCodexWithNativePaths(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "Atlas user's configuration")
 	t.Setenv("CODEX_HOME", home)
 	fakeCodex(t)
+	path, err := credentialPath("", "atlas")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for range 2 {
-		if err := configureCodex("https://ledger.example.com", "atlas"); err != nil {
+		if err := configureCodex("https://ledger.example.com", "atlas", filepath.Dir(path)); err != nil {
 			t.Fatal(err)
 		}
 	}
 	body, err := os.ReadFile(filepath.Join(home, "config.toml"))
 	if err != nil || !strings.Contains(string(body), "http_headers_helper") {
 		t.Fatalf("configuration missing: %v", err)
-	}
-	path, err := credentialPath("atlas")
-	if err != nil {
-		t.Fatal(err)
 	}
 	// The token remains on disk only in the protected credential file, never in TOML.
 	c := Credentials{Server: "https://ledger.example.com", ClientID: "fixture-client", Token: Token{AccessToken: "fixture-access", RefreshToken: "fixture-refresh"}}

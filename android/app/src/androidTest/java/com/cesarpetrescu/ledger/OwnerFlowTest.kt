@@ -1,13 +1,11 @@
 package com.cesarpetrescu.ledger
 
 import android.content.Context
-import android.os.Build
-import androidx.test.espresso.Espresso
+import android.view.inputmethod.InputMethodManager
 import java.io.OutputStream
 import androidx.compose.ui.test.*
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
-import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
@@ -20,43 +18,66 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 
+@OptIn(ExperimentalTestApi::class)
 class OwnerFlowTest {
     @get:Rule val ui = createEmptyComposeRule()
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
     @Before fun reset() { SessionStore(context).clear() }
 
     private fun awaitText(text: String) {
-        ui.waitUntil(15_000) { ui.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
+        ui.waitUntilAtLeastOneExists(hasText(text), 15_000)
+        ui.waitForIdle()
     }
     private fun tap(text: String) {
         awaitText(text)
-        // Transient snackbars can cover the target and consume its touch.
-        ui.waitUntil(15_000) {
-            ui.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion)).fetchSemanticsNodes().isEmpty()
-        }
+        // Use the rule's synchronization, not an eager semantics-tree walk
+        // inside a waitUntil callback while Android is measuring another frame.
+        ui.waitUntilDoesNotExist(SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion), 15_000)
         ui.onNodeWithText(text).performClick()
+        ui.waitForIdle()
+    }
+    private fun fillField(label: String, value: String) {
+        awaitText(label)
+        // Request focus separately, then let IME/layout settle before resolving
+        // the editable node again. Combining both operations retained a stale
+        // lazy-list node on API 28 when keyboard insets changed its layout.
+        ui.onNodeWithText(label).performClick()
+        ui.waitForIdle()
+        ui.waitUntilExactlyOneExists(hasText(label) and isFocused(), 15_000)
+        ui.onNode(hasText(label) and isFocused()).performTextReplacement(value)
+        ui.waitForIdle()
     }
     private fun scrollTo(text: String) {
-        val activity = ui.runOnUiThread {
-            ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).single()
-        }
-        if (Build.VERSION.SDK_INT < 30) {
-            Espresso.closeSoftKeyboard()
-            ui.runOnUiThread { activity.currentFocus?.clearFocus() }
-        } else {
-            // New Android versions do not reliably deliver the legacy keyboard result callback.
-            ui.runOnUiThread {
-                activity.currentFocus?.clearFocus()
-                WindowCompat.getInsetsController(activity.window, activity.window.decorView).hide(WindowInsetsCompat.Type.ime())
-            }
-            ui.waitUntil(10_000) {
-                ui.runOnUiThread {
-                    ViewCompat.getRootWindowInsets(activity.window.decorView)?.isVisible(WindowInsetsCompat.Type.ime()) == false
-                }
-            }
+        ui.waitForIdle()
+        ui.runOnUiThread {
+            val activity = ActivityLifecycleMonitorRegistry.getInstance()
+                .getActivitiesInStage(Stage.RESUMED).single()
+            val view = activity.currentFocus ?: activity.window.decorView
+            (activity.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
+                .hideSoftInputFromWindow(view.windowToken, 0)
+            view.clearFocus()
+            WindowCompat.getInsetsController(activity.window, activity.window.decorView)
+                .hide(WindowInsetsCompat.Type.ime())
         }
         ui.waitForIdle()
-        ui.onNodeWithTag("page").performScrollToNode(hasText(text))
+        // Exercise actual touch scrolling. performScrollToNode traverses lazy
+        // layout semantics on the instrumentation thread; that path raced the
+        // API-28 draw pass in run 34345248347. Do not disable the observer check.
+        repeat(24) {
+            val visible = try { ui.onNodeWithText(text).isDisplayed() }
+                catch (_: AssertionError) { false }
+            if (visible) return
+            ui.onNodeWithTag("page").performTouchInput {
+                swipe(center.copy(y = height * 0.75f), center.copy(y = height * 0.30f), 300)
+            }
+            ui.waitForIdle()
+        }
+        ui.onNodeWithText(text).assertIsDisplayed()
+    }
+    private fun recreate(activity: ActivityScenario<MainActivity>) {
+        ui.waitForIdle()
+        activity.recreate()
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync()
         ui.waitForIdle()
     }
 
@@ -79,9 +100,9 @@ class OwnerFlowTest {
     @Test fun nativeSignInRejectsCleartext() {
         ActivityScenario.launch(MainActivity::class.java).use {
             awaitText("Server address")
-            ui.onNodeWithText("Server address").performTextInput("http://example.com")
+            fillField("Server address", "http://example.com")
             scrollTo("Owner password")
-            ui.onNodeWithText("Owner password").performTextInput("fixture-password")
+            fillField("Owner password", "fixture-password")
             scrollTo("Sign in")
             tap("Sign in")
             awaitText("Use an HTTPS server address without a path, password, or query.")
@@ -91,7 +112,6 @@ class OwnerFlowTest {
 
     @Test fun ownerWorkflowOverHttps() {
         assumeTrue(InstrumentationRegistry.getArguments().getString("fixture") == "true")
-        // Also exercise the real network client directly: redirects must not forward the session.
         val client = Api("https://localhost:8443").login("fixture-password")
         try { client.request("GET", "/redirect-test"); fail("Followed a redirect") }
         catch (e: ApiError) { assertEquals(302, e.status) }
@@ -106,19 +126,19 @@ class OwnerFlowTest {
         assertEquals(100000, large.first().text("body").length)
         ActivityScenario.launch(MainActivity::class.java).use { activity ->
             awaitText("Server address")
-            ui.onNodeWithText("Server address").performTextInput("https://localhost:8443")
+            fillField("Server address", "https://localhost:8443")
             scrollTo("Owner password")
-            ui.onNodeWithText("Owner password").performTextInput("fixture-password")
+            fillField("Owner password", "fixture-password")
             scrollTo("Sign in")
             tap("Sign in")
             awaitText("A clear view of your work.")
-            activity.recreate()
+            recreate(activity)
             awaitText("A clear view of your work.")
             tap("Projects")
             tap("Atlas")
             tap("Add entry")
-            ui.onNodeWithText("Entry").performTextInput("Android verification note")
-            activity.recreate()
+            fillField("Entry", "Android verification note")
+            recreate(activity)
             ui.onNodeWithText("Android verification note").assertExists()
             scrollTo("Add entry")
             tap("Add entry")
@@ -126,9 +146,9 @@ class OwnerFlowTest {
             ui.onNodeWithText("Android verification note").assertExists()
             tap("Add entry")
             awaitText("Session expired")
-            ui.onNodeWithText("Owner password").performTextInput("fixture-password")
+            fillField("Owner password", "fixture-password")
             tap("Sign in again")
-            ui.waitUntil(15_000) { ui.onAllNodesWithText("Session expired").fetchSemanticsNodes().isEmpty() }
+            ui.waitUntilDoesNotExist(hasText("Session expired"), 15_000)
             ui.onNodeWithText("Android verification note").assertExists()
             tap("Add entry")
             awaitText("Entries")
@@ -144,18 +164,19 @@ class OwnerFlowTest {
             tap("Claim")
             awaitText("Complete")
             ui.onNodeWithText("Retarget").assertDoesNotExist()
-            ui.onNodeWithText("Complete").performScrollTo().performClick()
+            scrollTo("Complete")
+            tap("Complete")
             awaitText("Reopen")
             ui.onNodeWithContentDescription("Back").performClick()
             tap("Calendar")
             tap("Plan the week")
             awaitText("Title")
-            ui.onNodeWithText("Title").performTextReplacement("Updated planning session")
+            fillField("Title", "Updated planning session")
             scrollTo("Save event")
             tap("Save event")
             awaitText("Updated planning session")
             tap("Search")
-            ui.onNodeWithText("Search your work").performTextInput("Atlas")
+            fillField("Search your work", "Atlas")
             ui.onNodeWithTag("search-submit").performClick()
             awaitText("Atlas search result")
             ui.onNodeWithContentDescription("Settings").performClick()

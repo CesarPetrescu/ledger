@@ -217,11 +217,48 @@ func powershellCommand(script string) string {
 	return base64.StdEncoding.EncodeToString(data)
 }
 func powershellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
-func headerHelper(exe, profile string) string {
+func headerHelper(exe, profile, dir string) string {
 	// Codex launches through cmd.exe. Encoding avoids cmd expansion of %, &, and paths with spaces.
-	script := "& " + powershellQuote(exe) + " auth headers --profile " + powershellQuote(profile) + "; exit $LASTEXITCODE"
+	script := "& " + powershellQuote(exe) + " auth headers --profile " + powershellQuote(profile) + " --credential-dir " + powershellQuote(dir) + "; exit $LASTEXITCODE"
 	return "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand " + powershellCommand(script)
 }
+
+var getCurrentPackageFamilyName = windows.NewLazySystemDLL("kernel32.dll").NewProc("GetCurrentPackageFamilyName")
+
+// packageFamilyName reports the package identity that packaged apps, such as the
+// Codex desktop app, pass on to the processes they start.
+var packageFamilyName = func() (string, bool) {
+	if getCurrentPackageFamilyName.Find() != nil {
+		return "", false
+	}
+	var length uint32
+	rc, _, _ := getCurrentPackageFamilyName.Call(uintptr(unsafe.Pointer(&length)), 0)
+	if syscall.Errno(rc) != windows.ERROR_INSUFFICIENT_BUFFER || length == 0 {
+		return "", false
+	}
+	name := make([]uint16, length)
+	if rc, _, _ = getCurrentPackageFamilyName.Call(uintptr(unsafe.Pointer(&length)), uintptr(unsafe.Pointer(&name[0]))); rc != 0 {
+		return "", false
+	}
+	return windows.UTF16ToString(name), true
+}
+
+// Windows virtualizes %APPDATA% for packaged apps: files a login writes there land
+// under the package's LocalCache, which an ordinary terminal never consults.
+// Resolving that redirected directory first lets the helper name the location the
+// login actually used.
+func configDir() (string, error) {
+	family, ok := packageFamilyName()
+	if !ok {
+		return os.UserConfigDir()
+	}
+	local, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(local, "Packages", family, "LocalCache", "Roaming"), nil
+}
+
 func codexCommand(ctx context.Context, args ...string) *exec.Cmd {
 	path, err := exec.LookPath("codex")
 	if err != nil || strings.EqualFold(filepath.Ext(path), ".exe") {

@@ -78,8 +78,9 @@ func replaceFile(from, to string) error       { return os.Rename(from, to) }
 func replaceExecutable(from, to string) error { return replaceFile(from, to) }
 func detach(cmd *exec.Cmd)                    { cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} }
 func shellQuote(s string) string              { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
-func headerHelper(exe, profile string) string {
-	return shellQuote(exe) + " auth headers --profile " + shellQuote(profile)
+func configDir() (string, error)              { return os.UserConfigDir() }
+func headerHelper(exe, profile, dir string) string {
+	return shellQuote(exe) + " auth headers --profile " + shellQuote(profile) + " --credential-dir " + shellQuote(dir)
 }
 func codexCommand(ctx context.Context, args ...string) *exec.Cmd {
 	return exec.CommandContext(ctx, "codex", args...)
