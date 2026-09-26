@@ -64,6 +64,7 @@ fun LedgerApp(model: LedgerModel = viewModel()) {
     val route = model.route
     val title = when (route.substringBefore('/')) {
         "home" -> "Ledger"
+        "table", "table-add" -> "Table"
         "projects", "project", "project-edit", "entry", "project-files" -> "Projects"
         "handoffs", "handoff", "handoff-new", "handoff-edit", "message-new" -> "Handoffs"
         "calendar", "event", "event-new", "calendar-settings" -> "Calendar"
@@ -84,7 +85,7 @@ fun LedgerApp(model: LedgerModel = viewModel()) {
         }, confirmButton = { TextButton(enabled = !model.busy && password.isNotBlank(), onClick = { model.login(session.origin, password) }) { Text("Sign in again") } },
             dismissButton = { TextButton(enabled = !model.busy, onClick = model::forget) { Text("Discard draft and sign out") } })
     }
-    val tabs = listOf("home" to "Home", "projects" to "Projects", "handoffs" to "Handoffs", "calendar" to "Calendar", "search" to "Search")
+    val tabs = listOf("home" to "Home", "table" to "Table", "projects" to "Projects", "handoffs" to "Handoffs", "calendar" to "Calendar", "search" to "Search")
     Scaffold(
         topBar = {
             if (session != null) TopAppBar(title = { Text(title, fontWeight = FontWeight.Bold) }, navigationIcon = {
@@ -118,6 +119,8 @@ fun LedgerApp(model: LedgerModel = viewModel()) {
                     holder.SaveableStateProvider(route) {
                         when (route.substringBefore('/')) {
                             "home" -> Overview(model)
+                            "table" -> TableScreen(model)
+                            "table-add" -> route.split('/').let { TableAdd(model, it.getOrElse(1) { "note" }, it.getOrElse(2) { "" }) }
                             "projects" -> Projects(model)
                             "project" -> ProjectDetail(model, route.substringAfter('/'))
                             "project-edit" -> ProjectEditor(model, route.substringAfter('/', ""))
@@ -250,6 +253,7 @@ fun Glyph(name: String, description: String) {
     val data = when (name) {
         "home" -> "M10,20v-6h4v6h5v-8h3L12,3 2,12h3v8z"
         "projects" -> "M3,3h7v7H3zM14,3h7v7h-7zM3,14h7v7H3zM14,14h7v7h-7z"
+        "table" -> "M3,4h8v4H3zM13,4h8v4h-8zM3,10h8v4H3zM13,10h8v4h-8zM3,16h8v4H3zM13,16h8v4h-8z"
         "handoffs" -> "M2,3h20v14H6l-4,4zM6,7v2h12V7zM6,11v2h8v-2z"
         "calendar" -> "M19,4h-1V2h-2v2H8V2H6v2H5c-1.1,0 -2,.9 -2,2v14c0,1.1 .9,2 2,2h14c1.1,0 2,-.9 2,-2V6c0,-1.1 -.9,-2 -2,-2zM19,20H5V9h14z"
         "search" -> "M9.5,3a6.5,6.5 0,1 0,3.9,11.7L20,21l1,-1 -6.3,-6.6A6.5,6.5 0,0 0,9.5,3zM9.5,5a4.5,4.5 0,1 1,0,9 4.5,4.5 0,0 1,0,-9z"

@@ -12,6 +12,8 @@ PROJECT = dict(slug='atlas', name='Atlas', tier='focus', hours_wk=8, goal='Ship 
 ENTRIES = []
 MESSAGES = [dict(id='1', handoff_id='1', body='Review the Atlas plan', target='', work_state='draft', delivery_state='unseen', source='owner', created_at='2026-09-06T10:00:00Z', files=[])]
 HANDOFF = dict(id='1', title='Atlas handoff', description='A fictional handoff', scope='Planning', project_slug='atlas', project_name='Atlas', updated_at='2026-09-06T10:00:00Z')
+TODO = dict(id='50', slug='atlas', project_name='Atlas', kind='todo', body='Write the fixture todo in full detail', source='codex', created_at='2026-09-06T09:00:00Z',
+            meta=dict(title='Write the fixture todo', tags=['fixture'], priority='high', refs=[], origin='model'))
 EVENT = dict(id='event-1', calendar_id='calendar-1', calendar_name='Planning', title='Plan the week', start='2026-09-06T10:00:00Z', end='2026-09-06T11:00:00Z', all_day=False, recurring=False, etag='"v1"')
 
 class Handler(BaseHTTPRequestHandler):
@@ -110,6 +112,25 @@ class Handler(BaseHTTPRequestHandler):
             if body['action'] == 'acknowledge':
                 MESSAGES[0]['delivery_state'] = 'seen'
             return self.send_json(200, MESSAGES[0])
+        if path == '/table/projects':
+            summary = dict(slug='atlas', name='Atlas', tier='focus', deadline='', needs_me='', open_todos=0 if 'resolved_by' in TODO else 1,
+                           week_entries=1, week_agents=['codex'], status_title='', status_body='', status_source='',
+                           digest='Atlas shipped the fixture milestone.', digest_at='2026-09-06T12:00:00Z')
+            return self.send_json(200, {'projects': [summary], 'metadata': {'total': 1, 'ready': 1, 'failed': 0, 'active': True}})
+        if path == '/entries':
+            query = parse_qs(urlsplit(self.path).query)
+            if query.get('kind', [''])[0] not in ('', 'todo') or query.get('status', [''])[0] not in ('', 'open', 'done'):
+                return self.send_json(200, {'entries': [], 'sources': ['codex'], 'tags': ['fixture']})
+            state = 'done' if 'resolved_by' in TODO else 'open'
+            show = query.get('status', [''])[0] in ('', state)
+            return self.send_json(200, {'entries': [TODO] if show else [], 'sources': ['codex'], 'tags': ['fixture']})
+        if path == '/entries/50/resolve' and method == 'POST':
+            if 'resolved_by' in TODO:
+                return self.send_json(409, {'error': 'todo is already done'})
+            TODO['resolved_by'] = dict(entry_id='51', origin='owner', created_at='2026-09-06T13:00:00Z')
+            return self.send_json(201, dict(id='51', slug='atlas', kind='status', body='Done: Write the fixture todo', source='ledger-admin', created_at='2026-09-06T13:00:00Z'))
+        if path == '/entries/50/related':
+            return self.send_json(200, {'related': []})
         if path == '/calendar/connection':
             return self.send_json(200, {'connected': True, 'server_url': 'https://cloud.example.com', 'username': 'Atlas owner', 'selected_calendars': 1})
         if path == '/calendar/calendars':
