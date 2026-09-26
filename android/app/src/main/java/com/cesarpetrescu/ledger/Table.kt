@@ -73,10 +73,13 @@ private fun timeOf(iso: String) = runCatching {
     OffsetDateTime.parse(iso).atZoneSameInstant(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("HH:mm"))
 }.getOrDefault(iso)
 
+/** Route that opens a Table view filtered to one project and search text. */
+fun tableRoute(view: String, project: String, q: String) = "table-open/${segment(view)}/${segment(project)}/${segment(q)}"
+
 @Composable
-fun TableScreen(model: LedgerModel) {
-    var view by rememberSaveable { mutableStateOf("projects") }
-    var project by rememberSaveable { mutableStateOf("") }
+fun TableScreen(model: LedgerModel, initialView: String = "projects", initialProject: String = "", initialQuery: String = "") {
+    var view by rememberSaveable { mutableStateOf(initialView.takeIf { v -> tableViews.any { it.first == v } } ?: "projects") }
+    var project by rememberSaveable { mutableStateOf(initialProject) }
     Column {
         PrimaryTabRow(selectedTabIndex = tableViews.indexOfFirst { it.first == view }) {
             tableViews.forEach { (id, name) ->
@@ -84,7 +87,7 @@ fun TableScreen(model: LedgerModel) {
             }
         }
         if (view == "projects") TableProjects(model) { slug, target -> project = slug; view = target }
-        else key(view) { TableEntries(model, view, project) { project = it } }
+        else key(view) { TableEntries(model, view, project, if (view == initialView) initialQuery else "") { project = it } }
     }
 }
 
@@ -122,12 +125,12 @@ private fun TableProjects(model: LedgerModel, open: (String, String) -> Unit) = 
 }
 
 @Composable
-private fun TableEntries(model: LedgerModel, view: String, project: String, setProject: (String) -> Unit) {
+private fun TableEntries(model: LedgerModel, view: String, project: String, initialQuery: String, setProject: (String) -> Unit) {
     var source by rememberSaveable { mutableStateOf("") }
     var tag by rememberSaveable { mutableStateOf("") }
     var status by rememberSaveable { mutableStateOf("open") }
     var kind by rememberSaveable { mutableStateOf("") }
-    var q by rememberSaveable { mutableStateOf("") }
+    var q by rememberSaveable { mutableStateOf(initialQuery) }
     var filters by rememberSaveable { mutableStateOf(false) }
     var before by rememberSaveable { mutableStateOf("") }
     val query = tableQuery(view, project, source, tag, status, q, kind)
@@ -252,7 +255,8 @@ private fun RelatedEntries(model: LedgerModel, id: String) {
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text("Related", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         rows.forEach { r ->
-            TextButton(onClick = { model.go("project/${r.text("slug")}") }, contentPadding = PaddingValues(0.dp)) {
+            // Open the entry itself (by project and title), not just its project's newest page.
+            TextButton(onClick = { model.go(tableRoute("activity", r.text("slug"), entryTitle(r))) }, contentPadding = PaddingValues(0.dp)) {
                 Text("${entryTitle(r)} · ${r.text("project_name")}", style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }

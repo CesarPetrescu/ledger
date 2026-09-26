@@ -42,4 +42,10 @@ class TableTest {
         assertEquals("Yesterday", dayLabel(today.minusDays(1).atStartOfDay(java.time.ZoneId.systemDefault()).plusHours(12).toOffsetDateTime().toString(), today))
         assertEquals("not a date", dayLabel("not a date", today))
     }
+
+    @Test fun relatedRoutesKeepEntryIdentitySafelyEncoded() {
+        val route = tableRoute("activity", "atlas", "Ship v2/3 & more")
+        assertEquals("table-open/activity/atlas/Ship%20v2%2F3%20%26%20more", route)
+        assertEquals(listOf("table-open", "activity", "atlas", "Ship v2/3 & more"), route.split('/').map { java.net.URLDecoder.decode(it, Charsets.UTF_8.name()) })
+    }
 }

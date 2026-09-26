@@ -64,7 +64,7 @@ fun LedgerApp(model: LedgerModel = viewModel()) {
     val route = model.route
     val title = when (route.substringBefore('/')) {
         "home" -> "Ledger"
-        "table", "table-add" -> "Table"
+        "table", "table-add", "table-open" -> "Table"
         "projects", "project", "project-edit", "entry", "project-files" -> "Projects"
         "handoffs", "handoff", "handoff-new", "handoff-edit", "message-new" -> "Handoffs"
         "calendar", "event", "event-new", "calendar-settings" -> "Calendar"
@@ -120,6 +120,7 @@ fun LedgerApp(model: LedgerModel = viewModel()) {
                         when (route.substringBefore('/')) {
                             "home" -> Overview(model)
                             "table" -> TableScreen(model)
+                            "table-open" -> route.split('/').map { java.net.URLDecoder.decode(it, Charsets.UTF_8.name()) }.let { TableScreen(model, it.getOrElse(1) { "activity" }, it.getOrElse(2) { "" }, it.getOrElse(3) { "" }) }
                             "table-add" -> route.split('/').let { TableAdd(model, it.getOrElse(1) { "note" }, it.getOrElse(2) { "" }) }
                             "projects" -> Projects(model)
                             "project" -> ProjectDetail(model, route.substringAfter('/'))
