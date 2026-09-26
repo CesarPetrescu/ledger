@@ -11,11 +11,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/csv"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
 	"log"
+	"mime"
 	"net"
 	"net/http"
 	"net/netip"
@@ -89,6 +91,12 @@ func NewServer(config Config, db *store.DB) *Server {
 	s.mux.HandleFunc("PUT /admin/api/projects/{slug}", s.putProject)
 	s.mux.HandleFunc("POST /admin/api/projects/{slug}/entries", s.appendEntry)
 	s.mux.HandleFunc("GET /admin/api/projects/{slug}/files", s.listProjectFiles)
+	s.mux.HandleFunc("GET /admin/api/entries", s.listEntries)
+	s.mux.HandleFunc("GET /admin/api/entries.csv", s.exportEntries)
+	s.mux.HandleFunc("POST /admin/api/entries/{id}/resolve", s.resolveTodo)
+	s.mux.HandleFunc("POST /admin/api/entries/{id}/reopen", s.reopenTodo)
+	s.mux.HandleFunc("GET /admin/api/entries/{id}/related", s.relatedEntries)
+	s.mux.HandleFunc("GET /admin/api/table/projects", s.projectSummaries)
 	s.mux.HandleFunc("GET /admin/api/handoffs", s.listHandoffs)
 	s.mux.HandleFunc("POST /admin/api/handoffs", s.createHandoff)
 	s.mux.HandleFunc("GET /admin/api/handoffs/{id}", s.getHandoff)
@@ -443,6 +451,227 @@ func (s *Server) appendEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, entryResponse(entry))
+}
+
+// entryFilter reads the shared query parameters of the entry table and its CSV export.
+func entryFilter(query url.Values) (store.EntryFilter, error) {
+	f := store.EntryFilter{ProjectSlug: query.Get("project"), Kind: query.Get("kind"), Source: query.Get("source"), Tag: query.Get("tag"), Status: query.Get("status"), Query: strings.TrimSpace(query.Get("q"))}
+	if f.ProjectSlug != "" {
+		if err := store.ValidateProjectSlug(f.ProjectSlug); err != nil {
+			return f, err
+		}
+	}
+	if f.Kind != "" && !slices.Contains(store.EntryKinds, f.Kind) {
+		return f, errors.New("kind must be one of " + strings.Join(store.EntryKinds, ", "))
+	}
+	if err := store.ValidateContextHeader("source", f.Source, false); err != nil || utf8.RuneCountInString(f.Source) > 200 {
+		return f, errors.New("source must be at most 200 characters on one line")
+	}
+	if utf8.RuneCountInString(f.Tag) > 30 || strings.ContainsAny(f.Tag, "\r\n") {
+		return f, errors.New("tag must be at most 30 characters on one line")
+	}
+	if f.Status != "" && f.Status != "open" && f.Status != "done" {
+		return f, errors.New("status must be open or done")
+	}
+	if utf8.RuneCountInString(f.Query) > maxSearchRunes {
+		return f, errors.New("q must be at most 1000 characters")
+	}
+	return f, nil
+}
+
+func (s *Server) listEntries(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	filter, err := entryFilter(query)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	limit := defaultEntries
+	if raw := query.Get("limit"); raw != "" {
+		limit, err = strconv.Atoi(raw)
+		if err != nil || limit < 1 || limit > maxEntries {
+			writeError(w, http.StatusBadRequest, "limit must be between 1 and "+strconv.Itoa(maxEntries))
+			return
+		}
+	}
+	if raw := query.Get("before"); raw != "" {
+		before, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || before < 1 {
+			writeError(w, http.StatusBadRequest, "before must be a positive entry ID")
+			return
+		}
+		filter.Before = &before
+	}
+	filter.Limit = limit + 1
+	entries, err := s.db.ListEntries(r.Context(), filter)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	sources, err := s.db.EntrySources(r.Context())
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	tags, err := s.db.EntryTags(r.Context(), 50)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	payload := map[string]any{"sources": sources, "tags": tags}
+	if len(entries) > limit {
+		entries = entries[:limit]
+		payload["next_before"] = strconv.FormatInt(entries[limit-1].ID, 10)
+	}
+	rows := make([]map[string]any, 0, len(entries))
+	for _, entry := range entries {
+		rows = append(rows, tableEntryResponse(entry))
+	}
+	payload["entries"] = rows
+	writeJSON(w, http.StatusOK, payload)
+}
+
+// exportEntries downloads every entry matching the table filters as CSV for
+// spreadsheets. Times are UTC in a format Excel, LibreOffice, and Sheets parse.
+func (s *Server) exportEntries(w http.ResponseWriter, r *http.Request) {
+	filter, err := entryFilter(r.URL.Query())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	// ponytail: whole export is buffered in memory; stream rows if entries reach the hundreds of thousands.
+	entries, err := s.db.ListEntries(r.Context(), filter)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": "ledger-entries-" + time.Now().UTC().Format("20060102") + ".csv"}))
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, "\ufeff") // BOM so Excel reads UTF-8
+	out := csv.NewWriter(w)
+	_ = out.Write([]string{"Time (UTC)", "Project", "Project slug", "Kind", "Agent", "Title", "Tags", "Priority", "Todo state", "Text", "Entry ID", "Client ID"})
+	for _, e := range entries {
+		var title, tags, priority, state string
+		if e.Meta != nil {
+			title, tags, priority = e.Meta.Title, strings.Join(e.Meta.Tags, ", "), e.Meta.Priority
+		}
+		if e.Kind == "todo" {
+			state = "open"
+			if e.ResolvedBy != nil {
+				state = "done"
+			}
+		} else {
+			priority = ""
+		}
+		_ = out.Write([]string{e.CreatedAt.UTC().Format("2006-01-02 15:04:05"), spreadsheetText(e.ProjectName), e.Slug, e.Kind, spreadsheetText(e.Source), spreadsheetText(title), spreadsheetText(tags), priority, state, spreadsheetText(e.Body), strconv.FormatInt(e.ID, 10), spreadsheetText(e.ClientID)})
+	}
+	out.Flush()
+}
+
+func tableEntryResponse(entry store.EntryWithProject) map[string]any {
+	item := entryResponse(entry.Entry)
+	item["project_name"] = entry.ProjectName
+	if entry.Meta != nil {
+		item["meta"] = entry.Meta
+	}
+	if entry.DuplicateOf != nil {
+		item["duplicate_of"] = strconv.FormatInt(*entry.DuplicateOf, 10)
+	}
+	if entry.ResolvedBy != nil {
+		item["resolved_by"] = map[string]any{"entry_id": strconv.FormatInt(entry.ResolvedBy.EntryID, 10), "origin": entry.ResolvedBy.Origin, "created_at": entry.ResolvedBy.CreatedAt}
+	}
+	return item
+}
+
+func pathEntryID(w http.ResponseWriter, r *http.Request) (int64, bool) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id < 1 {
+		writeError(w, http.StatusBadRequest, "invalid entry id")
+		return 0, false
+	}
+	return id, true
+}
+
+func (s *Server) resolveTodo(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathEntryID(w, r)
+	if !ok {
+		return
+	}
+	entry, err := s.db.ResolveTodo(r.Context(), id, writeSource, clientIdentifier(sessionFrom(r)))
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusCreated, entryResponse(entry))
+	case store.IsNotFound(err):
+		writeError(w, http.StatusNotFound, "entry not found")
+	case errors.Is(err, store.ErrNotTodo):
+		writeError(w, http.StatusBadRequest, "only todos can be marked done")
+	case errors.Is(err, store.ErrAlreadyResolved):
+		writeError(w, http.StatusConflict, "todo is already done")
+	default:
+		s.internalError(w, r, err)
+	}
+}
+
+func (s *Server) reopenTodo(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathEntryID(w, r)
+	if !ok {
+		return
+	}
+	entry, err := s.db.ReopenTodo(r.Context(), id, writeSource, clientIdentifier(sessionFrom(r)))
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusCreated, entryResponse(entry))
+	case errors.Is(err, store.ErrNotResolved):
+		writeError(w, http.StatusConflict, "todo is not done")
+	default:
+		s.internalError(w, r, err)
+	}
+}
+
+// relatedMinSimilarity hides weak matches; calibrated on Qwen3-Embedding-8B.
+const relatedMinSimilarity = 0.62
+
+func (s *Server) relatedEntries(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathEntryID(w, r)
+	if !ok {
+		return
+	}
+	related, err := s.db.RelatedEntries(r.Context(), id, relatedMinSimilarity, 3)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	rows := make([]map[string]any, 0, len(related))
+	for _, entry := range related {
+		item := tableEntryResponse(entry.EntryWithProject)
+		item["similarity"] = entry.Similarity
+		rows = append(rows, item)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"related": rows})
+}
+
+func (s *Server) projectSummaries(w http.ResponseWriter, r *http.Request) {
+	projects, err := s.db.ProjectSummaries(r.Context())
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	progress, err := s.db.MetaProgress(r.Context())
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"projects": projects, "metadata": progress})
+}
+
+// spreadsheetText stops agent-written text from being evaluated as a formula
+// when the CSV is opened in a spreadsheet (CSV injection).
+func spreadsheetText(value string) string {
+	if value != "" && strings.ContainsRune("=+-@\t\r", rune(value[0])) {
+		return "'" + value
+	}
+	return value
 }
 
 func entryResponse(entry store.Entry) map[string]any {

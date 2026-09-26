@@ -60,7 +60,7 @@ nginx :8080 (only published port)
 
 ### Features
 
-- Stateless Streamable HTTP MCP server with 17 focused tools
+- Stateless Streamable HTTP MCP server with 21 focused tools
 - OAuth 2.1 authorization code flow with PKCE S256, Dynamic Client Registration, and Client ID Metadata Documents, so hosted clients such as ChatGPT connect without manual key exchange
 - Hashed authorization codes and tokens, rotating refresh-token families, replay revocation
 - PostgreSQL full-text search plus optional pgvector retrieval and reranking, fused with reciprocal rank fusion
@@ -68,11 +68,12 @@ nginx :8080 (only published port)
 - Cross-agent Handoffs inbox with append-only threads, per-message status, and up to 10 attachments per message
 - Optional Nextcloud calendar integration with owner-selected calendars and ETag-safe event updates
 - Responsive operator console with live WebSocket updates across projects, search, calendar, handoffs, files, and OAuth clients
+- Table view with per-project weekly digests, todos you can close or reopen, a decision log, and day-grouped activity; with an optional chat model, entries get short titles, merged tags, priorities, and automatic todo resolution, and embeddings fold repeated entries and suggest related ones. Derived data lives beside the entries and never changes them
 - Containerized deployment with non-root runtimes and a single published port
 
 ## MCP surface
 
-The server exposes 17 tools. Project and handoff reads require `ledger:read`; their mutations require `ledger:write`. Calendar tools use `calendar:read` and `calendar:write`. If a client omits `scope`, `ledger:read` is the default.
+The server exposes 21 tools. Project, handoff, change-feed, and transcription tools require `ledger:read`; project and handoff mutations require `ledger:write`. Calendar tools use `calendar:read` and `calendar:write`. If a client omits `scope`, `ledger:read` is the default.
 
 Every tool advertises an object output schema and validates successful structured results against it. `list_projects`, `list_calendars`, and `list_calendar_events` return their lists under `projects`, `calendars`, and `events`, respectively. Handoff IDs and cursors are strings. Tool errors use MCP's `isError` result.
 
@@ -81,6 +82,7 @@ Every tool advertises an object output schema and validates successful structure
 | Project memory | `list_projects`, `get_project`, `search`, `upsert_project`, `append_entry` |
 | Nextcloud calendar | `list_calendars`, `list_calendar_events`, `create_calendar_event`, `update_calendar_event`, `delete_calendar_event` |
 | Agent handoffs | `list_handoffs`, `get_handoff`, `create_handoff`, `append_handoff_message`, `update_handoff_message`, `attach_handoff_file`, `read_handoff_file` |
+| Glass devices | `get_entry`, `list_changes`, `ack_changes`, `transcribe_audio` |
 
 It also serves `ledger://project/{slug}` resources and a `prime` prompt that loads the whole registry into context, so an assistant starts a session already knowing your priorities.
 

@@ -81,6 +81,10 @@ claude mcp add --transport http ledger https://ledger.example.com/mcp
 | `LEDGER_EMBED_MODEL` | no | Default `qwen3-embedding` |
 | `LEDGER_EMBED_DIM` | no | Default `4096` |
 | `LEDGER_RERANK_MODEL` | no | Default `qwen3-reranker` |
+| `LEDGER_CHAT_URL` | no | OpenAI-compatible chat endpoint with JSON-schema output (llama.cpp, vLLM). Enables the Table view's extracted titles, tags, priorities, todo tracking, tag merging, and weekly project digests. Repeat folding and related entries also use the `LEDGER_INFER_URL` embedding endpoint, and the reranker shortlists todo candidates. |
+| `LEDGER_CHAT_MODEL` | no | Model name to send; leave empty for single-model servers |
+| `LEDGER_CHAT_API_KEY` | no | Bearer key if the chat endpoint requires one |
+| `LEDGER_DUPLICATE_SIMILARITY` | no | Cosine similarity at which the Table folds an entry under an earlier one of the same kind and project. Default `0.9`, calibrated on Qwen3-Embedding-8B; lower it to fold more. |
 | `LEDGER_INTERNAL_SUBNET`, `LEDGER_NGINX_INTERNAL_IP` | no | Compose network overrides, change together if the default subnet collides |
 
 The example domain and inference hostname in `.env.example` are placeholders.
@@ -97,7 +101,8 @@ Native deployments do not receive Compose's generated internal settings, so conf
 | `ledger-auth serve` | `LEDGER_PUBLIC_URL`, `LEDGER_PASSWORD_HASH`, `LEDGER_INTERNAL_PROXY_CIDR` |
 | `ledger-admin serve` | `LEDGER_PUBLIC_URL`, `LEDGER_ADMIN_PASSWORD_HASH`, `LEDGER_CALENDAR_ENCRYPTION_KEY`, `LEDGER_INTERNAL_PROXY_CIDR`, `LEDGER_INDEX_URL` |
 | `ledger-mcp serve` | `LEDGER_PUBLIC_URL`, `LEDGER_CALENDAR_ENCRYPTION_KEY`, `LEDGER_INDEX_URL` |
-| `ledger-index serve`, `ledger-index reindex` | `LEDGER_INFER_URL` |
+| `ledger-index serve`, `ledger-index reindex` | `LEDGER_INFER_URL`; `serve` also reads the optional `LEDGER_CHAT_*` settings |
+| `ledger-index reextract` | Clears model-generated entry metadata so it is extracted again |
 
 `LEDGER_DATABASE_URL` is a PostgreSQL connection URI; percent-encode reserved characters in the user-info or use a URL-safe password. You are responsible for the network isolation, startup ordering, restart policy, and TLS reverse proxy that Compose otherwise provides. Build the frontend with `npm run build` inside `frontend/` and serve it under `/admin/` on the same origin as the admin API.
 

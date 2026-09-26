@@ -50,6 +50,74 @@ export interface RecentEntry extends Entry {
   project_name: string
 }
 
+export type Priority = 'low' | 'normal' | 'high'
+
+/** Derived by the LLM extractor ('model') or set by console actions ('owner'). */
+export interface EntryMeta {
+  title: string
+  tags: string[]
+  priority?: Priority
+  refs: string[]
+  origin: 'model' | 'owner'
+}
+
+export interface TableEntry extends RecentEntry {
+  meta?: EntryMeta
+  resolved_by?: { entry_id: string; origin: 'model' | 'owner'; created_at: string }
+  /** Set when this entry repeats an earlier one in the same project. */
+  duplicate_of?: string
+}
+
+export interface RelatedEntry extends TableEntry {
+  similarity: number
+}
+
+export interface EntryFilter {
+  project?: string
+  kind?: string
+  source?: string
+  tag?: string
+  status?: string
+  q?: string
+}
+
+export interface EntryTablePage {
+  entries: TableEntry[]
+  sources: string[]
+  tags: string[]
+  next_before?: string
+}
+
+export interface ProjectSummary {
+  slug: string
+  name: string
+  tier: Tier
+  deadline: string
+  needs_me: string
+  last_entry_at?: string
+  open_todos: number
+  week_entries: number
+  week_agents: string[]
+  status_title: string
+  status_body: string
+  status_at?: string
+  status_source: string
+  digest: string
+  digest_at?: string
+}
+
+export interface ProjectSummaries {
+  projects: ProjectSummary[]
+  /** active is false when no extractor has checked in recently. */
+  metadata: { total: number; ready: number; failed: number; active: boolean }
+}
+
+function entryQuery(filter: EntryFilter, extra: Record<string, string> = {}): string {
+  const query = new URLSearchParams()
+  for (const [key, value] of Object.entries({ ...filter, ...extra })) if (value) query.set(key, value)
+  return query.size ? `?${query}` : ''
+}
+
 export interface Counts {
   projects: number
   entries: number
@@ -325,6 +393,12 @@ export const api = {
     request<ProjectDetail>('GET', `/projects/${encodeURIComponent(slug)}?entries=200${before === undefined ? '' : `&before=${encodeURIComponent(before)}`}`),
   saveProject: (slug: string, input: ProjectInput) => request<Project>('PUT', `/projects/${encodeURIComponent(slug)}`, input),
   appendEntry: (slug: string, kind: string, body: string) => request<Entry>('POST', `/projects/${encodeURIComponent(slug)}/entries`, { kind, body }),
+  listEntries: (filter: EntryFilter, before?: string) => request<EntryTablePage>('GET', `/entries${entryQuery(filter, { limit: '200', ...(before ? { before } : {}) })}`),
+  getProjectSummaries: () => request<ProjectSummaries>('GET', '/table/projects'),
+  resolveTodo: (id: string) => request<Entry>('POST', `/entries/${encodeURIComponent(id)}/resolve`),
+  relatedEntries: (id: string) => request<{ related: RelatedEntry[] }>('GET', `/entries/${encodeURIComponent(id)}/related`).then((response) => response.related),
+  reopenTodo: (id: string) => request<Entry>('POST', `/entries/${encodeURIComponent(id)}/reopen`),
+  entriesCsvUrl: (filter: EntryFilter) => `/admin/api/entries.csv${entryQuery(filter)}`,
   search: (input: SearchRequest) => request<SearchResponse>('POST', '/search', input),
   listClients: (offset = 0) => request<ClientPage>('GET', `/oauth/clients?limit=50&offset=${offset}`),
   revokeClient: (clientId: string) => request<{ revoked: number }>('POST', '/oauth/revoke', { client_id: clientId }),

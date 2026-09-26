@@ -7,6 +7,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -551,6 +553,302 @@ func TestProjectTimelineIsCursorPaginated(t *testing.T) {
 		if res := request(t, server, http.MethodGet, "/admin/api/projects/atlas?before="+before, "", authed(s, false)); res.Code != http.StatusBadRequest {
 			t.Errorf("invalid timeline cursor %s = %d %s", before, res.Code, res.Body.String())
 		}
+	}
+}
+
+func TestEntryTableFiltersPagesAndExportsCSV(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
+	_, s := login(t, server, "correct horse", "")
+	for _, p := range []store.Project{{Slug: "atlas", Name: "Atlas", Tier: "focus"}, {Slug: "beacon", Name: "Beacon", Tier: "park"}} {
+		if _, err := db.UpsertProject(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, e := range []struct{ slug, kind, body, source string }{
+		{"atlas", "decision", "Use Postgres", "claude-code"},
+		{"beacon", "todo", "=HYPERLINK(\"http://evil\")", "codex"},
+		{"atlas", "note", "Ship the TABLE view", "codex"},
+	} {
+		if _, err := db.AppendEntry(ctx, e.slug, e.kind, e.body, e.source, "client-1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	type page struct {
+		Entries []struct {
+			ID          string `json:"id"`
+			Body        string `json:"body"`
+			ProjectName string `json:"project_name"`
+		} `json:"entries"`
+		Sources    []string `json:"sources"`
+		NextBefore *string  `json:"next_before"`
+	}
+	get := func(path string) page {
+		t.Helper()
+		res := request(t, server, http.MethodGet, path, "", authed(s, false))
+		var body page
+		if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil || res.Code != http.StatusOK {
+			t.Fatalf("%s = %d %s", path, res.Code, res.Body.String())
+		}
+		return body
+	}
+	first := get("/admin/api/entries?limit=2")
+	if len(first.Entries) != 2 || first.Entries[0].Body != "Ship the TABLE view" || first.Entries[1].ProjectName != "Beacon" || first.NextBefore == nil || strings.Join(first.Sources, ",") != "claude-code,codex" {
+		t.Fatalf("first page = %+v", first)
+	}
+	if rest := get("/admin/api/entries?limit=2&before=" + *first.NextBefore); len(rest.Entries) != 1 || rest.Entries[0].Body != "Use Postgres" || rest.NextBefore != nil {
+		t.Fatalf("second page = %+v", rest)
+	}
+	for path, want := range map[string]string{
+		"/admin/api/entries?project=atlas&source=codex": "Ship the TABLE view",
+		"/admin/api/entries?kind=decision":              "Use Postgres",
+		"/admin/api/entries?q=table":                    "Ship the TABLE view",
+	} {
+		if got := get(path); len(got.Entries) != 1 || got.Entries[0].Body != want {
+			t.Errorf("%s = %+v", path, got)
+		}
+	}
+	for _, path := range []string{"/admin/api/entries?kind=idea", "/admin/api/entries?project=Bad%20Slug", "/admin/api/entries?limit=0", "/admin/api/entries?before=x", "/admin/api/entries.csv?source=a%0Ab"} {
+		if res := request(t, server, http.MethodGet, path, "", authed(s, false)); res.Code != http.StatusBadRequest {
+			t.Errorf("%s = %d", path, res.Code)
+		}
+	}
+
+	res := request(t, server, http.MethodGet, "/admin/api/entries.csv?project=beacon", "", authed(s, false))
+	if res.Code != http.StatusOK || !strings.HasPrefix(res.Header().Get("Content-Type"), "text/csv") || !strings.Contains(res.Header().Get("Content-Disposition"), "attachment") {
+		t.Fatalf("csv = %d %v", res.Code, res.Header())
+	}
+	lines := strings.Split(strings.TrimSpace(strings.TrimPrefix(res.Body.String(), "\ufeff")), "\n")
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], "Time (UTC),Project,") || !strings.Contains(lines[1], `,Beacon,beacon,todo,codex,,,,open,"'=HYPERLINK(""http://evil"")",`) {
+		t.Fatalf("csv body = %q", res.Body.String())
+	}
+}
+
+func TestTodoResolutionAndProjectSummaries(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
+	_, s := login(t, server, "correct horse", "")
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	todo, err := db.AppendEntry(ctx, "atlas", "todo", "Add CSV export", "codex", "c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	note, err := db.AppendEntry(ctx, "atlas", "note", "Kickoff", "claude-code", "c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SaveEntryMeta(ctx, todo.ID, store.EntryMeta{Title: "Add CSV export", Tags: []string{"export"}, Priority: "high"}); err != nil {
+		t.Fatal(err)
+	}
+	id := strconv.FormatInt(todo.ID, 10)
+	if res := request(t, server, http.MethodPost, "/admin/api/entries/"+id+"/resolve", "", authed(s, false)); res.Code != http.StatusForbidden {
+		t.Fatalf("resolve without CSRF = %d", res.Code)
+	}
+	if res := request(t, server, http.MethodPost, "/admin/api/entries/"+strconv.FormatInt(note.ID, 10)+"/resolve", "", authed(s, true)); res.Code != http.StatusBadRequest {
+		t.Fatalf("resolve note = %d", res.Code)
+	}
+	if res := request(t, server, http.MethodPost, "/admin/api/entries/999999/resolve", "", authed(s, true)); res.Code != http.StatusNotFound {
+		t.Fatalf("resolve missing = %d", res.Code)
+	}
+	if res := request(t, server, http.MethodPost, "/admin/api/entries/"+id+"/reopen", "", authed(s, true)); res.Code != http.StatusConflict {
+		t.Fatalf("reopen open todo = %d", res.Code)
+	}
+	summary := request(t, server, http.MethodGet, "/admin/api/table/projects", "", authed(s, false))
+	if summary.Code != http.StatusOK || !strings.Contains(summary.Body.String(), `"open_todos":1`) || !strings.Contains(summary.Body.String(), `"week_agents":["claude-code","codex"]`) || !strings.Contains(summary.Body.String(), `"metadata":{"total":2,"ready":1,"failed":0,"active":false}`) {
+		t.Fatalf("summary = %d %s", summary.Code, summary.Body.String())
+	}
+
+	resolved := request(t, server, http.MethodPost, "/admin/api/entries/"+id+"/resolve", "", authed(s, true))
+	if resolved.Code != http.StatusCreated || !strings.Contains(resolved.Body.String(), `"body":"Done: Add CSV export"`) || !strings.Contains(resolved.Body.String(), `"kind":"status"`) {
+		t.Fatalf("resolve = %d %s", resolved.Code, resolved.Body.String())
+	}
+	if res := request(t, server, http.MethodPost, "/admin/api/entries/"+id+"/resolve", "", authed(s, true)); res.Code != http.StatusConflict {
+		t.Fatalf("resolve twice = %d", res.Code)
+	}
+	done := request(t, server, http.MethodGet, "/admin/api/entries?status=done&tag=export", "", authed(s, false))
+	if done.Code != http.StatusOK || !strings.Contains(done.Body.String(), `"resolved_by":{"created_at":`) || !strings.Contains(done.Body.String(), `"origin":"owner"`) || !strings.Contains(done.Body.String(), `"tags":["export"]`) || !strings.Contains(done.Body.String(), `"priority":"high"`) {
+		t.Fatalf("done todos = %s", done.Body.String())
+	}
+	if res := request(t, server, http.MethodGet, "/admin/api/entries?status=later", "", authed(s, false)); res.Code != http.StatusBadRequest {
+		t.Fatalf("bad status = %d", res.Code)
+	}
+	if res := request(t, server, http.MethodPost, "/admin/api/entries/"+id+"/reopen", "", authed(s, true)); res.Code != http.StatusCreated || !strings.Contains(res.Body.String(), `"body":"Reopened: Add CSV export"`) {
+		t.Fatalf("reopen = %d %s", res.Code, res.Body.String())
+	}
+	// The reversal is on the timeline, so the latest status no longer says "Done".
+	if summary := request(t, server, http.MethodGet, "/admin/api/table/projects", "", authed(s, false)); !strings.Contains(summary.Body.String(), `"status_title":"Reopened: Add CSV export"`) {
+		t.Fatalf("summary after reopen = %s", summary.Body.String())
+	}
+	if res := request(t, server, http.MethodPost, "/admin/api/entries/"+strconv.FormatInt(note.ID, 10)+"/reopen", "", authed(s, true)); res.Code != http.StatusConflict {
+		t.Fatalf("reopen a note = %d", res.Code)
+	}
+	open := request(t, server, http.MethodGet, "/admin/api/entries?status=open", "", authed(s, false))
+	if !strings.Contains(open.Body.String(), `"id":"`+id+`"`) || strings.Contains(open.Body.String(), "resolved_by") {
+		t.Fatalf("reopened = %s", open.Body.String())
+	}
+
+	// Two sessions marking the same todo done at once create one completion.
+	results := make(chan error, 2)
+	for range 2 {
+		go func() {
+			_, err := db.ResolveTodo(ctx, todo.ID, "ledger-admin", "c")
+			results <- err
+		}()
+	}
+	first, second := <-results, <-results
+	if (first == nil) == (second == nil) || !errors.Is(errors.Join(first, second), store.ErrAlreadyResolved) {
+		t.Fatalf("concurrent resolve = %v, %v", first, second)
+	}
+	// A model guess for an already-closed todo keeps the rest of its metadata.
+	if err := db.SaveEntryMeta(ctx, note.ID, store.EntryMeta{Title: "Kickoff", Resolves: &todo.ID}); err != nil {
+		t.Fatalf("model resolution of a closed todo = %v", err)
+	}
+	var resolvers int
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM entry_meta WHERE resolves=$1`, todo.ID).Scan(&resolvers); err != nil || resolvers != 1 {
+		t.Fatalf("resolvers = %d %v", resolvers, err)
+	}
+
+	if err := db.Heartbeat(ctx, store.ExtractorHeartbeat); err != nil {
+		t.Fatal(err)
+	}
+	if summary := request(t, server, http.MethodGet, "/admin/api/table/projects", "", authed(s, false)); !strings.Contains(summary.Body.String(), `"active":true`) {
+		t.Fatalf("summary after heartbeat = %s", summary.Body.String())
+	}
+}
+
+func TestRelatedEntriesDuplicatesAndDigestsThroughTheAPI(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
+	_, s := login(t, server, "correct horse", "")
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	axis := func(values ...float32) []float32 { v := make([]float32, 8); copy(v, values); return v }
+	ids := map[string]int64{}
+	for _, e := range []struct {
+		name, kind string
+		vector     []float32
+		failed     bool
+	}{
+		{"first", "status", axis(1), false},
+		{"repeat", "status", axis(0.99, 0.1), false},
+		// Closest to "repeat" but must link to the root, never form a chain.
+		{"echo", "status", axis(0.97, 0.2), false},
+		// Extraction failed, yet the repeat link must still reach the table.
+		{"untitled", "status", axis(0.98, 0.15), true},
+		{"cousin", "note", axis(0.7, 0.7), false},
+		// Identical todos stay separate: each is resolved on its own.
+		{"todo-a", "todo", axis(0, 0, 0, 1), false},
+		{"todo-b", "todo", axis(0, 0, 0, 1), false},
+		{"stranger", "note", axis(0, 0, 1), false},
+	} {
+		entry, err := db.AppendEntry(ctx, "atlas", e.kind, e.name, "codex", "c")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids[e.name] = entry.ID
+		if e.failed {
+			for range store.MetaMaxAttempts {
+				if err := db.RecordMetaFailure(ctx, entry.ID, "m", "bad JSON"); err != nil {
+					t.Fatal(err)
+				}
+			}
+		} else if err := db.SaveEntryMeta(ctx, entry.ID, store.EntryMeta{Title: e.name}); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.SaveEntryEmbedding(ctx, entry.ID, "embed", e.vector); err != nil {
+			t.Fatal(err)
+		}
+	}
+	link := func(threshold float64) int {
+		t.Helper()
+		checked := 0
+		for {
+			n, err := db.LinkDuplicates(ctx, "embed", threshold)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if n == 0 {
+				return checked
+			}
+			checked++
+		}
+	}
+	links := func() map[int64]int64 {
+		t.Helper()
+		rows, err := db.Pool.Query(ctx, `SELECT entry_id,duplicate_of FROM entry_meta WHERE duplicate_of IS NOT NULL`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[int64]int64{}
+		for rows.Next() {
+			var id, of int64
+			_ = rows.Scan(&id, &of)
+			out[id] = of
+		}
+		return out
+	}
+	if n := link(0.9); n != 6 {
+		t.Fatalf("checked %d entries", n)
+	}
+	if got, want := links(), map[int64]int64{ids["repeat"]: ids["first"], ids["echo"]: ids["first"], ids["untitled"]: ids["first"]}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("links = %v, want %v (all pointing at the root)", got, want)
+	}
+	if n := link(0.9); n != 0 {
+		t.Fatalf("unchanged threshold rechecked %d entries", n)
+	}
+	// A stricter threshold rechecks everything: "repeat" (0.9950 to "first")
+	// becomes a root of its own, and only "untitled" (0.9987 to it) folds.
+	if n := link(0.995); n != 6 {
+		t.Fatalf("threshold change rechecked %d entries", n)
+	}
+	if got := links(); len(got) != 1 || got[ids["untitled"]] != ids["repeat"] {
+		t.Fatalf("links at 0.995 = %v", got)
+	}
+	if link(0.9) != 6 {
+		t.Fatal("restoring the threshold did not recheck")
+	}
+	if err := db.SaveDigest(ctx, "atlas", "Shipped things.", 4, ids["stranger"], "m"); err != nil {
+		t.Fatal(err)
+	}
+	entries := request(t, server, http.MethodGet, "/admin/api/entries", "", authed(s, false))
+	if strings.Count(entries.Body.String(), `"duplicate_of":"`+strconv.FormatInt(ids["first"], 10)+`"`) != 3 || !strings.Contains(entries.Body.String(), `"body":"untitled","client_id":"c","created_at"`) {
+		t.Fatalf("entries = %s", entries.Body.String())
+	}
+	related := request(t, server, http.MethodGet, "/admin/api/entries/"+strconv.FormatInt(ids["cousin"], 10)+"/related", "", authed(s, false))
+	var body struct {
+		Related []struct {
+			Body       string  `json:"body"`
+			Similarity float64 `json:"similarity"`
+		} `json:"related"`
+	}
+	if err := json.Unmarshal(related.Body.Bytes(), &body); err != nil || related.Code != http.StatusOK || len(body.Related) != 1 || body.Related[0].Body != "first" || body.Related[0].Similarity < 0.7 {
+		t.Fatalf("related = %d %s", related.Code, related.Body.String())
+	}
+	if res := request(t, server, http.MethodGet, "/admin/api/entries/"+strconv.FormatInt(ids["first"], 10)+"/related", "", authed(s, false)); strings.Contains(res.Body.String(), `"body":"repeat"`) {
+		t.Fatalf("own duplicate listed as related: %s", res.Body.String())
+	}
+	if res := request(t, server, http.MethodGet, "/admin/api/entries/x/related", "", authed(s, false)); res.Code != http.StatusBadRequest {
+		t.Fatalf("bad id = %d", res.Code)
+	}
+	summary := request(t, server, http.MethodGet, "/admin/api/table/projects", "", authed(s, false))
+	if !strings.Contains(summary.Body.String(), `"digest":"Shipped things."`) || !strings.Contains(summary.Body.String(), `"digest_at":`) {
+		t.Fatalf("summary = %s", summary.Body.String())
+	}
+	digests := func() int {
+		var n int
+		_ = db.Pool.QueryRow(ctx, `SELECT count(*) FROM project_digest`).Scan(&n)
+		return n
+	}
+	// Rechecking with a threshold that yields the same links keeps the digest.
+	if link(0.95); digests() != 1 {
+		t.Fatal("digest dropped although no link changed")
+	}
+	// Changed links feed a different digest, so it is regenerated.
+	if link(0.995); digests() != 0 {
+		t.Fatal("digest kept after links changed")
 	}
 }
 
