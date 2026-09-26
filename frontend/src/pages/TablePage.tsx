@@ -216,8 +216,8 @@ function ActivityRun({ items, onTag, onChanged }: { items: Folded[]; onTag: (tag
   )
 }
 
-function EntriesView({ view, initialProject }: { view: Exclude<View, 'projects'>; initialProject: string }) {
-  const [filter, setFilter] = useState<EntryFilter>({ project: initialProject, status: view === 'todos' ? 'open' : '' })
+function EntriesView({ view, initialProject, initialQuery }: { view: Exclude<View, 'projects'>; initialProject: string; initialQuery: string }) {
+  const [filter, setFilter] = useState<EntryFilter>({ project: initialProject, q: initialQuery, status: view === 'todos' ? 'open' : '' })
   const [loadingMore, setLoadingMore] = useState(false)
   const effective: EntryFilter = { ...filter, kind: view === 'todos' ? 'todo' : view === 'decisions' ? 'decision' : filter.kind ?? '', status: view === 'todos' ? filter.status ?? '' : '' }
   const key = `entries:${view}:${JSON.stringify(effective)}`
@@ -341,6 +341,7 @@ export function TablePage() {
   const requested = query.get('view')
   const view: View = VIEWS.some((item) => item.id === requested) ? (requested as View) : 'projects'
   const project = query.get('project') ?? ''
+  const search = query.get('q') ?? ''
   const summaries = useResource(api.getProjectSummaries, 'table-summaries', LIVE)
   const progress = summaries.data?.metadata
   // Only promise progress while an extractor is alive to make it.
@@ -367,7 +368,7 @@ export function TablePage() {
           : !summaries.data ? <ErrorState message="Couldn't load projects." onRetry={summaries.reload} />
           : <ProjectsView projects={summaries.data.projects} />
       ) : (
-        <EntriesView key={`${view}:${project}`} view={view} initialProject={project} />
+        <EntriesView key={`${view}:${project}:${search}`} view={view} initialProject={project} initialQuery={search} />
       )}
     </>
   )

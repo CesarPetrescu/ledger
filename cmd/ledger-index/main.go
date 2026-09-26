@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/cesarpetrescu/ledger/internal/config"
 	"github.com/cesarpetrescu/ledger/internal/retrieval"
@@ -40,7 +41,7 @@ func main() {
 		}()
 		// Table settings are read only here, so reindex and reextract never
 		// depend on them.
-		if chatURL := os.Getenv("LEDGER_CHAT_URL"); chatURL != "" {
+		if chatURL := strings.TrimSpace(os.Getenv("LEDGER_CHAT_URL")); chatURL != "" {
 			threshold := config.Float("LEDGER_DUPLICATE_SIMILARITY", 0.9)
 			if !retrieval.ValidDuplicateThreshold(threshold) {
 				log.Fatalf("LEDGER_DUPLICATE_SIMILARITY must be greater than 0 and at most 1, got %v", threshold)

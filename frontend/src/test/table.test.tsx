@@ -153,6 +153,13 @@ describe('table', () => {
     expect(within(today).getByRole('button', { name: '+1 repeat' })).toBeInTheDocument()
   })
 
+  it('opens a related entry with its search applied', async () => {
+    const { calls } = mockApi({ ...base, 'GET /admin/api/entries': { body: { entries: [{ ...decisionEntry, project_name: 'Beacon', slug: 'beacon' }], sources: [], tags: [] } } })
+    renderApp('/admin/table?view=activity&project=beacon&q=Export%20design%20decision')
+    expect(await screen.findByRole('searchbox', { name: /search text/i })).toHaveValue('Export design decision')
+    expect(Object.fromEntries(calls.find((call) => call.path === '/admin/api/entries')!.url.searchParams)).toMatchObject({ project: 'beacon', q: 'Export design decision' })
+  })
+
   it('shows an empty todo state', async () => {
     mockApi({ ...base, 'GET /admin/api/entries': { body: { entries: [], sources: [], tags: [] } } })
     renderApp('/admin/table?view=todos')
