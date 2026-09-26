@@ -153,8 +153,12 @@ private fun TableEntries(model: LedgerModel, view: String, project: String, init
                 }
             }
             Load(model, "table:$view:$query:$before", { it.request("GET", "/entries?limit=100&$query${if (before.isBlank()) "" else "&before=${segment(before)}"}") }) { data ->
-                val entries = data.rows("entries").let { list -> if (view == "todos") list.sortedWith(compareBy({ it.text("project_name") }, { it.text("slug") }, { priorityRank(it) })) else list }
-                val folded = foldRepeats(entries)
+                val entries = data.rows("entries")
+                // Fold while the response is still newest first, so each head is
+                // the newest copy; only then order todo heads by project and priority.
+                val folded = foldRepeats(entries).let { heads ->
+                    if (view == "todos") heads.sortedWith(compareBy({ it.entry.text("project_name") }, { it.entry.text("slug") }, { priorityRank(it.entry) })) else heads
+                }
                 val groups = runsBy(folded) { if (view == "todos") it.entry.text("slug") else dayLabel(it.entry.text("created_at")) }
                 Page {
                     if (filters) {
@@ -247,8 +251,15 @@ private fun RelatedEntries(model: LedgerModel, id: String) {
     val client = model.api ?: return
     var related by remember(id) { mutableStateOf<List<JSONObject>?>(null) }
     LaunchedEffect(id, client, model.revision) {
-        related = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { client.request("GET", "/entries/${segment(id)}/related").rows("related") } }
-            .getOrElse { if (it is kotlinx.coroutines.CancellationException) throw it; emptyList() }
+        related = try {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { client.request("GET", "/entries/${segment(id)}/related").rows("related") }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            // Related entries are best effort, but an expired session must still
+            // reach the normal sign-in-again flow.
+            if (e is ApiError && e.status == 401) model.failed(e, client)
+            emptyList()
+        }
     }
     val rows = related.orEmpty()
     if (rows.isEmpty()) return
