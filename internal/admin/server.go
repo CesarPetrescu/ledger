@@ -696,7 +696,8 @@ const inboxTodos = 20
 // todos, and each project's health and digest.
 func (s *Server) inbox(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	asks, err := s.db.ListEntries(ctx, store.EntryFilter{NeedsYou: true, Limit: 50})
+	// Every open ask is returned: none may silently fall off the inbox.
+	asks, err := s.db.ListEntries(ctx, store.EntryFilter{NeedsYou: true})
 	if err != nil {
 		s.internalError(w, r, err)
 		return

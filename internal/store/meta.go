@@ -266,9 +266,11 @@ type ProjectSummary struct {
 	StatusSource string     `json:"status_source"`
 	Digest       string     `json:"digest"`
 	DigestAt     *time.Time `json:"digest_at,omitempty"`
-	// StatusState is the latest status entry's extracted state (health).
+	// StatusState is the state of the latest status that has one (health);
+	// bookkeeping statuses such as "Done: …" from the console carry none.
 	StatusState string `json:"status_state"`
-	// NeedsYou counts entries asking something of the owner, not yet handled.
+	// NeedsYou counts entries asking something of the owner that are neither
+	// handled nor snoozed, matching the inbox.
 	NeedsYou int `json:"needs_you"`
 }
 
@@ -279,9 +281,10 @@ func (db *DB) ProjectSummaries(ctx context.Context) ([]ProjectSummary, error) {
  (SELECT count(*) FROM entry WHERE slug=p.slug AND created_at>now()-interval '7 days'),
  COALESCE((SELECT array_agg(DISTINCT source ORDER BY source) FROM entry WHERE slug=p.slug AND created_at>now()-interval '7 days'),'{}'),
  s.id,COALESCE(sm.title,''),COALESCE(s.body,''),s.created_at,COALESCE(s.source,''),COALESCE(d.summary,''),d.generated_at,
- COALESCE(sm.state,''),
+ COALESCE((SELECT hm.state FROM entry h JOIN entry_meta hm ON hm.entry_id=h.id
+  WHERE h.slug=p.slug AND h.kind='status' AND hm.state<>'' ORDER BY h.created_at DESC,h.id DESC LIMIT 1),''),
  (SELECT count(*) FROM entry a JOIN entry_meta am ON am.entry_id=a.id LEFT JOIN entry_owner_state ao ON ao.entry_id=a.id
-  WHERE a.slug=p.slug AND am.ask<>'' AND ao.handled_at IS NULL)
+  WHERE a.slug=p.slug AND am.ask<>'' AND ao.handled_at IS NULL AND (ao.snoozed_until IS NULL OR ao.snoozed_until<=current_date))
 FROM project p
 LEFT JOIN project_digest d ON d.slug=p.slug
 LEFT JOIN LATERAL (SELECT id,body,created_at,source FROM entry WHERE slug=p.slug AND kind='status' ORDER BY created_at DESC,id DESC LIMIT 1) s ON true

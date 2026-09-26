@@ -977,6 +977,21 @@ func TestFocusFieldsOwnerTriageAndInbox(t *testing.T) {
 		t.Fatalf("project health = %#v", projects[0])
 	}
 	// Snoozing hides an ask or todo; handling clears the ask for good.
+	// A snoozed ask leaves both the inbox and the project's count.
+	owner(ask, `{"snooze_days":1}`, http.StatusOK)
+	if asks, _, _, projects := inbox(); ids(asks) != id(askTodo) || projects[0].NeedsYou != 1 {
+		t.Fatalf("after snoozing an ask: asks=%s needs=%d", ids(asks), projects[0].NeedsYou)
+	}
+	// Console bookkeeping statuses ("Done: …") do not erase blocked health.
+	if _, err := db.ResolveTodo(ctx, lowTodo, "ledger-admin", "c"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, projects := inbox(); projects[0].StatusState != "blocked" {
+		t.Fatalf("health after a Done entry = %q", projects[0].StatusState)
+	}
+	if _, err := db.ReopenTodo(ctx, lowTodo, "ledger-admin", "c"); err != nil {
+		t.Fatal(err)
+	}
 	owner(dueTodo, `{"snooze_days":2}`, http.StatusOK)
 	owner(ask, `{"handled":true}`, http.StatusOK)
 	owner(askTodo, `{"handled":true}`, http.StatusOK)

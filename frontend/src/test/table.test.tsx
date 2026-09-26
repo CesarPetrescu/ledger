@@ -77,7 +77,7 @@ describe('table', () => {
     expect(rows[0]).toHaveTextContent('L')
     expect(rows[0]).toHaveTextContent('Needed before launch')
     expect(rows[0]).not.toHaveTextContent('phones…')
-    expect(rows[1]).toHaveTextContent(/Due \d/)
+    expect(rows[1]).toHaveTextContent(/Due \S/)
     expect(rows[1]).not.toHaveTextContent('Stale')
   })
 

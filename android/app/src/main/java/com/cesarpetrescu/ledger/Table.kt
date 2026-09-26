@@ -348,7 +348,8 @@ private fun EntrySheet(model: LedgerModel, entry: JSONObject, repeats: List<JSON
             if (meta?.text("link")?.isNotBlank() == true) {
                 val read = owner(entry).optBoolean("read")
                 val starred = owner(entry).optBoolean("starred")
-                OutlinedButton(onClick = { openBrowser(context, meta.text("link"), model); if (!read) ownerAction(model, entry, "Marked read", "read" to true) }) { Text("Open link") }
+                // Only a link that actually opened counts as read.
+                OutlinedButton(onClick = { if (openBrowser(context, meta.text("link"), model) && !read) ownerAction(model, entry, "Marked read", "read" to true) }) { Text("Open link") }
                 OutlinedButton(onClick = { act { ownerAction(model, entry, if (read) "Marked unread" else "Marked read", "read" to !read) } }, enabled = !model.busy) { Text(if (read) "Mark unread" else "Mark read") }
                 OutlinedButton(onClick = { act { ownerAction(model, entry, if (starred) "Unstarred" else "Starred", "starred" to !starred) } }, enabled = !model.busy) { Text(if (starred) "Unstar" else "Star") }
             }
