@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { api, describeError, ENTRY_KINDS, type EntryFilter, type ProjectSummary, type TableEntry } from '../api'
 import { useResource } from '../hooks/useResource'
 import { Link, useLocation } from '../router'
@@ -65,6 +65,11 @@ function foldRepeats(entries: TableEntry[]): { entry: TableEntry; repeats: Table
   return out
 }
 
+/** Project option label; adds the slug when another project shares the name. */
+function projectLabel(project: { slug: string; name: string }, all: { slug: string; name: string }[]): string {
+  return all.some((other) => other.slug !== project.slug && other.name === project.name) ? `${project.name} (${project.slug})` : project.name
+}
+
 function RelatedList({ id }: { id: string }) {
   const related = useResource(() => api.relatedEntries(id), `related:${id}`, 'entry_meta')
   if (related.loading || !related.data || related.data.length === 0) return null
@@ -113,7 +118,7 @@ function AddRow({ projects, initialProject, defaultKind, onAdded }: { projects: 
     <details className="table-add-toggle">
       <summary><Icon name="plus" /> Add a {defaultKind === 'todo' ? 'todo' : 'row'}</summary>
       <form className="table-add" aria-label="Add row" onSubmit={(event) => void submit(event)}>
-        <label>Project<select value={project} onChange={(event) => setSlug(event.target.value)}>{projects.map((item) => <option key={item.slug} value={item.slug}>{item.name}</option>)}</select></label>
+        <label>Project<select value={project} onChange={(event) => setSlug(event.target.value)}>{projects.map((item) => <option key={item.slug} value={item.slug}>{projectLabel(item, projects)}</option>)}</select></label>
         <label>Kind<select value={kind} onChange={(event) => setKind(event.target.value)}>{ENTRY_KINDS.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
         <label className="table-add-body">Text<input value={body} maxLength={MAX_BODY} onChange={(event) => setBody(event.target.value)} placeholder="New note, todo, decision, or status…" /></label>
         <button type="submit" className="btn btn-primary" disabled={!project || !body.trim() || busy}><Icon name="plus" /> {busy ? 'Adding…' : 'Add'}</button>
@@ -222,6 +227,10 @@ function EntriesView({ view, initialProject, initialQuery }: { view: Exclude<Vie
   const effective: EntryFilter = { ...filter, kind: view === 'todos' ? 'todo' : view === 'decisions' ? 'decision' : filter.kind ?? '', status: view === 'todos' ? filter.status ?? '' : '' }
   const key = `entries:${view}:${JSON.stringify(effective)}`
   const table = useResource(() => api.listEntries(effective), key, LIVE)
+  const currentKey = useRef(key)
+  useEffect(() => {
+    currentKey.current = key
+  }, [key])
   const projects = useResource(() => api.listProjects(), 'table-projects', 'project')
   const toast = useToast()
   const set = (field: keyof EntryFilter, value: string) => setFilter((current) => ({ ...current, [field]: value }))
@@ -237,13 +246,14 @@ function EntriesView({ view, initialProject, initialQuery }: { view: Exclude<Vie
 
   const loadMore = async () => {
     const cursor = table.data?.next_before
+    const requestKey = key
     if (!cursor || loadingMore) return
     setLoadingMore(true)
     try {
       const page = await api.listEntries(effective, cursor)
-      // A live reload while this was in flight replaced the list; appending
-      // a page from the old cursor would skip or duplicate rows.
-      table.update((current) => (current.next_before === cursor ? { ...page, entries: [...current.entries, ...page.entries] } : current))
+      // A filter change or live reload while this was in flight replaced the
+      // list; appending a page from the old request would mix or skip rows.
+      table.update((current) => (currentKey.current === requestKey && current.next_before === cursor ? { ...page, entries: [...current.entries, ...page.entries] } : current))
     } catch (failure) {
       toast(describeError(failure), 'error')
     } finally {
@@ -255,7 +265,7 @@ function EntriesView({ view, initialProject, initialQuery }: { view: Exclude<Vie
     <>
       <div className="filters table-filters">
         <label><span className="visually-hidden">Search text</span><input type="search" maxLength={1000} placeholder="Search titles and text" value={filter.q ?? ''} onChange={(event) => set('q', event.target.value)} /></label>
-        <label><span className="visually-hidden">Filter by project</span><select value={filter.project ?? ''} onChange={(event) => set('project', event.target.value)}><option value="">Any project</option>{(projects.data ?? []).map((item) => <option key={item.slug} value={item.slug}>{item.name}</option>)}</select></label>
+        <label><span className="visually-hidden">Filter by project</span><select value={filter.project ?? ''} onChange={(event) => set('project', event.target.value)}><option value="">Any project</option>{(projects.data ?? []).map((item) => <option key={item.slug} value={item.slug}>{projectLabel(item, projects.data ?? [])}</option>)}</select></label>
         {view === 'todos' && <label><span className="visually-hidden">Filter by state</span><select value={filter.status ?? ''} onChange={(event) => set('status', event.target.value)}><option value="open">Open</option><option value="done">Done</option><option value="">Open and done</option></select></label>}
         {view === 'activity' && <label><span className="visually-hidden">Filter by kind</span><select value={filter.kind ?? ''} onChange={(event) => set('kind', event.target.value)}><option value="">Any kind</option>{ENTRY_KINDS.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>}
         <label><span className="visually-hidden">Filter by agent</span><select value={filter.source ?? ''} onChange={(event) => set('source', event.target.value)}><option value="">Any agent</option>{(table.data?.sources ?? []).map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
