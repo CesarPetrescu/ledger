@@ -4,11 +4,13 @@ package retrieval
 
 import (
 	"encoding/json"
-	"github.com/cesarpetrescu/ledger/internal/testdb"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/cesarpetrescu/ledger/internal/store"
+	"github.com/cesarpetrescu/ledger/internal/testdb"
 )
 
 func TestSearchDegradesToFTSWhenEmbeddingFails(t *testing.T) {
@@ -40,6 +42,22 @@ func TestSearchDegradesToFTSWhenEmbeddingFails(t *testing.T) {
 	}
 	if len(result.Degraded) != 1 || result.Degraded[0] != "vector" {
 		t.Fatalf("degraded = %v", result.Degraded)
+	}
+}
+
+func TestSearchFallsBackToFTSWhenInferenceIsUnreachable(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO chunk(ref,ord,text,text_hash,model) VALUES('project:atlas',0,$1,decode(repeat('ab',32),'hex'),'qwen3-embedding')`, "[project: Atlas]\nRenovare bucătărie"); err != nil {
+		t.Fatal(err)
+	}
+	// Nothing listens on port 1, so every inference call is refused.
+	searcher := NewSearcher(db, NewInferClient("http://127.0.0.1:1/v1", "qwen3-embedding", "qwen3-reranker", 4096, ""))
+	result, err := searcher.Search(ctx, "renovare bucatarie", 10)
+	if err != nil || len(result.Hits) != 1 || strings.Join(result.Degraded, ",") != "vector,rerank" {
+		t.Fatalf("result = %#v, %v", result, err)
 	}
 }
 
