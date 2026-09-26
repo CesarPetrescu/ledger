@@ -42,12 +42,13 @@ func (db *DB) SaveEntryEmbedding(ctx context.Context, entryID int64, model strin
 // different threshold) against earlier settled entries of the same kind and
 // project, and links it to the root of the most similar one when similarity
 // reaches threshold. Working oldest first, one entry per call, keeps every
-// link pointing at a root, so repeats never form chains.
+// link pointing at a root, so repeats never form chains. Todos are never
+// folded: each one is resolved on its own, so similar todos stay separate.
 // ponytail: exact vector scan per project; add an HNSW index past ~50k entries.
 func (db *DB) LinkDuplicates(ctx context.Context, model string, threshold float64) (int64, error) {
 	tag, err := db.Pool.Exec(ctx, `WITH p AS (
   SELECT m.entry_id,e.slug,e.kind,e.created_at,m.embedding FROM entry_meta m JOIN entry e ON e.id=m.entry_id
-  WHERE m.embedding IS NOT NULL AND m.embed_model=$1 AND (NOT m.duplicate_checked OR m.duplicate_threshold IS DISTINCT FROM $2)
+  WHERE e.kind<>'todo' AND m.embedding IS NOT NULL AND m.embed_model=$1 AND (NOT m.duplicate_checked OR m.duplicate_threshold IS DISTINCT FROM $2)
   ORDER BY e.created_at,e.id LIMIT 1
 )
 UPDATE entry_meta m SET duplicate_checked=true,duplicate_threshold=$2,duplicate_of=(

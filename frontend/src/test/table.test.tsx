@@ -122,10 +122,13 @@ describe('table', () => {
 
   it('folds repeats under the newest copy', async () => {
     const entries: TableEntry[] = [
-      { ...decisionEntry, id: '9', kind: 'status', source: 'codex', created_at: now, project_name: 'Atlas', duplicate_of: '8', meta: { title: 'Checkpoint 3', tags: [], refs: [], origin: 'model' } },
+      { ...decisionEntry, id: '9', kind: 'status', source: 'codex', created_at: now, project_name: 'Atlas', duplicate_of: '2', meta: { title: 'Checkpoint 3', tags: [], refs: [], origin: 'model' } },
       { ...decisionEntry, id: '5', kind: 'status', source: 'claude-code', created_at: now, project_name: 'Atlas', meta: { title: 'Unrelated', tags: [], refs: [], origin: 'model' } },
       { ...decisionEntry, id: '8', kind: 'status', source: 'codex', created_at: now, project_name: 'Atlas', duplicate_of: '2', meta: { title: 'Checkpoint 2', tags: [], refs: [], origin: 'model' } },
       { ...decisionEntry, id: '2', kind: 'status', source: 'codex', created_at: now, project_name: 'Atlas', meta: { title: 'Checkpoint 1', tags: [], refs: [], origin: 'model' } },
+      // Both repeat a root older than the loaded page; they still fold together.
+      { ...decisionEntry, id: '1', kind: 'status', source: 'codex', created_at: now, project_name: 'Atlas', duplicate_of: '0', meta: { title: 'Old story again', tags: [], refs: [], origin: 'model' } },
+      { ...decisionEntry, id: '-1', kind: 'status', source: 'codex', created_at: now, project_name: 'Atlas', duplicate_of: '0', meta: { title: 'Old story once more', tags: [], refs: [], origin: 'model' } },
     ]
     mockApi({ ...base, 'GET /admin/api/entries': { body: { entries, sources: [], tags: [] } } })
     renderApp('/admin/table?view=activity')
@@ -136,6 +139,9 @@ describe('table', () => {
     const repeats = within(today).getByRole('list', { name: 'Repeats' })
     expect(within(repeats).getAllByRole('listitem').map((item) => item.textContent?.split(' ·')[0])).toEqual(['Checkpoint 2', 'Checkpoint 1'])
     expect(within(today).getByRole('button', { name: 'Unrelated' })).toBeInTheDocument()
+    expect(within(today).getByRole('button', { name: 'Old story again' })).toBeInTheDocument()
+    expect(within(today).queryByRole('button', { name: 'Old story once more' })).not.toBeInTheDocument()
+    expect(within(today).getByRole('button', { name: '+1 repeat' })).toBeInTheDocument()
   })
 
   it('shows an empty todo state', async () => {

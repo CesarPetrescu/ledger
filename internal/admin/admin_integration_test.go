@@ -732,6 +732,9 @@ func TestRelatedEntriesDuplicatesAndDigestsThroughTheAPI(t *testing.T) {
 		// Extraction failed, yet the repeat link must still reach the table.
 		{"untitled", "status", axis(0.98, 0.15), true},
 		{"cousin", "note", axis(0.7, 0.7), false},
+		// Identical todos stay separate: each is resolved on its own.
+		{"todo-a", "todo", axis(0, 0, 0, 1), false},
+		{"todo-b", "todo", axis(0, 0, 0, 1), false},
 		{"stranger", "note", axis(0, 0, 1), false},
 	} {
 		entry, err := db.AppendEntry(ctx, "atlas", e.kind, e.name, "codex", "c")

@@ -45,20 +45,15 @@ function groupBy<T>(items: T[], key: (item: T) => string): { key: string; items:
 }
 
 /**
- * Folds repeats into the newest loaded copy of the same story. Entries point
- * at the earlier entry they repeat; chains resolve to their oldest loaded root.
+ * Folds repeats into the newest loaded copy of the same story. The server
+ * links every repeat directly to its root, so the root ID groups a story even
+ * when the root itself is older than the loaded page.
  */
 function foldRepeats(entries: TableEntry[]): { entry: TableEntry; repeats: TableEntry[] }[] {
-  const byId = new Map(entries.map((entry) => [entry.id, entry]))
-  const root = (entry: TableEntry): string => {
-    let current = entry
-    for (let hops = 0; current.duplicate_of && byId.has(current.duplicate_of) && hops < 50; hops++) current = byId.get(current.duplicate_of)!
-    return current.id
-  }
   const heads = new Map<string, { entry: TableEntry; repeats: TableEntry[] }>()
   const out: { entry: TableEntry; repeats: TableEntry[] }[] = []
   for (const entry of entries) {
-    const key = root(entry)
+    const key = entry.duplicate_of ?? entry.id
     const head = heads.get(key)
     if (head) head.repeats.push(entry)
     else {
