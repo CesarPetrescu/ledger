@@ -3,12 +3,14 @@
 package retrieval
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/cesarpetrescu/ledger/internal/store"
 	"github.com/cesarpetrescu/ledger/internal/testdb"
@@ -154,6 +156,25 @@ func TestInsightsEmbedFoldDuplicatesMergeTagsAndWriteDigests(t *testing.T) {
 	}
 	if dupRelated, _ := db.RelatedEntries(ctx, second.ID, 0.62, 3); len(dupRelated) != 0 {
 		t.Fatalf("an entry's own duplicate was listed as related: %#v", dupRelated)
+	}
+	// A settled, idle worker must not write, or every console would reload.
+	conn, err := db.Pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Release()
+	if _, err := conn.Exec(ctx, `LISTEN ledger_admin_event`); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		if worked, err := x.Step(ctx); worked || err != nil {
+			t.Fatalf("idle step = %v %v", worked, err)
+		}
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, 700*time.Millisecond)
+	defer cancel()
+	if n, err := conn.Conn().WaitForNotification(waitCtx); err == nil {
+		t.Fatalf("idle worker emitted a change event: %s", n.Payload)
 	}
 	summaries, err := db.ProjectSummaries(ctx)
 	if err != nil || summaries[0].Digest != "Shipped the export." || summaries[0].DigestAt == nil {

@@ -230,9 +230,10 @@ function EntriesView({ view, initialProject }: { view: Exclude<View, 'projects'>
     const loaded = table.data?.entries ?? []
     if (view !== 'todos') return loaded
     // Todos read best per project, most important first.
-    return [...loaded].sort((a, b) => a.project_name.localeCompare(b.project_name) || (PRIORITY_ORDER[a.meta?.priority ?? 'normal'] ?? 1) - (PRIORITY_ORDER[b.meta?.priority ?? 'normal'] ?? 1))
+    return [...loaded].sort((a, b) => a.project_name.localeCompare(b.project_name) || a.slug.localeCompare(b.slug) || (PRIORITY_ORDER[a.meta?.priority ?? 'normal'] ?? 1) - (PRIORITY_ORDER[b.meta?.priority ?? 'normal'] ?? 1))
   }, [table.data, view])
-  const groups = useMemo(() => groupBy(foldRepeats(entries), (item) => (view === 'todos' ? item.entry.project_name : dayLabel(item.entry.created_at))), [entries, view])
+  // Todos group by project slug (names may repeat); other views by day.
+  const groups = useMemo(() => groupBy(foldRepeats(entries), (item) => (view === 'todos' ? item.entry.slug : dayLabel(item.entry.created_at))), [entries, view])
 
   const loadMore = async () => {
     if (!table.data?.next_before || loadingMore) return
@@ -263,8 +264,10 @@ function EntriesView({ view, initialProject }: { view: Exclude<View, 'projects'>
       {table.stale && <StaleNotice message="Table may be out of date." onRetry={table.reload} />}
       {table.data && entries.length === 0 && <EmptyState><p>{view === 'todos' && filter.status === 'open' ? 'No open todos. Nice.' : 'No entries match.'}</p></EmptyState>}
       {groups.map((group) => (
-        <section key={group.key} className="entry-group" aria-label={group.key}>
-          <h2 className="entry-group-title">{group.key} <span className="count">{group.items.length}</span></h2>
+        <section key={group.key} className="entry-group" aria-label={view === 'todos' ? group.items[0]?.entry.project_name : group.key}>
+          <h2 className="entry-group-title">
+            {view === 'todos' ? group.items[0]?.entry.project_name : group.key} {view === 'todos' && <code className="muted">{group.key}</code>} <span className="count">{group.items.length}</span>
+          </h2>
           <ul className="entry-list">
             {view === 'activity'
               ? groupBy(group.items, (item) => `${item.entry.slug}\u0000${item.entry.source}`).map((run) => <ActivityRun key={run.items[0]?.entry.id} items={run.items} onTag={(tag) => set('tag', tag)} onChanged={table.reload} />)

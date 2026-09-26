@@ -73,6 +73,15 @@ describe('table', () => {
     expect(screen.getByRole('link', { name: /download csv/i }).getAttribute('href')).toContain('tag=export')
   })
 
+  it('keeps todos of same-named projects apart', async () => {
+    const other: TableEntry = { ...todo, id: '60', slug: 'atlas-2', meta: { ...todo.meta!, title: 'Other atlas task' } }
+    mockApi({ ...base, 'GET /admin/api/entries': { body: { entries: [todo, other], sources: [], tags: [] } } })
+    renderApp('/admin/table?view=todos')
+    const groups = await screen.findAllByRole('region', { name: 'Atlas' })
+    expect(groups).toHaveLength(2)
+    expect(groups.map((group) => within(group).getByRole('heading').textContent)).toEqual(['Atlas atlas 1', 'Atlas atlas-2 1'])
+  })
+
   it('shows done todos with a reopen action', async () => {
     const { calls } = mockApi({ ...base, 'GET /admin/api/entries': { body: { entries: [doneTodo], sources: [], tags: [] } }, 'POST /admin/api/entries/49/reopen': { status: 201, body: { ...noteEntry, kind: 'status', body: 'Reopened: Fix login' } } })
     renderApp('/admin/table?view=todos')

@@ -46,17 +46,27 @@ func (db *DB) SaveEntryEmbedding(ctx context.Context, entryID int64, model strin
 // folded: each one is resolved on its own, so similar todos stay separate.
 // ponytail: exact vector scan per project; add an HNSW index past ~50k entries.
 func (db *DB) LinkDuplicates(ctx context.Context, model string, threshold float64) (int64, error) {
+	// Look before writing: an UPDATE matching nothing still fires the
+	// statement-level change trigger and reloads every open console.
+	var id int64
+	err := db.Pool.QueryRow(ctx, `SELECT m.entry_id FROM entry_meta m JOIN entry e ON e.id=m.entry_id
+WHERE e.kind<>'todo' AND m.embedding IS NOT NULL AND m.embed_model=$1 AND (NOT m.duplicate_checked OR m.duplicate_threshold IS DISTINCT FROM $2)
+ORDER BY e.created_at,e.id LIMIT 1`, model, threshold).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
 	tag, err := db.Pool.Exec(ctx, `WITH p AS (
-  SELECT m.entry_id,e.slug,e.kind,e.created_at,m.embedding FROM entry_meta m JOIN entry e ON e.id=m.entry_id
-  WHERE e.kind<>'todo' AND m.embedding IS NOT NULL AND m.embed_model=$1 AND (NOT m.duplicate_checked OR m.duplicate_threshold IS DISTINCT FROM $2)
-  ORDER BY e.created_at,e.id LIMIT 1
+  SELECT m.entry_id,e.slug,e.kind,e.created_at,m.embedding FROM entry_meta m JOIN entry e ON e.id=m.entry_id WHERE m.entry_id=$3
 )
 UPDATE entry_meta m SET duplicate_checked=true,duplicate_threshold=$2,duplicate_of=(
   SELECT COALESCE(o.duplicate_of,o.entry_id) FROM entry_meta o JOIN entry oe ON oe.id=o.entry_id
   WHERE oe.slug=p.slug AND oe.kind=p.kind AND (oe.created_at,oe.id)<(p.created_at,p.entry_id) AND o.embed_model=$1 AND o.embedding IS NOT NULL
     AND o.duplicate_checked AND o.duplicate_threshold=$2 AND 1-(o.embedding<=>p.embedding)>=$2
   ORDER BY o.embedding<=>p.embedding LIMIT 1)
-FROM p WHERE m.entry_id=p.entry_id`, model, threshold)
+FROM p WHERE m.entry_id=p.entry_id`, model, threshold, id)
 	return tag.RowsAffected(), err
 }
 
@@ -235,7 +245,14 @@ ON CONFLICT(slug) DO UPDATE SET summary=EXCLUDED.summary,entry_count=EXCLUDED.en
 }
 
 // DropQuietDigests removes digests of projects with no entries in the window.
+// It only issues the DELETE when one is due, since a DELETE matching nothing
+// still fires the change trigger that reloads open consoles.
 func (db *DB) DropQuietDigests(ctx context.Context) error {
-	_, err := db.Pool.Exec(ctx, `DELETE FROM project_digest d WHERE NOT EXISTS (SELECT 1 FROM entry e WHERE e.slug=d.slug AND e.created_at>now()-`+digestWindow+`)`)
+	const quiet = `NOT EXISTS (SELECT 1 FROM entry e WHERE e.slug=d.slug AND e.created_at>now()-` + digestWindow + `)`
+	var due bool
+	if err := db.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM project_digest d WHERE `+quiet+`)`).Scan(&due); err != nil || !due {
+		return err
+	}
+	_, err := db.Pool.Exec(ctx, `DELETE FROM project_digest d WHERE `+quiet)
 	return err
 }
