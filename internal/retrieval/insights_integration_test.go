@@ -176,6 +176,31 @@ func TestInsightsEmbedFoldDuplicatesMergeTagsAndWriteDigests(t *testing.T) {
 	if n, err := conn.Conn().WaitForNotification(waitCtx); err == nil {
 		t.Fatalf("idle worker emitted a change event: %s", n.Payload)
 	}
+	// Freshness follows the change cursor: an hour-old digest that covers every
+	// commit is not redone, but one behind a later commit is, even if that
+	// commit carries a lower entry ID (IDs are allocated before commit).
+	if _, err := db.Pool.Exec(ctx, `UPDATE project_digest SET generated_at=now()-interval '1 hour'`); err != nil {
+		t.Fatal(err)
+	}
+	if stale, err := db.NextStaleDigest(ctx, 60, nil); err != nil || stale != nil {
+		t.Fatalf("up-to-date digest picked again: %#v %v", stale, err)
+	}
+	var lowID int64
+	if err := db.Pool.QueryRow(ctx, `SELECT min(id) FROM entry`).Scan(&lowID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, `DELETE FROM entry_change WHERE entry_id=$1`, lowID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO entry_change(entry_id) VALUES($1)`, lowID); err != nil {
+		t.Fatal(err)
+	}
+	if stale, err := db.NextStaleDigest(ctx, 60, nil); err != nil || stale == nil || stale.Slug != "atlas" {
+		t.Fatalf("digest behind a late commit not picked: %#v %v", stale, err)
+	}
+	if _, err := db.Pool.Exec(ctx, `UPDATE project_digest SET generated_at=now()`); err != nil {
+		t.Fatal(err)
+	}
 	summaries, err := db.ProjectSummaries(ctx)
 	if err != nil || summaries[0].Digest != "Shipped the export." || summaries[0].DigestAt == nil {
 		t.Fatalf("digest = %#v %v", summaries, err)

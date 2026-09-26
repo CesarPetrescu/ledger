@@ -208,8 +208,9 @@ WHERE m.tags && ARRAY(SELECT tag FROM tag_vocab WHERE canonical IS NOT NULL)`); 
 type DigestInput struct {
 	Slug        string
 	ProjectName string
-	LastEntryID int64
-	Entries     []DigestEntry
+	// LastChangeID is the newest entry_change cursor the digest covers.
+	LastChangeID int64
+	Entries      []DigestEntry
 }
 
 type DigestEntry struct {
@@ -224,16 +225,17 @@ type DigestEntry struct {
 const digestWindow = `interval '7 days'`
 
 // NextStaleDigest picks one project with activity in the last week whose
-// digest is missing, a day old, or behind newer entries for over 30 minutes.
+// digest is missing, a day old, or behind newer committed entries (by change
+// cursor) for over 30 minutes.
 // Entries awaiting extraction are skipped so digests use settled titles.
 func (db *DB) NextStaleDigest(ctx context.Context, maxEntries int, skip []string) (*DigestInput, error) {
 	var in DigestInput
 	err := db.Pool.QueryRow(ctx, `SELECT p.slug,p.name,w.last_id FROM project p
-JOIN LATERAL (SELECT max(id) last_id FROM entry WHERE slug=p.slug AND created_at>now()-`+digestWindow+`) w ON w.last_id IS NOT NULL
+JOIN LATERAL (SELECT max(c.change_id) last_id FROM entry e JOIN entry_change c ON c.entry_id=e.id WHERE e.slug=p.slug AND e.created_at>now()-`+digestWindow+`) w ON w.last_id IS NOT NULL
 LEFT JOIN project_digest d ON d.slug=p.slug
-WHERE (d.slug IS NULL OR d.generated_at<now()-interval '20 hours' OR (d.last_entry_id<w.last_id AND d.generated_at<now()-interval '30 minutes'))
+WHERE (d.slug IS NULL OR d.generated_at<now()-interval '20 hours' OR (d.last_change_id<w.last_id AND d.generated_at<now()-interval '30 minutes'))
 AND NOT p.slug=ANY($2) AND NOT EXISTS (SELECT 1 FROM entry e LEFT JOIN entry_meta m ON m.entry_id=e.id WHERE e.slug=p.slug AND e.created_at>now()-`+digestWindow+` AND (m.entry_id IS NULL OR (m.title='' AND m.attempts<$1)))
-ORDER BY d.generated_at NULLS FIRST,p.slug LIMIT 1`, MetaMaxAttempts, append([]string{}, skip...)).Scan(&in.Slug, &in.ProjectName, &in.LastEntryID)
+ORDER BY d.generated_at NULLS FIRST,p.slug LIMIT 1`, MetaMaxAttempts, append([]string{}, skip...)).Scan(&in.Slug, &in.ProjectName, &in.LastChangeID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -255,10 +257,10 @@ ORDER BY e.created_at DESC,e.id DESC LIMIT $2`, in.Slug, maxEntries)
 	return &in, err
 }
 
-func (db *DB) SaveDigest(ctx context.Context, slug, summary string, entryCount int, lastEntryID int64, model string) error {
-	_, err := db.Pool.Exec(ctx, `INSERT INTO project_digest(slug,summary,entry_count,last_entry_id,model) VALUES($1,$2,$3,$4,$5)
-ON CONFLICT(slug) DO UPDATE SET summary=EXCLUDED.summary,entry_count=EXCLUDED.entry_count,last_entry_id=EXCLUDED.last_entry_id,model=EXCLUDED.model,generated_at=now()`,
-		slug, truncateRunes(summary, 1200), entryCount, lastEntryID, model)
+func (db *DB) SaveDigest(ctx context.Context, slug, summary string, entryCount int, lastChangeID int64, model string) error {
+	_, err := db.Pool.Exec(ctx, `INSERT INTO project_digest(slug,summary,entry_count,last_change_id,model) VALUES($1,$2,$3,$4,$5)
+ON CONFLICT(slug) DO UPDATE SET summary=EXCLUDED.summary,entry_count=EXCLUDED.entry_count,last_change_id=EXCLUDED.last_change_id,model=EXCLUDED.model,generated_at=now()`,
+		slug, truncateRunes(summary, 1200), entryCount, lastChangeID, model)
 	return err
 }
 

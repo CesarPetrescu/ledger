@@ -17,3 +17,9 @@ CREATE TABLE worker_heartbeat (
   name text PRIMARY KEY,
   seen_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- Digest freshness follows the commit-ordered change cursor from 0007_glass:
+-- entry IDs are allocated before commit, so a late commit can carry a lower
+-- ID than one a digest already covered. Existing digests are regenerated.
+ALTER TABLE project_digest RENAME COLUMN last_entry_id TO last_change_id;
+DELETE FROM project_digest;

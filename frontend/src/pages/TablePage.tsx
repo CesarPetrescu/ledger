@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useMemo, useState, type FormEvent } from 'react'
 import { api, describeError, ENTRY_KINDS, type EntryFilter, type ProjectSummary, type TableEntry } from '../api'
 import { useResource } from '../hooks/useResource'
 import { Link, useLocation } from '../router'
@@ -227,10 +227,6 @@ function EntriesView({ view, initialProject, initialQuery }: { view: Exclude<Vie
   const effective: EntryFilter = { ...filter, kind: view === 'todos' ? 'todo' : view === 'decisions' ? 'decision' : filter.kind ?? '', status: view === 'todos' ? filter.status ?? '' : '' }
   const key = `entries:${view}:${JSON.stringify(effective)}`
   const table = useResource(() => api.listEntries(effective), key, LIVE)
-  const currentKey = useRef(key)
-  useEffect(() => {
-    currentKey.current = key
-  }, [key])
   const projects = useResource(() => api.listProjects(), 'table-projects', 'project')
   const toast = useToast()
   const set = (field: keyof EntryFilter, value: string) => setFilter((current) => ({ ...current, [field]: value }))
@@ -245,15 +241,15 @@ function EntriesView({ view, initialProject, initialQuery }: { view: Exclude<Vie
   const groups = useMemo(() => groupBy(foldRepeats(entries), (item) => (view === 'todos' ? item.entry.slug : dayLabel(item.entry.created_at))), [entries, view])
 
   const loadMore = async () => {
-    const cursor = table.data?.next_before
-    const requestKey = key
+    const snapshot = table.data
+    const cursor = snapshot?.next_before
     if (!cursor || loadingMore) return
     setLoadingMore(true)
     try {
       const page = await api.listEntries(effective, cursor)
-      // A filter change or live reload while this was in flight replaced the
-      // list; appending a page from the old request would mix or skip rows.
-      table.update((current) => (currentKey.current === requestKey && current.next_before === cursor ? { ...page, entries: [...current.entries, ...page.entries] } : current))
+      // Any reload, filter change, or live update while this was in flight
+      // replaced the list object; appending the old page would mix or skip rows.
+      table.update((current) => (current === snapshot ? { ...page, entries: [...current.entries, ...page.entries] } : current))
     } catch (failure) {
       toast(describeError(failure), 'error')
     } finally {

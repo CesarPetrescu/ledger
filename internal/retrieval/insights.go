@@ -174,5 +174,5 @@ func (x *Extractor) writeDigest(ctx context.Context) (bool, error) {
 		x.digestRetry[in.Slug] = time.Now().Add(time.Hour)
 		return false, fmt.Errorf("digest %s: invalid reply", in.Slug)
 	}
-	return true, x.db.SaveDigest(ctx, in.Slug, strings.Join(strings.Fields(out.Summary), " "), len(in.Entries), in.LastEntryID, x.model)
+	return true, x.db.SaveDigest(ctx, in.Slug, strings.Join(strings.Fields(out.Summary), " "), len(in.Entries), in.LastChangeID, x.model)
 }
