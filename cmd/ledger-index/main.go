@@ -27,13 +27,8 @@ func main() {
 		fmt.Println(count)
 		return
 	}
-	threshold := config.Float("LEDGER_DUPLICATE_SIMILARITY", 0.9)
-	if !retrieval.ValidDuplicateThreshold(threshold) {
-		log.Fatalf("LEDGER_DUPLICATE_SIMILARITY must be greater than 0 and at most 1, got %v", threshold)
-	}
 	infer := retrieval.NewInferClient(config.Required("LEDGER_INFER_URL"), config.Value("LEDGER_EMBED_MODEL", "qwen3-embedding"), config.Value("LEDGER_RERANK_MODEL", "qwen3-reranker"), config.Int("LEDGER_EMBED_DIM", 4096), os.Getenv("LEDGER_INFER_API_KEY"))
 	worker := retrieval.NewIndexer(db, infer)
-	extractor := retrieval.NewExtractor(db, os.Getenv("LEDGER_CHAT_URL"), os.Getenv("LEDGER_CHAT_MODEL"), os.Getenv("LEDGER_CHAT_API_KEY"), infer, threshold)
 	switch os.Args[1] {
 	case "serve":
 		workerCtx, cancel := context.WithCancel(ctx)
@@ -43,7 +38,14 @@ func main() {
 				log.Printf("index worker stopped: %v", err)
 			}
 		}()
-		if extractor != nil {
+		// Table settings are read only here, so reindex and reextract never
+		// depend on them.
+		if chatURL := os.Getenv("LEDGER_CHAT_URL"); chatURL != "" {
+			threshold := config.Float("LEDGER_DUPLICATE_SIMILARITY", 0.9)
+			if !retrieval.ValidDuplicateThreshold(threshold) {
+				log.Fatalf("LEDGER_DUPLICATE_SIMILARITY must be greater than 0 and at most 1, got %v", threshold)
+			}
+			extractor := retrieval.NewExtractor(db, chatURL, os.Getenv("LEDGER_CHAT_MODEL"), os.Getenv("LEDGER_CHAT_API_KEY"), infer, threshold)
 			go func() {
 				if err := extractor.Run(workerCtx); err != nil && workerCtx.Err() == nil {
 					log.Printf("metadata extractor stopped: %v", err)
