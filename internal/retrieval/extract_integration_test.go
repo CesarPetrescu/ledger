@@ -86,8 +86,15 @@ func TestExtractorLabelsEntriesAndLinksResolvedTodos(t *testing.T) {
 	if open, err := db.ListEntries(ctx, store.EntryFilter{Status: "open"}); err != nil || len(open) != 1 {
 		t.Fatalf("reopened todo = %#v %v", open, err)
 	}
+	if err := db.SaveDigest(ctx, "atlas", "Old digest.", 2, done.ID, "m"); err != nil {
+		t.Fatal(err)
+	}
 	if n, err := db.ClearModelMeta(ctx); err != nil || n != 1 {
 		t.Fatalf("clear model meta = %d %v", n, err)
+	}
+	var digests int
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM project_digest`).Scan(&digests); err != nil || digests != 0 {
+		t.Fatalf("digests after reextract = %d %v", digests, err)
 	}
 }
 

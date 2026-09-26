@@ -49,16 +49,19 @@ func (db *DB) LinkDuplicates(ctx context.Context, model string, threshold float6
 	// Look before writing: an UPDATE matching nothing still fires the
 	// statement-level change trigger and reloads every open console.
 	var id int64
-	err := db.Pool.QueryRow(ctx, `SELECT m.entry_id FROM entry_meta m JOIN entry e ON e.id=m.entry_id
+	var slug string
+	var previous *int64
+	var recent bool
+	err := db.Pool.QueryRow(ctx, `SELECT m.entry_id,e.slug,m.duplicate_of,e.created_at>now()-`+digestWindow+` FROM entry_meta m JOIN entry e ON e.id=m.entry_id
 WHERE e.kind<>'todo' AND m.embedding IS NOT NULL AND m.embed_model=$1 AND (NOT m.duplicate_checked OR m.duplicate_threshold IS DISTINCT FROM $2)
-ORDER BY e.created_at,e.id LIMIT 1`, model, threshold).Scan(&id)
+ORDER BY e.created_at,e.id LIMIT 1`, model, threshold).Scan(&id, &slug, &previous, &recent)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, nil
 	}
 	if err != nil {
 		return 0, err
 	}
-	tag, err := db.Pool.Exec(ctx, `WITH p AS (
+	row := db.Pool.QueryRow(ctx, `WITH p AS (
   SELECT m.entry_id,e.slug,e.kind,e.created_at,m.embedding FROM entry_meta m JOIN entry e ON e.id=m.entry_id WHERE m.entry_id=$3
 )
 UPDATE entry_meta m SET duplicate_checked=true,duplicate_threshold=$2,duplicate_of=(
@@ -66,8 +69,23 @@ UPDATE entry_meta m SET duplicate_checked=true,duplicate_threshold=$2,duplicate_
   WHERE oe.slug=p.slug AND oe.kind=p.kind AND (oe.created_at,oe.id)<(p.created_at,p.entry_id) AND o.embed_model=$1 AND o.embedding IS NOT NULL
     AND o.duplicate_checked AND o.duplicate_threshold=$2 AND 1-(o.embedding<=>p.embedding)>=$2
   ORDER BY o.embedding<=>p.embedding LIMIT 1)
-FROM p WHERE m.entry_id=p.entry_id`, model, threshold, id)
-	return tag.RowsAffected(), err
+FROM p WHERE m.entry_id=p.entry_id RETURNING m.duplicate_of`, model, threshold, id)
+	var current *int64
+	if err := row.Scan(&current); err != nil {
+		return 0, err
+	}
+	// Folding feeds the digest, so a changed link inside the digest window
+	// makes the project's digest stale.
+	if recent && !sameID(previous, current) {
+		if _, err := db.Pool.Exec(ctx, `DELETE FROM project_digest WHERE slug=$1`, slug); err != nil {
+			return 1, err
+		}
+	}
+	return 1, nil
+}
+
+func sameID(a, b *int64) bool {
+	return (a == nil && b == nil) || (a != nil && b != nil && *a == *b)
 }
 
 // Heartbeat records that a background worker is alive.

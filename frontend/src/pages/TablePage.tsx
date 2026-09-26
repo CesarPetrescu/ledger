@@ -236,11 +236,14 @@ function EntriesView({ view, initialProject, initialQuery }: { view: Exclude<Vie
   const groups = useMemo(() => groupBy(foldRepeats(entries), (item) => (view === 'todos' ? item.entry.slug : dayLabel(item.entry.created_at))), [entries, view])
 
   const loadMore = async () => {
-    if (!table.data?.next_before || loadingMore) return
+    const cursor = table.data?.next_before
+    if (!cursor || loadingMore) return
     setLoadingMore(true)
     try {
-      const page = await api.listEntries(effective, table.data.next_before)
-      table.update((current) => ({ ...page, entries: [...current.entries, ...page.entries] }))
+      const page = await api.listEntries(effective, cursor)
+      // A live reload while this was in flight replaced the list; appending
+      // a page from the old cursor would skip or duplicate rows.
+      table.update((current) => (current.next_before === cursor ? { ...page, entries: [...current.entries, ...page.entries] } : current))
     } catch (failure) {
       toast(describeError(failure), 'error')
     } finally {

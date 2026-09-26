@@ -837,6 +837,19 @@ func TestRelatedEntriesDuplicatesAndDigestsThroughTheAPI(t *testing.T) {
 	if !strings.Contains(summary.Body.String(), `"digest":"Shipped things."`) || !strings.Contains(summary.Body.String(), `"digest_at":`) {
 		t.Fatalf("summary = %s", summary.Body.String())
 	}
+	digests := func() int {
+		var n int
+		_ = db.Pool.QueryRow(ctx, `SELECT count(*) FROM project_digest`).Scan(&n)
+		return n
+	}
+	// Rechecking with a threshold that yields the same links keeps the digest.
+	if link(0.95); digests() != 1 {
+		t.Fatal("digest dropped although no link changed")
+	}
+	// Changed links feed a different digest, so it is regenerated.
+	if link(0.995); digests() != 0 {
+		t.Fatal("digest kept after links changed")
+	}
 }
 
 func TestSearchAddsProvenanceFiltersAndDegradesGracefully(t *testing.T) {

@@ -114,10 +114,22 @@ WHERE entry_meta.origin='model'`, entryID, model, message)
 	return err
 }
 
-// ClearModelMeta drops every model-derived row so the extractor redoes them.
+// ClearModelMeta drops every model-derived row so the extractor redoes them,
+// along with the digests written from that metadata.
 func (db *DB) ClearModelMeta(ctx context.Context) (int64, error) {
-	tag, err := db.Pool.Exec(ctx, `DELETE FROM entry_meta WHERE origin='model'`)
-	return tag.RowsAffected(), err
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+	tag, err := tx.Exec(ctx, `DELETE FROM entry_meta WHERE origin='model'`)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM project_digest`); err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), tx.Commit(ctx)
 }
 
 // ResolveTodo appends an owner "Done" status entry that closes the todo.
