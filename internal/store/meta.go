@@ -11,16 +11,15 @@ import (
 
 // EntryMeta is derived metadata for one entry. It never changes the entry.
 type EntryMeta struct {
-	Title       string   `json:"title"`
-	Tags        []string `json:"tags"`
-	Priority    string   `json:"priority,omitempty"`
-	Refs        []string `json:"refs"`
-	Resolves    *int64   `json:"-"`
-	DuplicateOf *int64   `json:"-"`
-	Origin      string   `json:"origin"`
-	Model       string   `json:"-"`
-	Attempts    int      `json:"-"`
-	Error       string   `json:"-"`
+	Title    string   `json:"title"`
+	Tags     []string `json:"tags"`
+	Priority string   `json:"priority,omitempty"`
+	Refs     []string `json:"refs"`
+	Resolves *int64   `json:"-"`
+	Origin   string   `json:"origin"`
+	Model    string   `json:"-"`
+	Attempts int      `json:"-"`
+	Error    string   `json:"-"`
 }
 
 // Resolution names the entry that closed a todo.
@@ -83,13 +82,23 @@ ORDER BY e.created_at DESC,e.id DESC LIMIT $4`, slug, before, exclude, limit)
 	})
 }
 
-// SaveEntryMeta stores extracted metadata unless the owner already set it.
+// SaveEntryMeta stores extracted metadata unless the owner already set it. A
+// todo that another entry resolved in the meantime is left to that entry.
 func (db *DB) SaveEntryMeta(ctx context.Context, entryID int64, m EntryMeta) error {
+	err := db.saveEntryMeta(ctx, entryID, m)
+	if m.Resolves != nil && pgErrorCode(err) == "23505" {
+		m.Resolves = nil
+		err = db.saveEntryMeta(ctx, entryID, m)
+	}
+	return err
+}
+
+func (db *DB) saveEntryMeta(ctx context.Context, entryID int64, m EntryMeta) error {
 	_, err := db.Pool.Exec(ctx, `INSERT INTO entry_meta(entry_id,title,tags,priority,refs,resolves,origin,model,attempts,error)
 VALUES($1,$2,$3,$4,$5,$6,'model',$7,1,'')
 ON CONFLICT(entry_id) DO UPDATE SET title=EXCLUDED.title,tags=EXCLUDED.tags,priority=EXCLUDED.priority,refs=EXCLUDED.refs,
  resolves=EXCLUDED.resolves,model=EXCLUDED.model,attempts=entry_meta.attempts+1,error='',updated_at=now(),
- embedding=NULL,embed_model='',duplicate_of=NULL,duplicate_checked=false
+ embedding=NULL,embed_model='',duplicate_of=NULL,duplicate_checked=false,duplicate_threshold=NULL
 WHERE entry_meta.origin='model'`, entryID, m.Title, nonNil(m.Tags), m.Priority, nonNil(m.Refs), m.Resolves, m.Model)
 	return err
 }
@@ -136,6 +145,10 @@ FROM entry e LEFT JOIN entry_meta m ON m.entry_id=e.id WHERE e.id=$1 FOR UPDATE 
 		return Entry{}, err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO entry_meta(entry_id,title,resolves,origin) VALUES($1,$2,$3,'owner')`, e.ID, truncateRunes("Done: "+text, 120), todoID); err != nil {
+		// Another session resolved it after our check; the unique index decides.
+		if pgErrorCode(err) == "23505" {
+			return Entry{}, ErrAlreadyResolved
+		}
 		return Entry{}, err
 	}
 	return e, tx.Commit(ctx)
@@ -155,12 +168,19 @@ type MetaProgress struct {
 	Total  int `json:"total"`
 	Ready  int `json:"ready"`
 	Failed int `json:"failed"`
+	// Active reports whether the extractor has checked in recently; without
+	// it, pending entries will not be processed.
+	Active bool `json:"active"`
 }
+
+// ExtractorHeartbeat names the metadata extractor in worker_heartbeat.
+const ExtractorHeartbeat = "extractor"
 
 func (db *DB) MetaProgress(ctx context.Context) (MetaProgress, error) {
 	var p MetaProgress
-	err := db.Pool.QueryRow(ctx, `SELECT count(*),count(*) FILTER (WHERE m.title<>''),count(*) FILTER (WHERE m.title='' AND m.attempts>=$1)
-FROM entry e LEFT JOIN entry_meta m ON m.entry_id=e.id`, MetaMaxAttempts).Scan(&p.Total, &p.Ready, &p.Failed)
+	err := db.Pool.QueryRow(ctx, `SELECT count(*),count(*) FILTER (WHERE m.title<>''),count(*) FILTER (WHERE m.title='' AND m.attempts>=$1),
+ EXISTS (SELECT 1 FROM worker_heartbeat WHERE name=$2 AND seen_at>now()-interval '2 minutes')
+FROM entry e LEFT JOIN entry_meta m ON m.entry_id=e.id`, MetaMaxAttempts, ExtractorHeartbeat).Scan(&p.Total, &p.Ready, &p.Failed, &p.Active)
 	return p, err
 }
 

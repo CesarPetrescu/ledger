@@ -108,7 +108,8 @@ export interface ProjectSummary {
 
 export interface ProjectSummaries {
   projects: ProjectSummary[]
-  metadata: { total: number; ready: number; failed: number }
+  /** active is false when no extractor has checked in recently. */
+  metadata: { total: number; ready: number; failed: number; active: boolean }
 }
 
 function entryQuery(filter: EntryFilter, extra: Record<string, string> = {}): string {

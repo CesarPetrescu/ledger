@@ -1,6 +1,7 @@
 package retrieval
 
 import (
+	"math"
 	"reflect"
 	"testing"
 
@@ -42,5 +43,17 @@ func TestValidMergesRejectsUnknownSelfDoubleAndChainedMerges(t *testing.T) {
 	}
 	if tags := canonicalTags([]string{"asr", "stt", "deploy"}, want); !reflect.DeepEqual(tags, []string{"stt", "deploy"}) {
 		t.Fatalf("canonical tags = %v", tags)
+	}
+	chained := map[string]string{"a": "b", "b": "c", "loop": "loop2", "loop2": "loop"}
+	if tags := canonicalTags([]string{"a", "c", "loop"}, chained); !reflect.DeepEqual(tags, []string{"c", "loop"}) {
+		t.Fatalf("chained canonical tags = %v", tags)
+	}
+}
+
+func TestValidDuplicateThreshold(t *testing.T) {
+	for value, want := range map[float64]bool{0.9: true, 1: true, 0.01: true, 0: false, -0.9: false, 1.1: false, math.NaN(): false, math.Inf(1): false} {
+		if got := ValidDuplicateThreshold(value); got != want {
+			t.Errorf("ValidDuplicateThreshold(%v) = %v", value, got)
+		}
 	}
 }

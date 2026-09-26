@@ -38,22 +38,31 @@ func (db *DB) SaveEntryEmbedding(ctx context.Context, entryID int64, model strin
 	return err
 }
 
-// LinkDuplicates points each unchecked entry at its most similar earlier entry
-// of the same kind in the same project when similarity reaches threshold.
+// LinkDuplicates checks the oldest unchecked entry (or one checked with a
+// different threshold) against earlier settled entries of the same kind and
+// project, and links it to the root of the most similar one when similarity
+// reaches threshold. Working oldest first, one entry per call, keeps every
+// link pointing at a root, so repeats never form chains.
 // ponytail: exact vector scan per project; add an HNSW index past ~50k entries.
-func (db *DB) LinkDuplicates(ctx context.Context, model string, threshold float64, limit int) (int64, error) {
-	tag, err := db.Pool.Exec(ctx, `WITH pending AS (
+func (db *DB) LinkDuplicates(ctx context.Context, model string, threshold float64) (int64, error) {
+	tag, err := db.Pool.Exec(ctx, `WITH p AS (
   SELECT m.entry_id,e.slug,e.kind,e.created_at,m.embedding FROM entry_meta m JOIN entry e ON e.id=m.entry_id
-  WHERE NOT m.duplicate_checked AND m.embedding IS NOT NULL AND m.embed_model=$1 ORDER BY e.created_at,e.id LIMIT $3
-), best AS (
-  SELECT p.entry_id,(SELECT o.entry_id FROM entry_meta o JOIN entry oe ON oe.id=o.entry_id
-    WHERE oe.slug=p.slug AND oe.kind=p.kind AND (oe.created_at,oe.id)<(p.created_at,p.entry_id) AND o.embed_model=$1 AND o.embedding IS NOT NULL
-      AND 1-(o.embedding<=>p.embedding)>=$2
-    ORDER BY o.embedding<=>p.embedding LIMIT 1) AS original
-  FROM pending p
+  WHERE m.embedding IS NOT NULL AND m.embed_model=$1 AND (NOT m.duplicate_checked OR m.duplicate_threshold IS DISTINCT FROM $2)
+  ORDER BY e.created_at,e.id LIMIT 1
 )
-UPDATE entry_meta m SET duplicate_of=best.original,duplicate_checked=true FROM best WHERE m.entry_id=best.entry_id`, model, threshold, limit)
+UPDATE entry_meta m SET duplicate_checked=true,duplicate_threshold=$2,duplicate_of=(
+  SELECT COALESCE(o.duplicate_of,o.entry_id) FROM entry_meta o JOIN entry oe ON oe.id=o.entry_id
+  WHERE oe.slug=p.slug AND oe.kind=p.kind AND (oe.created_at,oe.id)<(p.created_at,p.entry_id) AND o.embed_model=$1 AND o.embedding IS NOT NULL
+    AND o.duplicate_checked AND o.duplicate_threshold=$2 AND 1-(o.embedding<=>p.embedding)>=$2
+  ORDER BY o.embedding<=>p.embedding LIMIT 1)
+FROM p WHERE m.entry_id=p.entry_id`, model, threshold)
 	return tag.RowsAffected(), err
+}
+
+// Heartbeat records that a background worker is alive.
+func (db *DB) Heartbeat(ctx context.Context, name string) error {
+	_, err := db.Pool.Exec(ctx, `INSERT INTO worker_heartbeat(name) VALUES($1) ON CONFLICT(name) DO UPDATE SET seen_at=now()`, name)
+	return err
 }
 
 // RelatedEntry is a similar entry with its cosine similarity.
@@ -143,6 +152,17 @@ func (db *DB) ApplyTagMerges(ctx context.Context, reviewed []string, merges map[
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO tag_vocab(tag,canonical) VALUES($1,$2) ON CONFLICT(tag) DO UPDATE SET canonical=EXCLUDED.canonical,reviewed_at=now()`, tag, canonical); err != nil {
 			return err
+		}
+	}
+	// Earlier aliases whose target was just merged away follow it, so every
+	// alias names a live canonical tag.
+	for range 10 {
+		tag, err := tx.Exec(ctx, `UPDATE tag_vocab v SET canonical=w.canonical FROM tag_vocab w WHERE v.canonical=w.tag AND w.canonical IS NOT NULL AND w.canonical<>v.tag`)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			break
 		}
 	}
 	if _, err := tx.Exec(ctx, `UPDATE entry_meta m SET tags=(

@@ -574,9 +574,9 @@ func tableEntryResponse(entry store.EntryWithProject) map[string]any {
 	item["project_name"] = entry.ProjectName
 	if entry.Meta != nil {
 		item["meta"] = entry.Meta
-		if entry.Meta.DuplicateOf != nil {
-			item["duplicate_of"] = strconv.FormatInt(*entry.Meta.DuplicateOf, 10)
-		}
+	}
+	if entry.DuplicateOf != nil {
+		item["duplicate_of"] = strconv.FormatInt(*entry.DuplicateOf, 10)
 	}
 	if entry.ResolvedBy != nil {
 		item["resolved_by"] = map[string]any{"entry_id": strconv.FormatInt(entry.ResolvedBy.EntryID, 10), "origin": entry.ResolvedBy.Origin, "created_at": entry.ResolvedBy.CreatedAt}

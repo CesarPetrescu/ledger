@@ -32,6 +32,12 @@ type Extractor struct {
 	digestRetry map[string]time.Time
 }
 
+// ValidDuplicateThreshold reports whether a cosine-similarity threshold can
+// fold anything without folding everything.
+func ValidDuplicateThreshold(threshold float64) bool {
+	return threshold > 0 && threshold <= 1
+}
+
 // NewExtractor returns nil when no chat endpoint is configured. dupThreshold
 // is the cosine similarity at which an entry folds under an earlier one.
 func NewExtractor(db *store.DB, chatURL, model, apiKey string, infer *InferClient, dupThreshold float64) *Extractor {
@@ -125,10 +131,16 @@ func (x *Extractor) shortlistTodos(ctx context.Context, body string, todos []sto
 	return todos[:min(len(todos), 30)]
 }
 
+// canonicalTags maps merged tags to their final canonical tag, following
+// alias chains left by earlier consolidation runs.
 func canonicalTags(tags []string, aliases map[string]string) []string {
 	out := make([]string, 0, len(tags))
 	for _, tag := range tags {
-		if to, ok := aliases[tag]; ok {
+		for hops := 0; hops < 10; hops++ {
+			to, ok := aliases[tag]
+			if !ok {
+				break
+			}
 			tag = to
 		}
 		if !slices.Contains(out, tag) {
@@ -252,7 +264,15 @@ func clip(value string, limit int) string {
 // chat endpoint is unreachable.
 func (x *Extractor) Run(ctx context.Context) error {
 	// ponytail: polls every 5s; LISTEN on entry inserts if lower latency matters.
+	var lastBeat time.Time
 	for {
+		if time.Since(lastBeat) >= 30*time.Second {
+			if err := x.db.Heartbeat(ctx, store.ExtractorHeartbeat); err != nil && ctx.Err() == nil {
+				log.Printf("entry insights heartbeat: %v", err)
+			} else {
+				lastBeat = time.Now()
+			}
+		}
 		worked, err := x.Step(ctx)
 		wait := time.Duration(0)
 		switch {

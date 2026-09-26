@@ -88,6 +88,7 @@ type EntryWithProject struct {
 	Entry
 	ProjectName string      `json:"project_name"`
 	Meta        *EntryMeta  `json:"meta,omitempty"`
+	DuplicateOf *int64      `json:"-"`
 	ResolvedBy  *Resolution `json:"resolved_by,omitempty"`
 }
 
@@ -141,7 +142,7 @@ ORDER BY e.created_at DESC,e.id DESC LIMIT $8`, f.ProjectSlug, f.Kind, f.Source,
 		var resolution Resolution
 		var resolvedAt *time.Time
 		if err := rows.Scan(&e.ID, &e.Slug, &e.Kind, &e.Body, &e.Source, &e.ClientID, &e.CreatedAt, &e.ProjectName,
-			&hasMeta, &meta.Title, &meta.Tags, &meta.Priority, &meta.Refs, &meta.Origin, &meta.DuplicateOf, &resolverID, &resolution.Origin, &resolvedAt); err != nil {
+			&hasMeta, &meta.Title, &meta.Tags, &meta.Priority, &meta.Refs, &meta.Origin, &e.DuplicateOf, &resolverID, &resolution.Origin, &resolvedAt); err != nil {
 			return nil, err
 		}
 		if hasMeta {

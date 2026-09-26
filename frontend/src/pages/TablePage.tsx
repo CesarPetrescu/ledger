@@ -6,7 +6,7 @@ import { useToast } from '../components/Toast'
 import { EmptyState, ErrorState, Icon, KindBadge, Loading, StaleNotice, TierBadge, Timestamp } from '../components/ui'
 
 const MAX_BODY = 4000
-const LIVE = 'project entry entry_meta'
+const LIVE = 'project entry entry_meta project_digest'
 type View = 'projects' | 'todos' | 'decisions' | 'activity'
 const VIEWS: { id: View; label: string }[] = [
   { id: 'projects', label: 'Projects' },
@@ -345,7 +345,8 @@ export function TablePage() {
   const project = query.get('project') ?? ''
   const summaries = useResource(api.getProjectSummaries, 'table-summaries', LIVE)
   const progress = summaries.data?.metadata
-  const extracting = progress && progress.total > 0 && progress.ready + progress.failed < progress.total
+  // Only promise progress while an extractor is alive to make it.
+  const extracting = progress?.active && progress.total > 0 && progress.ready + progress.failed < progress.total
 
   return (
     <>

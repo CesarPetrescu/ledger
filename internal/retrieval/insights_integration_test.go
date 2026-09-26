@@ -103,6 +103,9 @@ func TestInsightsEmbedFoldDuplicatesMergeTagsAndWriteDigests(t *testing.T) {
 	defer chat.Close()
 
 	x := NewExtractor(db, chat.URL, "", "", NewInferClient(infer.URL, "embed", "rerank", 4096, ""), 0.9)
+	if progress, _ := db.MetaProgress(ctx); progress.Active {
+		t.Fatal("extractor reported active before running")
+	}
 	for i := 0; ; i++ {
 		worked, err := x.Step(ctx)
 		if err != nil {
@@ -134,6 +137,16 @@ func TestInsightsEmbedFoldDuplicatesMergeTagsAndWriteDigests(t *testing.T) {
 	aliases, _ := db.TagAliases(ctx)
 	if len(aliases) != 1 || aliases["benchmarks"] != "benchmark" {
 		t.Fatalf("aliases = %v", aliases)
+	}
+	// A later run merging the canonical tag flattens earlier aliases onto it.
+	if err := db.ApplyTagMerges(ctx, []string{"benchmark", "bench"}, map[string]string{"benchmark": "bench"}); err != nil {
+		t.Fatal(err)
+	}
+	if aliases, _ := db.TagAliases(ctx); aliases["benchmarks"] != "bench" || aliases["benchmark"] != "bench" {
+		t.Fatalf("flattened aliases = %v", aliases)
+	}
+	if tags, _ := db.EntryTags(ctx, 10); strings.Join(tags, ",") != "bench" {
+		t.Fatalf("tags after second merge = %v", tags)
 	}
 	related, err := db.RelatedEntries(ctx, export.ID, 0.62, 3)
 	if err != nil || len(related) != 1 || related[0].Body != "Todo 0 csv" || related[0].Similarity < 0.79 {

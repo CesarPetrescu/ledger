@@ -25,7 +25,7 @@ func (x *Extractor) Step(ctx context.Context) (bool, error) {
 		if n, err := x.embedBatch(ctx); n > 0 || err != nil {
 			return n > 0, err
 		}
-		if n, err := x.db.LinkDuplicates(ctx, x.infer.embeddingModel, x.dupThreshold, 50); n > 0 || err != nil {
+		if n, err := x.db.LinkDuplicates(ctx, x.infer.embeddingModel, x.dupThreshold); n > 0 || err != nil {
 			return n > 0, err
 		}
 	}

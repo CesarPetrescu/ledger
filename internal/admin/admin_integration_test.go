@@ -7,6 +7,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -654,7 +656,7 @@ func TestTodoResolutionAndProjectSummaries(t *testing.T) {
 		t.Fatalf("reopen open todo = %d", res.Code)
 	}
 	summary := request(t, server, http.MethodGet, "/admin/api/table/projects", "", authed(s, false))
-	if summary.Code != http.StatusOK || !strings.Contains(summary.Body.String(), `"open_todos":1`) || !strings.Contains(summary.Body.String(), `"week_agents":["claude-code","codex"]`) || !strings.Contains(summary.Body.String(), `"metadata":{"total":2,"ready":1,"failed":0}`) {
+	if summary.Code != http.StatusOK || !strings.Contains(summary.Body.String(), `"open_todos":1`) || !strings.Contains(summary.Body.String(), `"week_agents":["claude-code","codex"]`) || !strings.Contains(summary.Body.String(), `"metadata":{"total":2,"ready":1,"failed":0,"active":false}`) {
 		t.Fatalf("summary = %d %s", summary.Code, summary.Body.String())
 	}
 
@@ -679,6 +681,34 @@ func TestTodoResolutionAndProjectSummaries(t *testing.T) {
 	if !strings.Contains(open.Body.String(), `"id":"`+id+`"`) || strings.Contains(open.Body.String(), "resolved_by") {
 		t.Fatalf("reopened = %s", open.Body.String())
 	}
+
+	// Two sessions marking the same todo done at once create one completion.
+	results := make(chan error, 2)
+	for range 2 {
+		go func() {
+			_, err := db.ResolveTodo(ctx, todo.ID, "ledger-admin", "c")
+			results <- err
+		}()
+	}
+	first, second := <-results, <-results
+	if (first == nil) == (second == nil) || !errors.Is(errors.Join(first, second), store.ErrAlreadyResolved) {
+		t.Fatalf("concurrent resolve = %v, %v", first, second)
+	}
+	// A model guess for an already-closed todo keeps the rest of its metadata.
+	if err := db.SaveEntryMeta(ctx, note.ID, store.EntryMeta{Title: "Kickoff", Resolves: &todo.ID}); err != nil {
+		t.Fatalf("model resolution of a closed todo = %v", err)
+	}
+	var resolvers int
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM entry_meta WHERE resolves=$1`, todo.ID).Scan(&resolvers); err != nil || resolvers != 1 {
+		t.Fatalf("resolvers = %d %v", resolvers, err)
+	}
+
+	if err := db.Heartbeat(ctx, store.ExtractorHeartbeat); err != nil {
+		t.Fatal(err)
+	}
+	if summary := request(t, server, http.MethodGet, "/admin/api/table/projects", "", authed(s, false)); !strings.Contains(summary.Body.String(), `"active":true`) {
+		t.Fatalf("summary after heartbeat = %s", summary.Body.String())
+	}
 }
 
 func TestRelatedEntriesDuplicatesAndDigestsThroughTheAPI(t *testing.T) {
@@ -693,29 +723,88 @@ func TestRelatedEntriesDuplicatesAndDigestsThroughTheAPI(t *testing.T) {
 	for _, e := range []struct {
 		name, kind string
 		vector     []float32
+		failed     bool
 	}{
-		{"first", "status", axis(1)}, {"repeat", "status", axis(0.99, 0.1)}, {"cousin", "note", axis(0.7, 0.7)}, {"stranger", "note", axis(0, 0, 1)},
+		{"first", "status", axis(1), false},
+		{"repeat", "status", axis(0.99, 0.1), false},
+		// Closest to "repeat" but must link to the root, never form a chain.
+		{"echo", "status", axis(0.97, 0.2), false},
+		// Extraction failed, yet the repeat link must still reach the table.
+		{"untitled", "status", axis(0.98, 0.15), true},
+		{"cousin", "note", axis(0.7, 0.7), false},
+		{"stranger", "note", axis(0, 0, 1), false},
 	} {
 		entry, err := db.AppendEntry(ctx, "atlas", e.kind, e.name, "codex", "c")
 		if err != nil {
 			t.Fatal(err)
 		}
 		ids[e.name] = entry.ID
-		if err := db.SaveEntryMeta(ctx, entry.ID, store.EntryMeta{Title: e.name}); err != nil {
+		if e.failed {
+			for range store.MetaMaxAttempts {
+				if err := db.RecordMetaFailure(ctx, entry.ID, "m", "bad JSON"); err != nil {
+					t.Fatal(err)
+				}
+			}
+		} else if err := db.SaveEntryMeta(ctx, entry.ID, store.EntryMeta{Title: e.name}); err != nil {
 			t.Fatal(err)
 		}
 		if err := db.SaveEntryEmbedding(ctx, entry.ID, "embed", e.vector); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if n, err := db.LinkDuplicates(ctx, "embed", 0.9, 50); err != nil || n != 4 {
-		t.Fatalf("link duplicates = %d %v", n, err)
+	link := func(threshold float64) int {
+		t.Helper()
+		checked := 0
+		for {
+			n, err := db.LinkDuplicates(ctx, "embed", threshold)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if n == 0 {
+				return checked
+			}
+			checked++
+		}
+	}
+	links := func() map[int64]int64 {
+		t.Helper()
+		rows, err := db.Pool.Query(ctx, `SELECT entry_id,duplicate_of FROM entry_meta WHERE duplicate_of IS NOT NULL`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[int64]int64{}
+		for rows.Next() {
+			var id, of int64
+			_ = rows.Scan(&id, &of)
+			out[id] = of
+		}
+		return out
+	}
+	if n := link(0.9); n != 6 {
+		t.Fatalf("checked %d entries", n)
+	}
+	if got, want := links(), map[int64]int64{ids["repeat"]: ids["first"], ids["echo"]: ids["first"], ids["untitled"]: ids["first"]}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("links = %v, want %v (all pointing at the root)", got, want)
+	}
+	if n := link(0.9); n != 0 {
+		t.Fatalf("unchanged threshold rechecked %d entries", n)
+	}
+	// A stricter threshold rechecks everything: "repeat" (0.9950 to "first")
+	// becomes a root of its own, and only "untitled" (0.9987 to it) folds.
+	if n := link(0.995); n != 6 {
+		t.Fatalf("threshold change rechecked %d entries", n)
+	}
+	if got := links(); len(got) != 1 || got[ids["untitled"]] != ids["repeat"] {
+		t.Fatalf("links at 0.995 = %v", got)
+	}
+	if link(0.9) != 6 {
+		t.Fatal("restoring the threshold did not recheck")
 	}
 	if err := db.SaveDigest(ctx, "atlas", "Shipped things.", 4, ids["stranger"], "m"); err != nil {
 		t.Fatal(err)
 	}
 	entries := request(t, server, http.MethodGet, "/admin/api/entries", "", authed(s, false))
-	if !strings.Contains(entries.Body.String(), `"duplicate_of":"`+strconv.FormatInt(ids["first"], 10)+`"`) || strings.Count(entries.Body.String(), `"duplicate_of"`) != 1 {
+	if strings.Count(entries.Body.String(), `"duplicate_of":"`+strconv.FormatInt(ids["first"], 10)+`"`) != 3 || !strings.Contains(entries.Body.String(), `"body":"untitled","client_id":"c","created_at"`) {
 		t.Fatalf("entries = %s", entries.Body.String())
 	}
 	related := request(t, server, http.MethodGet, "/admin/api/entries/"+strconv.FormatInt(ids["cousin"], 10)+"/related", "", authed(s, false))

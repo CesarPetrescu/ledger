@@ -10,7 +10,7 @@ const summaries: ProjectSummaries = {
     { slug: 'atlas', name: 'Atlas', tier: 'focus', deadline: 'Friday', needs_me: 'Review the migration', last_entry_at: now, open_todos: 2, week_entries: 5, week_agents: ['claude-code', 'codex'], status_title: 'Deployed table page', status_body: 'long text', status_at: now, status_source: 'codex', digest: 'Shipped the table page; two todos remain.', digest_at: now },
     { slug: 'beacon', name: 'Beacon', tier: 'park', deadline: '', needs_me: '', open_todos: 0, week_entries: 0, week_agents: [], status_title: '', status_body: '', status_source: '', digest: '' },
   ],
-  metadata: { total: 10, ready: 4, failed: 0 },
+  metadata: { total: 10, ready: 4, failed: 0, active: true },
 }
 const todo: TableEntry = {
   ...noteEntry, id: '50', kind: 'todo', body: 'We should add CSV export to the table page because phones…', source: 'codex', created_at: now, project_name: 'Atlas',
@@ -33,6 +33,13 @@ describe('table', () => {
     expect(within(table).getAllByRole('row')[2]).toHaveTextContent('No status yet')
     expect(screen.getByText(/AI summaries: 4 of 10/)).toHaveAttribute('role', 'status')
     expect(screen.getByRole('link', { name: 'Projects', current: 'page' })).toBeInTheDocument()
+  })
+
+  it('hides extraction progress when no extractor is running', async () => {
+    mockApi({ ...base, 'GET /admin/api/table/projects': { body: { ...summaries, metadata: { ...summaries.metadata, active: false } } } })
+    renderApp('/admin/table')
+    await screen.findByRole('table')
+    expect(screen.queryByText(/AI summaries/)).not.toBeInTheDocument()
   })
 
   it('lists open todos by priority, marks one done, and filters by tag', async () => {
