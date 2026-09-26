@@ -77,7 +77,7 @@ func TestExtractorLabelsEntriesAndLinksResolvedTodos(t *testing.T) {
 	}
 
 	// The owner overrides the model, and later extraction must not undo it.
-	if err := db.ReopenTodo(ctx, todo.ID); err != nil {
+	if _, err := db.ReopenTodo(ctx, todo.ID, "ledger-admin", "c"); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.SaveEntryMeta(ctx, done.ID, store.EntryMeta{Title: "again", Resolves: &todo.ID}); err != nil {

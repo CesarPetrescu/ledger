@@ -74,7 +74,7 @@ describe('table', () => {
   })
 
   it('shows done todos with a reopen action', async () => {
-    const { calls } = mockApi({ ...base, 'GET /admin/api/entries': { body: { entries: [doneTodo], sources: [], tags: [] } }, 'POST /admin/api/entries/49/reopen': { body: { reopened: true } } })
+    const { calls } = mockApi({ ...base, 'GET /admin/api/entries': { body: { entries: [doneTodo], sources: [], tags: [] } }, 'POST /admin/api/entries/49/reopen': { status: 201, body: { ...noteEntry, kind: 'status', body: 'Reopened: Fix login' } } })
     renderApp('/admin/table?view=todos')
     await screen.findByText('Fix login')
     await userEvent.setup().selectOptions(screen.getByRole('combobox', { name: /filter by state/i }), 'done')

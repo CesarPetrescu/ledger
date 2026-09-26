@@ -674,8 +674,15 @@ func TestTodoResolutionAndProjectSummaries(t *testing.T) {
 	if res := request(t, server, http.MethodGet, "/admin/api/entries?status=later", "", authed(s, false)); res.Code != http.StatusBadRequest {
 		t.Fatalf("bad status = %d", res.Code)
 	}
-	if res := request(t, server, http.MethodPost, "/admin/api/entries/"+id+"/reopen", "", authed(s, true)); res.Code != http.StatusOK {
+	if res := request(t, server, http.MethodPost, "/admin/api/entries/"+id+"/reopen", "", authed(s, true)); res.Code != http.StatusCreated || !strings.Contains(res.Body.String(), `"body":"Reopened: Add CSV export"`) {
 		t.Fatalf("reopen = %d %s", res.Code, res.Body.String())
+	}
+	// The reversal is on the timeline, so the latest status no longer says "Done".
+	if summary := request(t, server, http.MethodGet, "/admin/api/table/projects", "", authed(s, false)); !strings.Contains(summary.Body.String(), `"status_title":"Reopened: Add CSV export"`) {
+		t.Fatalf("summary after reopen = %s", summary.Body.String())
+	}
+	if res := request(t, server, http.MethodPost, "/admin/api/entries/"+strconv.FormatInt(note.ID, 10)+"/reopen", "", authed(s, true)); res.Code != http.StatusConflict {
+		t.Fatalf("reopen a note = %d", res.Code)
 	}
 	open := request(t, server, http.MethodGet, "/admin/api/entries?status=open", "", authed(s, false))
 	if !strings.Contains(open.Body.String(), `"id":"`+id+`"`) || strings.Contains(open.Body.String(), "resolved_by") {

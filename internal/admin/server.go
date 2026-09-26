@@ -618,9 +618,10 @@ func (s *Server) reopenTodo(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	switch err := s.db.ReopenTodo(r.Context(), id); {
+	entry, err := s.db.ReopenTodo(r.Context(), id, writeSource, clientIdentifier(sessionFrom(r)))
+	switch {
 	case err == nil:
-		writeJSON(w, http.StatusOK, map[string]any{"reopened": true})
+		writeJSON(w, http.StatusCreated, entryResponse(entry))
 	case errors.Is(err, store.ErrNotResolved):
 		writeError(w, http.StatusConflict, "todo is not done")
 	default:

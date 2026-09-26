@@ -154,13 +154,38 @@ FROM entry e LEFT JOIN entry_meta m ON m.entry_id=e.id WHERE e.id=$1 FOR UPDATE 
 	return e, tx.Commit(ctx)
 }
 
-// ReopenTodo detaches every resolution of a todo and pins that choice.
-func (db *DB) ReopenTodo(ctx context.Context, todoID int64) error {
-	tag, err := db.Pool.Exec(ctx, `UPDATE entry_meta SET resolves=NULL,origin='owner',updated_at=now() WHERE resolves=$1`, todoID)
-	if err == nil && tag.RowsAffected() == 0 {
-		return ErrNotResolved
+// ReopenTodo detaches the todo's resolution, pins that choice so the model
+// cannot re-link it, and appends a "Reopened" status entry so the timeline,
+// latest status, and digests record the reversal.
+func (db *DB) ReopenTodo(ctx context.Context, todoID int64, source, clientID string) (Entry, error) {
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return Entry{}, err
 	}
-	return err
+	defer tx.Rollback(ctx)
+	var slug, text string
+	if err := tx.QueryRow(ctx, `SELECT e.slug,COALESCE(NULLIF(m.title,''),e.body) FROM entry e LEFT JOIN entry_meta m ON m.entry_id=e.id WHERE e.id=$1 AND e.kind='todo' FOR UPDATE OF e`, todoID).Scan(&slug, &text); err != nil {
+		if IsNotFound(err) {
+			return Entry{}, ErrNotResolved
+		}
+		return Entry{}, err
+	}
+	tag, err := tx.Exec(ctx, `UPDATE entry_meta SET resolves=NULL,origin='owner',updated_at=now() WHERE resolves=$1`, todoID)
+	if err != nil {
+		return Entry{}, err
+	}
+	if tag.RowsAffected() == 0 {
+		return Entry{}, ErrNotResolved
+	}
+	var e Entry
+	if err := tx.QueryRow(ctx, `INSERT INTO entry(slug,kind,body,source,client_id) VALUES($1,'status',$2,$3,$4) RETURNING id,slug,kind,body,source,client_id,created_at`,
+		slug, truncateRunes("Reopened: "+text, 4000), source, clientID).Scan(&e.ID, &e.Slug, &e.Kind, &e.Body, &e.Source, &e.ClientID, &e.CreatedAt); err != nil {
+		return Entry{}, err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO entry_meta(entry_id,title,origin) VALUES($1,$2,'owner')`, e.ID, truncateRunes("Reopened: "+text, 120)); err != nil {
+		return Entry{}, err
+	}
+	return e, tx.Commit(ctx)
 }
 
 // MetaProgress reports how many entries have finished metadata extraction.

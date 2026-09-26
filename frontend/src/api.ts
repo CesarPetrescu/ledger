@@ -397,7 +397,7 @@ export const api = {
   getProjectSummaries: () => request<ProjectSummaries>('GET', '/table/projects'),
   resolveTodo: (id: string) => request<Entry>('POST', `/entries/${encodeURIComponent(id)}/resolve`),
   relatedEntries: (id: string) => request<{ related: RelatedEntry[] }>('GET', `/entries/${encodeURIComponent(id)}/related`).then((response) => response.related),
-  reopenTodo: (id: string) => request<{ reopened: boolean }>('POST', `/entries/${encodeURIComponent(id)}/reopen`),
+  reopenTodo: (id: string) => request<Entry>('POST', `/entries/${encodeURIComponent(id)}/reopen`),
   entriesCsvUrl: (filter: EntryFilter) => `/admin/api/entries.csv${entryQuery(filter)}`,
   search: (input: SearchRequest) => request<SearchResponse>('POST', '/search', input),
   listClients: (offset = 0) => request<ClientPage>('GET', `/oauth/clients?limit=50&offset=${offset}`),
