@@ -619,7 +619,7 @@ func TestEntryTableFiltersPagesAndExportsCSV(t *testing.T) {
 		t.Fatalf("csv = %d %v", res.Code, res.Header())
 	}
 	lines := strings.Split(strings.TrimSpace(strings.TrimPrefix(res.Body.String(), "\ufeff")), "\n")
-	if len(lines) != 2 || !strings.HasPrefix(lines[0], "Time (UTC),Project,") || !strings.Contains(lines[1], `,Beacon,beacon,todo,codex,,,,open,"'=HYPERLINK(""http://evil"")",`) {
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], "Time (UTC),Project,") || !strings.Contains(lines[1], `,Beacon,beacon,todo,codex,,,,,,,,,,,open,"'=HYPERLINK(""http://evil"")",`) {
 		t.Fatalf("csv body = %q", res.Body.String())
 	}
 }
@@ -849,6 +849,150 @@ func TestRelatedEntriesDuplicatesAndDigestsThroughTheAPI(t *testing.T) {
 	// Changed links feed a different digest, so it is regenerated.
 	if link(0.995); digests() != 0 {
 		t.Fatal("digest kept after links changed")
+	}
+}
+
+func TestFocusFieldsOwnerTriageAndInbox(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
+	_, s := login(t, server, "correct horse", "")
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "site", Name: "Site", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	add := func(kind, body string, meta store.EntryMeta) int64 {
+		t.Helper()
+		e, err := db.AppendEntry(ctx, "site", kind, body, "codex", "c")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if meta.Title == "" {
+			meta.Title = body
+		}
+		if err := db.SaveEntryMeta(ctx, e.ID, meta); err != nil {
+			t.Fatal(err)
+		}
+		return e.ID
+	}
+	soon := time.Now().AddDate(0, 0, 3).Format(time.DateOnly)
+	later := time.Now().AddDate(0, 1, 0).Format(time.DateOnly)
+	lowTodo := add("todo", "Tidy docs", store.EntryMeta{Priority: "low", Size: "S"})
+	highTodo := add("todo", "Fix login", store.EntryMeta{Priority: "high", Size: "M", Due: later})
+	dueTodo := add("todo", "Send invoice", store.EntryMeta{Priority: "normal", Size: "S", Due: soon})
+	ask := add("note", "Pricing question", store.EntryMeta{Importance: "important", Ask: "Confirm the pricing claims", Gist: "Two claims unverified"})
+	add("status", "Checkpoint", store.EntryMeta{Importance: "routine", State: "done"})
+	blocked := add("status", "Stuck on legal", store.EntryMeta{Importance: "important", State: "blocked", Blocker: "Waiting on legal", NextStep: "Email legal"})
+	news := add("note", "Ollama release", store.EntryMeta{Link: "https://example.com/r", SourceName: "GitHub", Why: "Faster on Macs"})
+
+	type row struct {
+		ID    string `json:"id"`
+		Meta  map[string]any
+		Owner store.OwnerState `json:"owner"`
+	}
+	list := func(path string) []row {
+		t.Helper()
+		res := request(t, server, http.MethodGet, path, "", authed(s, false))
+		var body struct{ Entries []row }
+		if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil || res.Code != http.StatusOK {
+			t.Fatalf("%s = %d %s", path, res.Code, res.Body.String())
+		}
+		return body.Entries
+	}
+	ids := func(rows []row) string {
+		out := []string{}
+		for _, r := range rows {
+			out = append(out, r.ID)
+		}
+		return strings.Join(out, ",")
+	}
+	id := func(v int64) string { return strconv.FormatInt(v, 10) }
+
+	if got := ids(list("/admin/api/entries?needs=you")); got != id(ask) {
+		t.Fatalf("needs=you = %s", got)
+	}
+	if got := ids(list("/admin/api/entries?state=blocked")); got != id(blocked) {
+		t.Fatalf("state=blocked = %s", got)
+	}
+	if rows := list("/admin/api/entries?hide_routine=1"); len(rows) != 6 {
+		t.Fatalf("hide_routine kept %d rows", len(rows))
+	}
+	if rows := list("/admin/api/entries?state=blocked"); rows[0].Meta["blocker"] != "Waiting on legal" || rows[0].Meta["next_step"] != "Email legal" || rows[0].Meta["importance"] != "important" {
+		t.Fatalf("blocked meta = %v", rows[0].Meta)
+	}
+	if rows := list("/admin/api/entries?reading=unread"); ids(rows) != id(news) || rows[0].Meta["link"] != "https://example.com/r" || rows[0].Meta["source"] != "GitHub" {
+		t.Fatalf("reading=unread = %v", rows)
+	}
+
+	owner := func(entry int64, body string, want int) store.OwnerState {
+		t.Helper()
+		res := request(t, server, http.MethodPost, "/admin/api/entries/"+id(entry)+"/owner", body, authed(s, true))
+		var state store.OwnerState
+		_ = json.Unmarshal(res.Body.Bytes(), &state)
+		if res.Code != want {
+			t.Fatalf("owner %s = %d %s", body, res.Code, res.Body.String())
+		}
+		return state
+	}
+	if res := request(t, server, http.MethodPost, "/admin/api/entries/"+id(news)+"/owner", `{"read":true}`, authed(s, false)); res.Code != http.StatusForbidden {
+		t.Fatalf("owner without CSRF = %d", res.Code)
+	}
+	owner(news, `{}`, http.StatusBadRequest)
+	owner(news, `{"snooze_days":31}`, http.StatusBadRequest)
+	owner(999999, `{"read":true}`, http.StatusNotFound)
+	if st := owner(news, `{"read":true,"starred":true}`, http.StatusOK); !st.Read || !st.Starred || st.Handled {
+		t.Fatalf("read+star = %#v", st)
+	}
+	// Patches change only what they name.
+	if st := owner(news, `{"starred":false}`, http.StatusOK); !st.Read || st.Starred {
+		t.Fatalf("unstar = %#v", st)
+	}
+	if got := ids(list("/admin/api/entries?reading=unread")); got != "" {
+		t.Fatalf("read entry still unread: %s", got)
+	}
+	if got := ids(list("/admin/api/entries?reading=all")); got != id(news) {
+		t.Fatalf("reading=all = %s", got)
+	}
+
+	// The inbox: asks, then todos by urgency (due soon, then priority, then age).
+	inbox := func() (asks, todos []row, total int, projects []store.ProjectSummary) {
+		t.Helper()
+		res := request(t, server, http.MethodGet, "/admin/api/inbox", "", authed(s, false))
+		var body struct {
+			NeedsYou   []row                  `json:"needs_you"`
+			Todos      []row                  `json:"todos"`
+			TodosTotal int                    `json:"todos_total"`
+			Projects   []store.ProjectSummary `json:"projects"`
+		}
+		if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil || res.Code != http.StatusOK {
+			t.Fatalf("inbox = %d %s", res.Code, res.Body.String())
+		}
+		return body.NeedsYou, body.Todos, body.TodosTotal, body.Projects
+	}
+	asks, todos, total, projects := inbox()
+	if ids(asks) != id(ask) || ids(todos) != strings.Join([]string{id(dueTodo), id(highTodo), id(lowTodo)}, ",") || total != 3 {
+		t.Fatalf("inbox asks=%s todos=%s total=%d", ids(asks), ids(todos), total)
+	}
+	if projects[0].NeedsYou != 1 || projects[0].StatusState != "blocked" {
+		t.Fatalf("project health = %#v", projects[0])
+	}
+	// Snoozing hides an ask or todo; handling clears the ask for good.
+	owner(dueTodo, `{"snooze_days":2}`, http.StatusOK)
+	owner(ask, `{"handled":true}`, http.StatusOK)
+	asks, todos, total, projects = inbox()
+	if len(asks) != 0 || ids(todos) != id(highTodo)+","+id(lowTodo) || total != 2 || projects[0].NeedsYou != 0 {
+		t.Fatalf("after triage asks=%s todos=%s total=%d needs=%d", ids(asks), ids(todos), total, projects[0].NeedsYou)
+	}
+	if st := owner(dueTodo, `{"snooze_days":0}`, http.StatusOK); st.SnoozedUntil != "" {
+		t.Fatalf("unsnooze = %#v", st)
+	}
+
+	res := request(t, server, http.MethodGet, "/admin/api/entries.csv?state=blocked", "", authed(s, false))
+	if !strings.Contains(res.Body.String(), "Gist,Importance,Asks you,Status,Next step,Due,Link") || !strings.Contains(res.Body.String(), ",important,,blocked,Email legal,,,") {
+		t.Fatalf("csv = %s", res.Body.String())
+	}
+	for _, bad := range []string{"hide_routine=2", "needs=me", "reading=later", "state=stuck"} {
+		if res := request(t, server, http.MethodGet, "/admin/api/entries?"+bad, "", authed(s, false)); res.Code != http.StatusBadRequest {
+			t.Errorf("%s = %d", bad, res.Code)
+		}
 	}
 }
 

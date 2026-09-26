@@ -96,6 +96,8 @@ func NewServer(config Config, db *store.DB) *Server {
 	s.mux.HandleFunc("POST /admin/api/entries/{id}/resolve", s.resolveTodo)
 	s.mux.HandleFunc("POST /admin/api/entries/{id}/reopen", s.reopenTodo)
 	s.mux.HandleFunc("GET /admin/api/entries/{id}/related", s.relatedEntries)
+	s.mux.HandleFunc("POST /admin/api/entries/{id}/owner", s.setOwnerState)
+	s.mux.HandleFunc("GET /admin/api/inbox", s.inbox)
 	s.mux.HandleFunc("GET /admin/api/table/projects", s.projectSummaries)
 	s.mux.HandleFunc("GET /admin/api/handoffs", s.listHandoffs)
 	s.mux.HandleFunc("POST /admin/api/handoffs", s.createHandoff)
@@ -476,6 +478,27 @@ func entryFilter(query url.Values) (store.EntryFilter, error) {
 	if utf8.RuneCountInString(f.Query) > maxSearchRunes {
 		return f, errors.New("q must be at most 1000 characters")
 	}
+	switch query.Get("hide_routine") {
+	case "", "0":
+	case "1":
+		f.HideRoutine = true
+	default:
+		return f, errors.New("hide_routine must be 0 or 1")
+	}
+	switch query.Get("needs") {
+	case "":
+	case "you":
+		f.NeedsYou = true
+	default:
+		return f, errors.New("needs must be you")
+	}
+	f.Reading, f.State = query.Get("reading"), query.Get("state")
+	if f.Reading != "" && !slices.Contains([]string{"all", "unread", "starred"}, f.Reading) {
+		return f, errors.New("reading must be all, unread, or starred")
+	}
+	if f.State != "" && !slices.Contains([]string{"done", "in_progress", "blocked"}, f.State) {
+		return f, errors.New("state must be done, in_progress, or blocked")
+	}
 	return f, nil
 }
 
@@ -550,10 +573,12 @@ func (s *Server) exportEntries(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.WriteString(w, "\ufeff") // BOM so Excel reads UTF-8
 	out := csv.NewWriter(w)
-	_ = out.Write([]string{"Time (UTC)", "Project", "Project slug", "Kind", "Agent", "Title", "Tags", "Priority", "Todo state", "Text", "Entry ID", "Client ID"})
+	_ = out.Write([]string{"Time (UTC)", "Project", "Project slug", "Kind", "Agent", "Title", "Gist", "Importance", "Asks you", "Status", "Next step", "Due", "Link", "Tags", "Priority", "Todo state", "Text", "Entry ID", "Client ID"})
 	for _, e := range entries {
 		var title, tags, priority, state string
+		var meta store.EntryMeta
 		if e.Meta != nil {
+			meta = *e.Meta
 			title, tags, priority = e.Meta.Title, strings.Join(e.Meta.Tags, ", "), e.Meta.Priority
 		}
 		if e.Kind == "todo" {
@@ -564,7 +589,9 @@ func (s *Server) exportEntries(w http.ResponseWriter, r *http.Request) {
 		} else {
 			priority = ""
 		}
-		_ = out.Write([]string{e.CreatedAt.UTC().Format("2006-01-02 15:04:05"), spreadsheetText(e.ProjectName), e.Slug, e.Kind, spreadsheetText(e.Source), spreadsheetText(title), spreadsheetText(tags), priority, state, spreadsheetText(e.Body), strconv.FormatInt(e.ID, 10), spreadsheetText(e.ClientID)})
+		_ = out.Write([]string{e.CreatedAt.UTC().Format("2006-01-02 15:04:05"), spreadsheetText(e.ProjectName), e.Slug, e.Kind, spreadsheetText(e.Source),
+			spreadsheetText(title), spreadsheetText(meta.Gist), meta.Importance, spreadsheetText(meta.Ask), meta.State, spreadsheetText(meta.NextStep), meta.Due, spreadsheetText(meta.Link),
+			spreadsheetText(tags), priority, state, spreadsheetText(e.Body), strconv.FormatInt(e.ID, 10), spreadsheetText(e.ClientID)})
 	}
 	out.Flush()
 }
@@ -578,6 +605,7 @@ func tableEntryResponse(entry store.EntryWithProject) map[string]any {
 	if entry.DuplicateOf != nil {
 		item["duplicate_of"] = strconv.FormatInt(*entry.DuplicateOf, 10)
 	}
+	item["owner"] = entry.Owner
 	if entry.ResolvedBy != nil {
 		item["resolved_by"] = map[string]any{"entry_id": strconv.FormatInt(entry.ResolvedBy.EntryID, 10), "origin": entry.ResolvedBy.Origin, "created_at": entry.ResolvedBy.CreatedAt}
 	}
@@ -627,6 +655,108 @@ func (s *Server) reopenTodo(w http.ResponseWriter, r *http.Request) {
 	default:
 		s.internalError(w, r, err)
 	}
+}
+
+func (s *Server) setOwnerState(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathEntryID(w, r)
+	if !ok {
+		return
+	}
+	var input struct {
+		Read       *bool `json:"read"`
+		Starred    *bool `json:"starred"`
+		Handled    *bool `json:"handled"`
+		SnoozeDays *int  `json:"snooze_days"`
+	}
+	if err := decodeJSON(w, r, &input, maxBodyBytes); err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if input.Read == nil && input.Starred == nil && input.Handled == nil && input.SnoozeDays == nil {
+		writeError(w, http.StatusBadRequest, "set at least one of read, starred, handled, snooze_days")
+		return
+	}
+	state, err := s.db.SetOwnerState(r.Context(), id, store.OwnerPatch{Read: input.Read, Starred: input.Starred, Handled: input.Handled, SnoozeDays: input.SnoozeDays})
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusOK, state)
+	case errors.Is(err, store.ErrInvalidSnooze):
+		writeError(w, http.StatusBadRequest, err.Error())
+	case store.IsNotFound(err):
+		writeError(w, http.StatusNotFound, "entry not found")
+	default:
+		s.internalError(w, r, err)
+	}
+}
+
+// inboxTodos is how many open todos the inbox shows, most urgent first.
+const inboxTodos = 20
+
+// inbox gathers what needs the owner: unhandled asks, the most urgent open
+// todos, and each project's health and digest.
+func (s *Server) inbox(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	asks, err := s.db.ListEntries(ctx, store.EntryFilter{NeedsYou: true, Limit: 50})
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	todos, err := s.db.ListEntries(ctx, store.EntryFilter{Kind: "todo", Status: "open", Awake: true})
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	projects, err := s.db.ProjectSummaries(ctx)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	sortByUrgency(todos, time.Now())
+	total := len(todos)
+	todos = todos[:min(total, inboxTodos)]
+	rows := func(entries []store.EntryWithProject) []map[string]any {
+		out := make([]map[string]any, 0, len(entries))
+		for _, entry := range entries {
+			out = append(out, tableEntryResponse(entry))
+		}
+		return out
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"needs_you": rows(asks), "todos": rows(todos), "todos_total": total, "projects": projects})
+}
+
+// sortByUrgency orders open todos: due within a week (earliest first), then
+// high before normal before low priority, then oldest first so stale work
+// surfaces.
+func sortByUrgency(todos []store.EntryWithProject, now time.Time) {
+	soon := now.AddDate(0, 0, 7).Format(time.DateOnly)
+	// "~" sorts after every date, so todos without a near due date go last.
+	rank := func(e store.EntryWithProject) (due string, priority int) {
+		due, priority = "~", 1
+		if e.Meta == nil {
+			return
+		}
+		if e.Meta.Due != "" && e.Meta.Due <= soon {
+			due = e.Meta.Due
+		}
+		switch e.Meta.Priority {
+		case "high":
+			priority = 0
+		case "low":
+			priority = 2
+		}
+		return
+	}
+	slices.SortStableFunc(todos, func(a, b store.EntryWithProject) int {
+		ad, ap := rank(a)
+		bd, bp := rank(b)
+		if c := strings.Compare(ad, bd); c != 0 {
+			return c
+		}
+		if ap != bp {
+			return ap - bp
+		}
+		return a.CreatedAt.Compare(b.CreatedAt)
+	})
 }
 
 // relatedMinSimilarity hides weak matches; calibrated on Qwen3-Embedding-8B.

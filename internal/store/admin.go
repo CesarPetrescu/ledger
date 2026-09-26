@@ -90,6 +90,7 @@ type EntryWithProject struct {
 	Meta        *EntryMeta  `json:"meta,omitempty"`
 	DuplicateOf *int64      `json:"-"`
 	ResolvedBy  *Resolution `json:"resolved_by,omitempty"`
+	Owner       OwnerState  `json:"owner"`
 }
 
 func (db *DB) RecentEntries(ctx context.Context, limit int) ([]EntryWithProject, error) {
@@ -109,10 +110,22 @@ type EntryFilter struct {
 	Query       string
 	Before      *int64
 	Limit       int
+	// HideRoutine drops entries the extractor rated routine.
+	HideRoutine bool
+	// NeedsYou keeps entries asking something of the owner that are neither
+	// handled nor snoozed.
+	NeedsYou bool
+	// Reading keeps linked (news-shaped) entries: "all", "unread", or "starred".
+	Reading string
+	// Awake drops entries snoozed past today.
+	Awake bool
+	// State keeps status entries in one state: done, in_progress, or blocked.
+	State string
 }
 
 // ListEntries returns matching entries from every project, newest first,
-// with their extracted metadata and, for todos, the entry that resolved them.
+// with their extracted metadata, the owner's triage state and, for todos, the
+// entry that resolved them.
 func (db *DB) ListEntries(ctx context.Context, f EntryFilter) ([]EntryWithProject, error) {
 	var limit *int
 	if f.Limit > 0 {
@@ -120,15 +133,25 @@ func (db *DB) ListEntries(ctx context.Context, f EntryFilter) ([]EntryWithProjec
 	}
 	rows, err := db.Pool.Query(ctx, `SELECT e.id,e.slug,e.kind,e.body,e.source,e.client_id,e.created_at,p.name,
  m.entry_id IS NOT NULL AND m.title<>'',COALESCE(m.title,''),COALESCE(m.tags,'{}'),COALESCE(m.priority,''),COALESCE(m.refs,'{}'),COALESCE(m.origin,''),m.duplicate_of,
+ COALESCE(m.gist,''),COALESCE(m.importance,''),COALESCE(m.ask,''),COALESCE(m.state,''),COALESCE(m.next_step,''),COALESCE(m.blocker,''),
+ COALESCE(m.why,''),COALESCE(m.size,''),COALESCE(to_char(m.due,'YYYY-MM-DD'),''),COALESCE(m.source_name,''),COALESCE(m.link,''),
+ o.read_at IS NOT NULL,COALESCE(o.starred,false),o.handled_at IS NOT NULL,COALESCE(to_char(o.snoozed_until,'YYYY-MM-DD'),''),
  rb.entry_id,COALESCE(rb.origin,''),rb.created_at
 FROM entry e JOIN project p ON p.slug=e.slug
 LEFT JOIN entry_meta m ON m.entry_id=e.id
+LEFT JOIN entry_owner_state o ON o.entry_id=e.id
 LEFT JOIN LATERAL (SELECT r.entry_id,r.origin,re.created_at FROM entry_meta r JOIN entry re ON re.id=r.entry_id WHERE r.resolves=e.id ORDER BY re.created_at,re.id LIMIT 1) rb ON e.kind='todo'
 WHERE ($1='' OR e.slug=$1) AND ($2='' OR e.kind=$2) AND ($3='' OR e.source=$3) AND ($4='' OR m.tags @> ARRAY[$4])
 AND ($5='' OR (e.kind='todo' AND ($5='open')=(rb.entry_id IS NULL)))
 AND ($6='' OR strpos(lower(e.body),lower($6))>0 OR strpos(lower(COALESCE(m.title,'')),lower($6))>0)
 AND ($7::bigint IS NULL OR (e.created_at,e.id) < (SELECT created_at,id FROM entry WHERE id=$7))
-ORDER BY e.created_at DESC,e.id DESC LIMIT $8`, f.ProjectSlug, f.Kind, f.Source, f.Tag, f.Status, f.Query, f.Before, limit)
+AND (NOT $9 OR COALESCE(m.importance,'')<>'routine')
+AND (NOT $10 OR (COALESCE(m.ask,'')<>'' AND o.handled_at IS NULL))
+AND ($11='' OR (COALESCE(m.link,'')<>'' AND ($11='all' OR ($11='unread' AND o.read_at IS NULL) OR ($11='starred' AND COALESCE(o.starred,false)))))
+AND (NOT ($12 OR $10) OR o.snoozed_until IS NULL OR o.snoozed_until<=current_date)
+AND ($13='' OR (e.kind='status' AND m.state=$13))
+ORDER BY e.created_at DESC,e.id DESC LIMIT $8`, f.ProjectSlug, f.Kind, f.Source, f.Tag, f.Status, f.Query, f.Before, limit,
+		f.HideRoutine, f.NeedsYou, f.Reading, f.Awake, f.State)
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +165,11 @@ ORDER BY e.created_at DESC,e.id DESC LIMIT $8`, f.ProjectSlug, f.Kind, f.Source,
 		var resolution Resolution
 		var resolvedAt *time.Time
 		if err := rows.Scan(&e.ID, &e.Slug, &e.Kind, &e.Body, &e.Source, &e.ClientID, &e.CreatedAt, &e.ProjectName,
-			&hasMeta, &meta.Title, &meta.Tags, &meta.Priority, &meta.Refs, &meta.Origin, &e.DuplicateOf, &resolverID, &resolution.Origin, &resolvedAt); err != nil {
+			&hasMeta, &meta.Title, &meta.Tags, &meta.Priority, &meta.Refs, &meta.Origin, &e.DuplicateOf,
+			&meta.Gist, &meta.Importance, &meta.Ask, &meta.State, &meta.NextStep, &meta.Blocker,
+			&meta.Why, &meta.Size, &meta.Due, &meta.SourceName, &meta.Link,
+			&e.Owner.Read, &e.Owner.Starred, &e.Owner.Handled, &e.Owner.SnoozedUntil,
+			&resolverID, &resolution.Origin, &resolvedAt); err != nil {
 			return nil, err
 		}
 		if hasMeta {

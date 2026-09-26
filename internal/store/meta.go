@@ -20,7 +20,24 @@ type EntryMeta struct {
 	Model    string   `json:"-"`
 	Attempts int      `json:"-"`
 	Error    string   `json:"-"`
+
+	// Focus fields: short, type-shaped facts that replace the full text in lists.
+	Gist       string `json:"gist,omitempty"`
+	Importance string `json:"importance,omitempty"` // routine, useful, important
+	Ask        string `json:"ask,omitempty"`        // what the entry needs from the owner
+	State      string `json:"state,omitempty"`      // status entries: done, in_progress, blocked
+	NextStep   string `json:"next_step,omitempty"`
+	Blocker    string `json:"blocker,omitempty"`
+	Why        string `json:"why,omitempty"`  // why it matters, or why it was decided
+	Size       string `json:"size,omitempty"` // todos: S, M, L
+	Due        string `json:"due,omitempty"`  // todos: YYYY-MM-DD
+	SourceName string `json:"source,omitempty"`
+	Link       string `json:"link,omitempty"`
 }
+
+// MetaVersion is the current extraction schema. Model rows with an older
+// version are extracted again so they gain the newer fields.
+const MetaVersion = 2
 
 // Resolution names the entry that closed a todo.
 type Resolution struct {
@@ -55,13 +72,15 @@ var (
 )
 
 // NextUnlabeledEntry returns the newest entry without metadata, including
-// failed extractions that are due for a retry, or nil when none remain.
+// failed extractions that are due for a retry and model rows from an older
+// extraction version, or nil when none remain.
 func (db *DB) NextUnlabeledEntry(ctx context.Context) (*PendingEntry, error) {
 	var e PendingEntry
 	err := db.Pool.QueryRow(ctx, `SELECT e.id,e.slug,p.name,e.kind,e.body,e.source,e.created_at
 FROM entry e JOIN project p ON p.slug=e.slug LEFT JOIN entry_meta m ON m.entry_id=e.id
 WHERE m.entry_id IS NULL OR (m.origin='model' AND m.title='' AND m.attempts<$1 AND m.updated_at<now()-interval '10 minutes')
-ORDER BY e.created_at DESC,e.id DESC LIMIT 1`, MetaMaxAttempts).Scan(&e.ID, &e.Slug, &e.ProjectName, &e.Kind, &e.Body, &e.Source, &e.CreatedAt)
+ OR (m.origin='model' AND m.title<>'' AND m.version<$2)
+ORDER BY e.created_at DESC,e.id DESC LIMIT 1`, MetaMaxAttempts, MetaVersion).Scan(&e.ID, &e.Slug, &e.ProjectName, &e.Kind, &e.Body, &e.Source, &e.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -94,12 +113,18 @@ func (db *DB) SaveEntryMeta(ctx context.Context, entryID int64, m EntryMeta) err
 }
 
 func (db *DB) saveEntryMeta(ctx context.Context, entryID int64, m EntryMeta) error {
-	_, err := db.Pool.Exec(ctx, `INSERT INTO entry_meta(entry_id,title,tags,priority,refs,resolves,origin,model,attempts,error)
-VALUES($1,$2,$3,$4,$5,$6,'model',$7,1,'')
+	// An upgrade re-extraction keeps an existing resolution: the todo it closed
+	// is no longer offered as a candidate, so the model could not re-pick it.
+	_, err := db.Pool.Exec(ctx, `INSERT INTO entry_meta(entry_id,title,tags,priority,refs,resolves,origin,model,attempts,error,
+ gist,importance,ask,state,next_step,blocker,why,size,due,source_name,link,version)
+VALUES($1,$2,$3,$4,$5,$6,'model',$7,1,'',$8,$9,$10,$11,$12,$13,$14,$15,NULLIF($16,'')::date,$17,$18,$19)
 ON CONFLICT(entry_id) DO UPDATE SET title=EXCLUDED.title,tags=EXCLUDED.tags,priority=EXCLUDED.priority,refs=EXCLUDED.refs,
- resolves=EXCLUDED.resolves,model=EXCLUDED.model,attempts=entry_meta.attempts+1,error='',updated_at=now(),
+ resolves=COALESCE(entry_meta.resolves,EXCLUDED.resolves),model=EXCLUDED.model,attempts=entry_meta.attempts+1,error='',updated_at=now(),
+ gist=EXCLUDED.gist,importance=EXCLUDED.importance,ask=EXCLUDED.ask,state=EXCLUDED.state,next_step=EXCLUDED.next_step,
+ blocker=EXCLUDED.blocker,why=EXCLUDED.why,size=EXCLUDED.size,due=EXCLUDED.due,source_name=EXCLUDED.source_name,link=EXCLUDED.link,version=EXCLUDED.version,
  embedding=NULL,embed_model='',duplicate_of=NULL,duplicate_checked=false,duplicate_threshold=NULL
-WHERE entry_meta.origin='model'`, entryID, m.Title, nonNil(m.Tags), m.Priority, nonNil(m.Refs), m.Resolves, m.Model)
+WHERE entry_meta.origin='model'`, entryID, m.Title, nonNil(m.Tags), m.Priority, nonNil(m.Refs), m.Resolves, m.Model,
+		m.Gist, m.Importance, m.Ask, m.State, m.NextStep, m.Blocker, m.Why, m.Size, m.Due, m.SourceName, m.Link, MetaVersion)
 	return err
 }
 
@@ -108,9 +133,11 @@ func (db *DB) RecordMetaFailure(ctx context.Context, entryID int64, model, messa
 	if utf8.RuneCountInString(message) > 500 {
 		message = string([]rune(message)[:500])
 	}
+	// A failed upgrade keeps the older metadata and is not retried endlessly.
 	_, err := db.Pool.Exec(ctx, `INSERT INTO entry_meta(entry_id,origin,model,attempts,error) VALUES($1,'model',$2,1,$3)
-ON CONFLICT(entry_id) DO UPDATE SET attempts=entry_meta.attempts+1,model=EXCLUDED.model,error=EXCLUDED.error,updated_at=now()
-WHERE entry_meta.origin='model'`, entryID, model, message)
+ON CONFLICT(entry_id) DO UPDATE SET attempts=entry_meta.attempts+1,model=EXCLUDED.model,error=EXCLUDED.error,updated_at=now(),
+ version=CASE WHEN entry_meta.title<>'' THEN $4 ELSE entry_meta.version END
+WHERE entry_meta.origin='model'`, entryID, model, message, MetaVersion)
 	return err
 }
 
@@ -239,6 +266,10 @@ type ProjectSummary struct {
 	StatusSource string     `json:"status_source"`
 	Digest       string     `json:"digest"`
 	DigestAt     *time.Time `json:"digest_at,omitempty"`
+	// StatusState is the latest status entry's extracted state (health).
+	StatusState string `json:"status_state"`
+	// NeedsYou counts entries asking something of the owner, not yet handled.
+	NeedsYou int `json:"needs_you"`
 }
 
 func (db *DB) ProjectSummaries(ctx context.Context) ([]ProjectSummary, error) {
@@ -247,7 +278,10 @@ func (db *DB) ProjectSummaries(ctx context.Context) ([]ProjectSummary, error) {
  (SELECT count(*) FROM entry t WHERE t.slug=p.slug AND t.kind='todo' AND NOT EXISTS (SELECT 1 FROM entry_meta r WHERE r.resolves=t.id)),
  (SELECT count(*) FROM entry WHERE slug=p.slug AND created_at>now()-interval '7 days'),
  COALESCE((SELECT array_agg(DISTINCT source ORDER BY source) FROM entry WHERE slug=p.slug AND created_at>now()-interval '7 days'),'{}'),
- s.id,COALESCE(sm.title,''),COALESCE(s.body,''),s.created_at,COALESCE(s.source,''),COALESCE(d.summary,''),d.generated_at
+ s.id,COALESCE(sm.title,''),COALESCE(s.body,''),s.created_at,COALESCE(s.source,''),COALESCE(d.summary,''),d.generated_at,
+ COALESCE(sm.state,''),
+ (SELECT count(*) FROM entry a JOIN entry_meta am ON am.entry_id=a.id LEFT JOIN entry_owner_state ao ON ao.entry_id=a.id
+  WHERE a.slug=p.slug AND am.ask<>'' AND ao.handled_at IS NULL)
 FROM project p
 LEFT JOIN project_digest d ON d.slug=p.slug
 LEFT JOIN LATERAL (SELECT id,body,created_at,source FROM entry WHERE slug=p.slug AND kind='status' ORDER BY created_at DESC,id DESC LIMIT 1) s ON true
@@ -258,7 +292,7 @@ ORDER BY 6 DESC NULLS LAST,p.slug`)
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (ProjectSummary, error) {
 		var s ProjectSummary
-		return s, row.Scan(&s.Slug, &s.Name, &s.Tier, &s.Deadline, &s.NeedsMe, &s.LastEntryAt, &s.OpenTodos, &s.WeekEntries, &s.WeekAgents, &s.StatusID, &s.StatusTitle, &s.StatusBody, &s.StatusAt, &s.StatusSource, &s.Digest, &s.DigestAt)
+		return s, row.Scan(&s.Slug, &s.Name, &s.Tier, &s.Deadline, &s.NeedsMe, &s.LastEntryAt, &s.OpenTodos, &s.WeekEntries, &s.WeekAgents, &s.StatusID, &s.StatusTitle, &s.StatusBody, &s.StatusAt, &s.StatusSource, &s.Digest, &s.DigestAt, &s.StatusState, &s.NeedsYou)
 	})
 }
 

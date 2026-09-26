@@ -53,12 +53,45 @@ export interface RecentEntry extends Entry {
 export type Priority = 'low' | 'normal' | 'high'
 
 /** Derived by the LLM extractor ('model') or set by console actions ('owner'). */
+export type Importance = 'routine' | 'useful' | 'important'
+export type StatusState = 'done' | 'in_progress' | 'blocked'
+
 export interface EntryMeta {
   title: string
   tags: string[]
   priority?: Priority
   refs: string[]
   origin: 'model' | 'owner'
+  /** One sentence with the key fact the title does not say. */
+  gist?: string
+  importance?: Importance
+  /** What the entry needs from the owner, as a short imperative. */
+  ask?: string
+  state?: StatusState
+  next_step?: string
+  blocker?: string
+  /** Why it matters (notes) or why it was decided (decisions). */
+  why?: string
+  size?: 'S' | 'M' | 'L'
+  /** YYYY-MM-DD */
+  due?: string
+  source?: string
+  link?: string
+}
+
+/** The owner's own triage of an entry. */
+export interface OwnerState {
+  read: boolean
+  starred: boolean
+  handled: boolean
+  snoozed_until?: string
+}
+
+export interface OwnerPatch {
+  read?: boolean
+  starred?: boolean
+  handled?: boolean
+  snooze_days?: number
 }
 
 export interface TableEntry extends RecentEntry {
@@ -66,6 +99,7 @@ export interface TableEntry extends RecentEntry {
   resolved_by?: { entry_id: string; origin: 'model' | 'owner'; created_at: string }
   /** Set when this entry repeats an earlier one in the same project. */
   duplicate_of?: string
+  owner: OwnerState
 }
 
 export interface RelatedEntry extends TableEntry {
@@ -79,6 +113,13 @@ export interface EntryFilter {
   tag?: string
   status?: string
   q?: string
+  /** "1" hides entries rated routine. */
+  hide_routine?: string
+  /** "you" keeps entries asking something of the owner, not yet handled. */
+  needs?: string
+  /** Linked (news-shaped) entries: "all", "unread", or "starred". */
+  reading?: string
+  state?: string
 }
 
 export interface EntryTablePage {
@@ -104,6 +145,16 @@ export interface ProjectSummary {
   status_source: string
   digest: string
   digest_at?: string
+  /** The latest status entry's state: done, in_progress, blocked, or "". */
+  status_state: string
+  needs_you: number
+}
+
+export interface InboxResponse {
+  needs_you: TableEntry[]
+  todos: TableEntry[]
+  todos_total: number
+  projects: ProjectSummary[]
 }
 
 export interface ProjectSummaries {
@@ -396,6 +447,8 @@ export const api = {
   listEntries: (filter: EntryFilter, before?: string) => request<EntryTablePage>('GET', `/entries${entryQuery(filter, { limit: '200', ...(before ? { before } : {}) })}`),
   getProjectSummaries: () => request<ProjectSummaries>('GET', '/table/projects'),
   resolveTodo: (id: string) => request<Entry>('POST', `/entries/${encodeURIComponent(id)}/resolve`),
+  inbox: () => request<InboxResponse>('GET', '/inbox'),
+  setOwner: (id: string, patch: OwnerPatch) => request<OwnerState>('POST', `/entries/${encodeURIComponent(id)}/owner`, patch),
   relatedEntries: (id: string) => request<{ related: RelatedEntry[] }>('GET', `/entries/${encodeURIComponent(id)}/related`).then((response) => response.related),
   reopenTodo: (id: string) => request<Entry>('POST', `/entries/${encodeURIComponent(id)}/reopen`),
   entriesCsvUrl: (filter: EntryFilter) => `/admin/api/entries.csv${entryQuery(filter)}`,
