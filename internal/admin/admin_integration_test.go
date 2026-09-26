@@ -876,6 +876,7 @@ func TestFocusFieldsOwnerTriageAndInbox(t *testing.T) {
 	soon := time.Now().AddDate(0, 0, 3).Format(time.DateOnly)
 	later := time.Now().AddDate(0, 1, 0).Format(time.DateOnly)
 	lowTodo := add("todo", "Tidy docs", store.EntryMeta{Priority: "low", Size: "S"})
+	askTodo := add("todo", "Verify claims", store.EntryMeta{Priority: "high", Ask: "Confirm the claims"})
 	highTodo := add("todo", "Fix login", store.EntryMeta{Priority: "high", Size: "M", Due: later})
 	dueTodo := add("todo", "Send invoice", store.EntryMeta{Priority: "normal", Size: "S", Due: soon})
 	ask := add("note", "Pricing question", store.EntryMeta{Importance: "important", Ask: "Confirm the pricing claims", Gist: "Two claims unverified"})
@@ -906,13 +907,13 @@ func TestFocusFieldsOwnerTriageAndInbox(t *testing.T) {
 	}
 	id := func(v int64) string { return strconv.FormatInt(v, 10) }
 
-	if got := ids(list("/admin/api/entries?needs=you")); got != id(ask) {
+	if got := ids(list("/admin/api/entries?needs=you")); got != id(ask)+","+id(askTodo) {
 		t.Fatalf("needs=you = %s", got)
 	}
 	if got := ids(list("/admin/api/entries?state=blocked")); got != id(blocked) {
 		t.Fatalf("state=blocked = %s", got)
 	}
-	if rows := list("/admin/api/entries?hide_routine=1"); len(rows) != 6 {
+	if rows := list("/admin/api/entries?hide_routine=1"); len(rows) != 7 {
 		t.Fatalf("hide_routine kept %d rows", len(rows))
 	}
 	if rows := list("/admin/api/entries?state=blocked"); rows[0].Meta["blocker"] != "Waiting on legal" || rows[0].Meta["next_step"] != "Email legal" || rows[0].Meta["importance"] != "important" {
@@ -968,17 +969,20 @@ func TestFocusFieldsOwnerTriageAndInbox(t *testing.T) {
 		return body.NeedsYou, body.Todos, body.TodosTotal, body.Projects
 	}
 	asks, todos, total, projects := inbox()
-	if ids(asks) != id(ask) || ids(todos) != strings.Join([]string{id(dueTodo), id(highTodo), id(lowTodo)}, ",") || total != 3 {
+	// The asking todo appears once, under asks, not again under todos.
+	if ids(asks) != id(ask)+","+id(askTodo) || ids(todos) != strings.Join([]string{id(dueTodo), id(highTodo), id(lowTodo)}, ",") || total != 3 {
 		t.Fatalf("inbox asks=%s todos=%s total=%d", ids(asks), ids(todos), total)
 	}
-	if projects[0].NeedsYou != 1 || projects[0].StatusState != "blocked" {
+	if projects[0].NeedsYou != 2 || projects[0].StatusState != "blocked" {
 		t.Fatalf("project health = %#v", projects[0])
 	}
 	// Snoozing hides an ask or todo; handling clears the ask for good.
 	owner(dueTodo, `{"snooze_days":2}`, http.StatusOK)
 	owner(ask, `{"handled":true}`, http.StatusOK)
+	owner(askTodo, `{"handled":true}`, http.StatusOK)
 	asks, todos, total, projects = inbox()
-	if len(asks) != 0 || ids(todos) != id(highTodo)+","+id(lowTodo) || total != 2 || projects[0].NeedsYou != 0 {
+	// Once handled, the todo returns to the todo list, highest priority first.
+	if len(asks) != 0 || ids(todos) != id(askTodo)+","+id(highTodo)+","+id(lowTodo) || total != 3 || projects[0].NeedsYou != 0 {
 		t.Fatalf("after triage asks=%s todos=%s total=%d needs=%d", ids(asks), ids(todos), total, projects[0].NeedsYou)
 	}
 	if st := owner(dueTodo, `{"snooze_days":0}`, http.StatusOK); st.SnoozedUntil != "" {

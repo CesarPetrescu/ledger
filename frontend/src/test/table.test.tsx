@@ -34,7 +34,8 @@ describe('table', () => {
     expect(within(table).getAllByRole('row')[2]).toHaveTextContent('No status yet')
     expect(screen.getByText(/AI summaries: 4 of 10/)).toHaveAttribute('role', 'status')
     expect(screen.getByRole('link', { name: 'Projects', current: 'page' })).toBeInTheDocument()
-    expect(within(atlasRow).getByText('In progress')).toBeInTheDocument()
+    // Only a blocked project gets a health label; an in-progress one gets none.
+    expect(within(atlasRow).queryByText('In progress')).not.toBeInTheDocument()
     expect(within(atlasRow).getByRole('link', { name: '1 thing needs you' })).toHaveAttribute('href', '/admin/table?view=inbox')
   })
 

@@ -711,6 +711,12 @@ func (s *Server) inbox(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
+	// A todo that asks the owner something is already listed under asks.
+	asked := map[int64]bool{}
+	for _, entry := range asks {
+		asked[entry.ID] = true
+	}
+	todos = slices.DeleteFunc(todos, func(e store.EntryWithProject) bool { return asked[e.ID] })
 	sortByUrgency(todos, time.Now())
 	total := len(todos)
 	todos = todos[:min(total, inboxTodos)]

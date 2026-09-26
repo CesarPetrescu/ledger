@@ -425,9 +425,13 @@ function EntriesView({ view, initialProject, initialQuery }: { view: Exclude<Vie
   )
 }
 
+/**
+ * A project's health label. Only "blocked" is shown: a latest status of "done"
+ * means that update finished something, not that the project did.
+ */
 function HealthBadge({ state }: { state: string }) {
-  if (!STATE_LABEL[state]) return null
-  return <span className="badge" data-state={state}>{STATE_LABEL[state]}</span>
+  if (state !== 'blocked') return null
+  return <span className="badge" data-state="blocked">Blocked</span>
 }
 
 /** Everything that needs the owner, most urgent first. */
