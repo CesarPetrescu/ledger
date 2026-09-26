@@ -5,15 +5,16 @@ import type { ProjectSummaries, TableEntry } from '../api'
 import { atlas, authenticatedSession, beacon, decisionEntry, mockApi, noteEntry, renderApp } from './helpers'
 
 const now = new Date().toISOString()
+const owner = { read: false, starred: false, handled: false }
 const summaries: ProjectSummaries = {
   projects: [
-    { slug: 'atlas', name: 'Atlas', tier: 'focus', deadline: 'Friday', needs_me: 'Review the migration', last_entry_at: now, open_todos: 2, week_entries: 5, week_agents: ['claude-code', 'codex'], status_title: 'Deployed table page', status_body: 'long text', status_at: now, status_source: 'codex', digest: 'Shipped the table page; two todos remain.', digest_at: now },
-    { slug: 'beacon', name: 'Beacon', tier: 'park', deadline: '', needs_me: '', open_todos: 0, week_entries: 0, week_agents: [], status_title: '', status_body: '', status_source: '', digest: '' },
+    { slug: 'atlas', name: 'Atlas', tier: 'focus', deadline: 'Friday', needs_me: 'Review the migration', last_entry_at: now, open_todos: 2, week_entries: 5, week_agents: ['claude-code', 'codex'], status_title: 'Deployed table page', status_body: 'long text', status_at: now, status_source: 'codex', digest: 'Shipped the table page; two todos remain.', digest_at: now, status_state: 'in_progress', needs_you: 1 },
+    { slug: 'beacon', name: 'Beacon', tier: 'park', deadline: '', needs_me: '', open_todos: 0, week_entries: 0, week_agents: [], status_title: '', status_body: '', status_source: '', digest: '', status_state: '', needs_you: 0 },
   ],
   metadata: { total: 10, ready: 4, failed: 0, active: true },
 }
 const todo: TableEntry = {
-  ...noteEntry, id: '50', kind: 'todo', body: 'We should add CSV export to the table page because phones…', source: 'codex', created_at: now, project_name: 'Atlas',
+  ...noteEntry, owner, id: '50', kind: 'todo', body: 'We should add CSV export to the table page because phones…', source: 'codex', created_at: now, project_name: 'Atlas',
   meta: { title: 'Add CSV export', tags: ['export'], priority: 'high', refs: ['internal/admin/server.go'], origin: 'model' },
 }
 const doneTodo: TableEntry = { ...todo, id: '49', meta: { ...todo.meta!, title: 'Fix login', priority: 'low' }, resolved_by: { entry_id: '51', origin: 'model', created_at: now } }
@@ -22,7 +23,7 @@ const base = { 'GET /admin/api/session': authenticatedSession, 'GET /admin/api/p
 describe('table', () => {
   it('opens on a per-project summary with extraction progress', async () => {
     mockApi(base)
-    renderApp('/admin/table')
+    renderApp('/admin/table?view=projects')
     const table = await screen.findByRole('table')
     const atlasRow = within(table).getAllByRole('row')[1]!
     expect(atlasRow).toHaveTextContent('Shipped the table page; two todos remain.')
@@ -33,11 +34,56 @@ describe('table', () => {
     expect(within(table).getAllByRole('row')[2]).toHaveTextContent('No status yet')
     expect(screen.getByText(/AI summaries: 4 of 10/)).toHaveAttribute('role', 'status')
     expect(screen.getByRole('link', { name: 'Projects', current: 'page' })).toBeInTheDocument()
+    // Only a blocked project gets a health label; an in-progress one gets none.
+    expect(within(atlasRow).queryByText('In progress')).not.toBeInTheDocument()
+    expect(within(atlasRow).getByRole('link', { name: '1 thing needs you' })).toHaveAttribute('href', '/admin/table?view=inbox')
+  })
+
+  it('opens on the inbox: asks, urgent todos, blocked projects, and digests', async () => {
+    const ask: TableEntry = { ...noteEntry, owner, id: '70', created_at: now, project_name: 'Atlas', meta: { title: 'Pricing question', tags: [], refs: [], origin: 'model', ask: 'Confirm the pricing claims', importance: 'important' } }
+    const blockedSummary = { ...summaries.projects[1]!, status_state: 'blocked', status_title: 'Waiting on legal' }
+    const { calls } = mockApi({
+      ...base,
+      'GET /admin/api/inbox': { body: { needs_you: [ask], todos: [todo], todos_total: 5, projects: [summaries.projects[0]!, blockedSummary] } },
+      'POST /admin/api/entries/70/owner': { body: { ...owner, handled: true } },
+    })
+    renderApp('/admin/table')
+    const asks = await screen.findByRole('region', { name: 'Needs you' })
+    expect(screen.getByRole('link', { name: 'Inbox', current: 'page' })).toBeInTheDocument()
+    expect(within(asks).getByRole('button', { name: 'Confirm the pricing claims' })).toBeInTheDocument()
+    expect(within(asks).getByText('Pricing question')).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'Todos' })).getByText('1 of 5')).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'Blocked' })).getByText(/Waiting on legal/)).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'This week' })).getByText('Shipped the table page; two todos remain.')).toBeInTheDocument()
+    await userEvent.setup().click(within(asks).getByRole('button', { name: 'Handled' }))
+    expect(await screen.findByText('Marked handled.')).toBeInTheDocument()
+    expect(calls.find((call) => call.method === 'POST')?.body).toEqual({ handled: true })
+  })
+
+  it('shows short facts as badges and in the details instead of the full text', async () => {
+    const day = (offset: number) => { const d = new Date(); d.setDate(d.getDate() + offset); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
+    const old = new Date(Date.now() - 20 * 86400000).toISOString()
+    const entries: TableEntry[] = [
+      { ...todo, id: '81', created_at: old, meta: { ...todo.meta!, title: 'Old overdue task', size: 'L', due: day(-1), importance: 'important', gist: 'Needed before launch' } },
+      { ...todo, id: '82', meta: { ...todo.meta!, title: 'Upcoming task', size: 'S', due: day(3) } },
+    ]
+    mockApi({ ...base, 'GET /admin/api/entries': { body: { entries, sources: [], tags: [] } } })
+    renderApp('/admin/table?view=todos')
+    const group = await screen.findByRole('region', { name: 'Atlas' })
+    const rows = within(group).getAllByRole('listitem')
+    expect(rows[0]).toHaveTextContent('Important')
+    expect(rows[0]).toHaveTextContent('Overdue')
+    expect(rows[0]).toHaveTextContent('Stale')
+    expect(rows[0]).toHaveTextContent('L')
+    expect(rows[0]).toHaveTextContent('Needed before launch')
+    expect(rows[0]).not.toHaveTextContent('phones…')
+    expect(rows[1]).toHaveTextContent(/Due \S/)
+    expect(rows[1]).not.toHaveTextContent('Stale')
   })
 
   it('hides extraction progress when no extractor is running', async () => {
     mockApi({ ...base, 'GET /admin/api/table/projects': { body: { ...summaries, metadata: { ...summaries.metadata, active: false } } } })
-    renderApp('/admin/table')
+    renderApp('/admin/table?view=projects')
     await screen.findByRole('table')
     expect(screen.queryByText(/AI summaries/)).not.toBeInTheDocument()
   })
@@ -46,8 +92,8 @@ describe('table', () => {
     const { calls } = mockApi({
       ...base,
       'GET /admin/api/entries': (_init, url) => ({ body: { entries: url.searchParams.get('tag') === 'export' ? [todo] : [{ ...todo, id: '48', meta: { ...todo.meta!, title: 'Tidy docs', priority: 'low', tags: [] } }, todo], sources: ['codex'], tags: ['export'] } }),
-      'POST /admin/api/entries/50/resolve': { status: 201, body: { ...noteEntry, kind: 'status' } },
-      'GET /admin/api/entries/50/related': { body: { related: [{ ...decisionEntry, id: '7', project_name: 'Beacon', slug: 'beacon', similarity: 0.8, meta: { title: 'Export design decision', tags: [], refs: [], origin: 'model' } }] } },
+      'POST /admin/api/entries/50/resolve': { status: 201, body: { ...noteEntry, owner, kind: 'status' } },
+      'GET /admin/api/entries/50/related': { body: { related: [{ ...decisionEntry, owner, id: '7', project_name: 'Beacon', slug: 'beacon', similarity: 0.8, meta: { title: 'Export design decision', tags: [], refs: [], origin: 'model' } }] } },
     })
     renderApp('/admin/table?view=todos&project=atlas')
     const group = await screen.findByRole('region', { name: 'Atlas' })
@@ -85,7 +131,7 @@ describe('table', () => {
   })
 
   it('shows done todos with a reopen action', async () => {
-    const { calls } = mockApi({ ...base, 'GET /admin/api/entries': { body: { entries: [doneTodo], sources: [], tags: [] } }, 'POST /admin/api/entries/49/reopen': { status: 201, body: { ...noteEntry, kind: 'status', body: 'Reopened: Fix login' } } })
+    const { calls } = mockApi({ ...base, 'GET /admin/api/entries': { body: { entries: [doneTodo], sources: [], tags: [] } }, 'POST /admin/api/entries/49/reopen': { status: 201, body: { ...noteEntry, owner, kind: 'status', body: 'Reopened: Fix login' } } })
     renderApp('/admin/table?view=todos')
     await screen.findByText('Fix login')
     await userEvent.setup().selectOptions(screen.getByRole('combobox', { name: /filter by state/i }), 'done')
@@ -97,9 +143,9 @@ describe('table', () => {
 
   it('groups activity by day and collapses runs from one agent', async () => {
     const entries: TableEntry[] = [
-      { ...decisionEntry, id: '3', source: 'codex', created_at: now, project_name: 'Atlas', meta: { title: 'Third', tags: [], refs: [], origin: 'model' } },
-      { ...decisionEntry, id: '2', source: 'codex', created_at: now, project_name: 'Atlas' },
-      { ...decisionEntry, id: '1', source: 'claude-code', created_at: now, project_name: 'Atlas' },
+      { ...decisionEntry, owner, id: '3', source: 'codex', created_at: now, project_name: 'Atlas', meta: { title: 'Third', tags: [], refs: [], origin: 'model' } },
+      { ...decisionEntry, owner, id: '2', source: 'codex', created_at: now, project_name: 'Atlas' },
+      { ...decisionEntry, owner, id: '1', source: 'claude-code', created_at: now, project_name: 'Atlas' },
     ]
     mockApi({ ...base, 'GET /admin/api/entries': { body: { entries, sources: [], tags: [] } } })
     renderApp('/admin/table?view=activity')
@@ -114,8 +160,8 @@ describe('table', () => {
   it('adds a row and pages older rows', async () => {
     const { calls } = mockApi({
       ...base,
-      'GET /admin/api/entries': (_init, url) => ({ body: url.searchParams.get('before') === '41' ? { entries: [{ ...noteEntry, project_name: 'Atlas' }], sources: [], tags: [] } : { entries: [{ ...decisionEntry, project_name: 'Atlas' }], sources: [], tags: [], next_before: '41' } }),
-      'POST /admin/api/projects/beacon/entries': { status: 201, body: { ...noteEntry, slug: 'beacon' } },
+      'GET /admin/api/entries': (_init, url) => ({ body: url.searchParams.get('before') === '41' ? { entries: [{ ...noteEntry, owner, project_name: 'Atlas' }], sources: [], tags: [] } : { entries: [{ ...decisionEntry, owner, project_name: 'Atlas' }], sources: [], tags: [], next_before: '41' } }),
+      'POST /admin/api/projects/beacon/entries': { status: 201, body: { ...noteEntry, owner, slug: 'beacon' } },
     })
     renderApp('/admin/table?view=activity')
     await screen.findByText(/1 row loaded · more available/)
@@ -133,13 +179,13 @@ describe('table', () => {
 
   it('folds repeats under the newest copy', async () => {
     const entries: TableEntry[] = [
-      { ...decisionEntry, id: '9', kind: 'status', source: 'codex', created_at: now, project_name: 'Atlas', duplicate_of: '2', meta: { title: 'Checkpoint 3', tags: [], refs: [], origin: 'model' } },
-      { ...decisionEntry, id: '5', kind: 'status', source: 'claude-code', created_at: now, project_name: 'Atlas', meta: { title: 'Unrelated', tags: [], refs: [], origin: 'model' } },
-      { ...decisionEntry, id: '8', kind: 'status', source: 'codex', created_at: now, project_name: 'Atlas', duplicate_of: '2', meta: { title: 'Checkpoint 2', tags: [], refs: [], origin: 'model' } },
-      { ...decisionEntry, id: '2', kind: 'status', source: 'codex', created_at: now, project_name: 'Atlas', meta: { title: 'Checkpoint 1', tags: [], refs: [], origin: 'model' } },
+      { ...decisionEntry, owner, id: '9', kind: 'status', source: 'codex', created_at: now, project_name: 'Atlas', duplicate_of: '2', meta: { title: 'Checkpoint 3', tags: [], refs: [], origin: 'model' } },
+      { ...decisionEntry, owner, id: '5', kind: 'status', source: 'claude-code', created_at: now, project_name: 'Atlas', meta: { title: 'Unrelated', tags: [], refs: [], origin: 'model' } },
+      { ...decisionEntry, owner, id: '8', kind: 'status', source: 'codex', created_at: now, project_name: 'Atlas', duplicate_of: '2', meta: { title: 'Checkpoint 2', tags: [], refs: [], origin: 'model' } },
+      { ...decisionEntry, owner, id: '2', kind: 'status', source: 'codex', created_at: now, project_name: 'Atlas', meta: { title: 'Checkpoint 1', tags: [], refs: [], origin: 'model' } },
       // Both repeat a root older than the loaded page; they still fold together.
-      { ...decisionEntry, id: '1', kind: 'status', source: 'codex', created_at: now, project_name: 'Atlas', duplicate_of: '0', meta: { title: 'Old story again', tags: [], refs: [], origin: 'model' } },
-      { ...decisionEntry, id: '-1', kind: 'status', source: 'codex', created_at: now, project_name: 'Atlas', duplicate_of: '0', meta: { title: 'Old story once more', tags: [], refs: [], origin: 'model' } },
+      { ...decisionEntry, owner, id: '1', kind: 'status', source: 'codex', created_at: now, project_name: 'Atlas', duplicate_of: '0', meta: { title: 'Old story again', tags: [], refs: [], origin: 'model' } },
+      { ...decisionEntry, owner, id: '-1', kind: 'status', source: 'codex', created_at: now, project_name: 'Atlas', duplicate_of: '0', meta: { title: 'Old story once more', tags: [], refs: [], origin: 'model' } },
     ]
     mockApi({ ...base, 'GET /admin/api/entries': { body: { entries, sources: [], tags: [] } } })
     renderApp('/admin/table?view=activity')
@@ -156,10 +202,44 @@ describe('table', () => {
   })
 
   it('opens a related entry with its search applied', async () => {
-    const { calls } = mockApi({ ...base, 'GET /admin/api/entries': { body: { entries: [{ ...decisionEntry, project_name: 'Beacon', slug: 'beacon' }], sources: [], tags: [] } } })
+    const { calls } = mockApi({ ...base, 'GET /admin/api/entries': { body: { entries: [{ ...decisionEntry, owner, project_name: 'Beacon', slug: 'beacon' }], sources: [], tags: [] } } })
     renderApp('/admin/table?view=activity&project=beacon&q=Export%20design%20decision')
     expect(await screen.findByRole('searchbox', { name: /search text/i })).toHaveValue('Export design decision')
     expect(Object.fromEntries(calls.find((call) => call.path === '/admin/api/entries')!.url.searchParams)).toMatchObject({ project: 'beacon', q: 'Export design decision' })
+  })
+
+  it('hides routine entries in activity unless asked', async () => {
+    const { calls } = mockApi({ ...base, 'GET /admin/api/entries': { body: { entries: [], sources: [], tags: [] } } })
+    renderApp('/admin/table?view=activity')
+    await screen.findByText('No entries match.')
+    expect(calls.filter((call) => call.path === '/admin/api/entries').at(-1)?.url.searchParams.get('hide_routine')).toBe('1')
+    await userEvent.setup().click(screen.getByRole('checkbox', { name: /show routine entries/i }))
+    await screen.findByText('No entries match.')
+    expect(calls.filter((call) => call.path === '/admin/api/entries').at(-1)?.url.searchParams.get('hide_routine')).toBeNull()
+  })
+
+  it('reads the news feed: why it matters, source, external link, read and star', async () => {
+    const news: TableEntry = { ...noteEntry, owner, id: '90', created_at: now, project_name: 'AI news', slug: 'ai-news',
+      meta: { title: 'Ollama v0.40 ships MLX by default', tags: [], refs: [], origin: 'model', why: 'Macs get a faster default engine', source: 'GitHub', link: 'https://example.com/release' } }
+    const { calls } = mockApi({
+      ...base,
+      'GET /admin/api/entries': { body: { entries: [news], sources: [], tags: [] } },
+      'POST /admin/api/entries/90/owner': { body: { ...owner, read: true } },
+    })
+    renderApp('/admin/table?view=reading')
+    const row = (await screen.findByRole('button', { name: 'Ollama v0.40 ships MLX by default' })).closest('li')!
+    expect(calls.find((call) => call.path === '/admin/api/entries')?.url.searchParams.get('reading')).toBe('unread')
+    expect(row).toHaveTextContent('Macs get a faster default engine')
+    expect(row).toHaveTextContent('GitHub')
+    const link = within(row).getByRole('link', { name: /open/i })
+    expect(link).toHaveAttribute('href', 'https://example.com/release')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+    const user = userEvent.setup()
+    await user.click(within(row).getByRole('button', { name: 'Mark read' }))
+    expect(await screen.findByText('Marked read.')).toBeInTheDocument()
+    expect(calls.find((call) => call.method === 'POST')?.body).toEqual({ read: true })
+    await user.click(within(row).getByRole('button', { name: 'Ollama v0.40 ships MLX by default' }))
+    expect(within(row).getByText('Why it matters')).toBeInTheDocument()
   })
 
   it('shows an empty todo state', async () => {

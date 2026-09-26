@@ -23,7 +23,7 @@ class ReadmeScreenshotTest {
         SessionStore(context).save(session)
         try {
             ActivityScenario.launch(MainActivity::class.java).use {
-                ui.waitUntilAtLeastOneExists(hasText("A clear view of your work."), 15_000)
+                ui.waitUntilAtLeastOneExists(hasText("Needs you", substring = true), 15_000)
                 ui.waitForIdle()
                 val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
                 val path = "/data/local/tmp/ledger-readme-overview.png"

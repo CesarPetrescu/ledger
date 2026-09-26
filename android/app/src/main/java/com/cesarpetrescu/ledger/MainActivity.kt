@@ -63,14 +63,16 @@ fun LedgerApp(model: LedgerModel = viewModel()) {
     val session = model.api
     val route = model.route
     val title = when (route.substringBefore('/')) {
-        "home" -> "Ledger"
-        "table", "table-add", "table-open" -> "Table"
-        "projects", "project", "project-edit", "entry", "project-files" -> "Projects"
+        "inbox" -> "Inbox"
+        "projects", "project", "project-edit", "entry", "project-files", "table-add" -> "Projects"
+        "reading" -> "Reading"
+        "todos" -> "Todos"
         "handoffs", "handoff", "handoff-new", "handoff-edit", "message-new" -> "Handoffs"
         "calendar", "event", "event-new", "calendar-settings" -> "Calendar"
         "search" -> "Search"
         "clients" -> "Connected clients"
         "device" -> "Approve a device"
+        "more" -> "More"
         else -> "Settings"
     }
     if (model.reauthRequired && session != null) {
@@ -85,12 +87,13 @@ fun LedgerApp(model: LedgerModel = viewModel()) {
         }, confirmButton = { TextButton(enabled = !model.busy && password.isNotBlank(), onClick = { model.login(session.origin, password) }) { Text("Sign in again") } },
             dismissButton = { TextButton(enabled = !model.busy, onClick = model::forget) { Text("Discard draft and sign out") } })
     }
-    val tabs = listOf("home" to "Home", "table" to "Table", "projects" to "Projects", "handoffs" to "Handoffs", "calendar" to "Calendar", "search" to "Search")
+    val tabs = listOf("inbox" to "Inbox", "projects" to "Projects", "reading" to "Reading", "handoffs" to "Handoffs", "more" to "More")
     Scaffold(
         topBar = {
             if (session != null) TopAppBar(title = { Text(title, fontWeight = FontWeight.Bold) }, navigationIcon = {
                 if (model.stack.size > 1) IconButton(onClick = model::back, enabled = !model.busy) { Glyph("back", "Back") }
             }, actions = {
+                IconButton(onClick = { model.go("search") }, enabled = !model.busy && route != "search") { Glyph("search", "Search") }
                 IconButton(onClick = model::refresh, enabled = !model.busy) { Glyph("refresh", "Refresh") }
                 IconButton(onClick = { model.go("settings") }, enabled = !model.busy) { Glyph("settings", "Settings") }
             })
@@ -118,12 +121,13 @@ fun LedgerApp(model: LedgerModel = viewModel()) {
                     CompositionLocalProvider(LocalEditingEnabled provides !model.busy) {
                     holder.SaveableStateProvider(route) {
                         when (route.substringBefore('/')) {
-                            "home" -> Overview(model)
-                            "table" -> TableScreen(model)
-                            "table-open" -> route.split('/').map { java.net.URLDecoder.decode(it, Charsets.UTF_8.name()) }.let { TableScreen(model, it.getOrElse(1) { "activity" }, it.getOrElse(2) { "" }, it.getOrElse(3) { "" }) }
+                            "inbox" -> InboxScreen(model)
+                            "projects" -> ProjectsHome(model)
+                            "project" -> route.split('/').map { java.net.URLDecoder.decode(it, Charsets.UTF_8.name()) }.let { ProjectScreen(model, it.getOrElse(1) { "" }, it.getOrElse(2) { "activity" }, it.getOrElse(3) { "" }) }
+                            "reading" -> ReadingScreen(model)
+                            "todos" -> TodosScreen(model)
+                            "more" -> MoreScreen(model)
                             "table-add" -> route.split('/').let { TableAdd(model, it.getOrElse(1) { "note" }, it.getOrElse(2) { "" }) }
-                            "projects" -> Projects(model)
-                            "project" -> ProjectDetail(model, route.substringAfter('/'))
                             "project-edit" -> ProjectEditor(model, route.substringAfter('/', ""))
                             "entry" -> EntryEditor(model, route.substringAfter('/'))
                             "project-files" -> ProjectFiles(model, route.substringAfter('/'))
@@ -252,9 +256,10 @@ fun label(value: String) = value.replace('_', ' ').replaceFirstChar { it.upperca
 @Composable
 fun Glyph(name: String, description: String) {
     val data = when (name) {
-        "home" -> "M10,20v-6h4v6h5v-8h3L12,3 2,12h3v8z"
+        "inbox" -> "M19,3H4.99c-1.11,0 -1.98,.89 -1.98,2L3,19c0,1.1 .88,2 1.99,2H19c1.1,0 2,-.9 2,-2V5c0,-1.11 -.9,-2 -2,-2zM19,15h-4c0,1.66 -1.35,3 -3,3s-3,-1.34 -3,-3H4.99V5H19v10z"
+        "reading" -> "M19,3H5c-1.1,0 -2,.9 -2,2v14c0,1.1 .9,2 2,2h14c1.1,0 2,-.9 2,-2V5c0,-1.1 -.9,-2 -2,-2zM14,17H7v-2h7v2zM17,13H7v-2h10v2zM17,9H7V7h10v2z"
+        "more" -> "M6,10c-1.1,0 -2,.9 -2,2s.9,2 2,2 2,-.9 2,-2 -.9,-2 -2,-2zM18,10c-1.1,0 -2,.9 -2,2s.9,2 2,2 2,-.9 2,-2 -.9,-2 -2,-2zM12,10c-1.1,0 -2,.9 -2,2s.9,2 2,2 2,-.9 2,-2 -.9,-2 -2,-2z"
         "projects" -> "M3,3h7v7H3zM14,3h7v7h-7zM3,14h7v7H3zM14,14h7v7h-7z"
-        "table" -> "M3,4h8v4H3zM13,4h8v4h-8zM3,10h8v4H3zM13,10h8v4h-8zM3,16h8v4H3zM13,16h8v4h-8z"
         "handoffs" -> "M2,3h20v14H6l-4,4zM6,7v2h12V7zM6,11v2h8v-2z"
         "calendar" -> "M19,4h-1V2h-2v2H8V2H6v2H5c-1.1,0 -2,.9 -2,2v14c0,1.1 .9,2 2,2h14c1.1,0 2,-.9 2,-2V6c0,-1.1 -.9,-2 -2,-2zM19,20H5V9h14z"
         "search" -> "M9.5,3a6.5,6.5 0,1 0,3.9,11.7L20,21l1,-1 -6.3,-6.6A6.5,6.5 0,0 0,9.5,3zM9.5,5a4.5,4.5 0,1 1,0,9 4.5,4.5 0,0 1,0,-9z"
