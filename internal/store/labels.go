@@ -192,7 +192,6 @@ func labelSet(src string) string {
 func applyLabels(ctx context.Context, db execer, entryID int64) error {
 	_, err := db.Exec(ctx, `UPDATE entry_meta m SET `+labelSet("o.fields")+`,
  edited=ARRAY(SELECT jsonb_object_keys(o.fields) ORDER BY 1),
- unsure=ARRAY(SELECT u FROM unnest(m.unsure) u WHERE NOT o.fields ? u),
  updated_at=now()
 FROM entry_meta_override o WHERE o.entry_id=m.entry_id AND m.entry_id=$1`, entryID)
 	return err

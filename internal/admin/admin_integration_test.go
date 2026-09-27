@@ -1487,7 +1487,8 @@ func TestOwnerLabelsSurviveReextractionAndTeachTheExtractor(t *testing.T) {
 	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM entry_meta_override`).Scan(&overrides); err != nil || overrides != 0 {
 		t.Fatalf("overrides=%d err=%v", overrides, err)
 	}
-	if got := meta(); len(got.Edited) != 0 || got.Importance != "routine" || got.Ask != "" || got.Category != "" || !reflect.DeepEqual(got.Tags, []string{"web"}) {
+	if got := meta(); len(got.Edited) != 0 || got.Importance != "routine" || got.Ask != "" || got.Category != "" || !reflect.DeepEqual(got.Tags, []string{"web"}) ||
+		!reflect.DeepEqual(got.Unsure, []string{"importance", "ask"}) {
 		t.Fatalf("after reset: %#v", got)
 	}
 	// Owner tags follow tag merges.
