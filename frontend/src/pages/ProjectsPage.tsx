@@ -1,6 +1,8 @@
 import { useMemo, useState, type FormEvent } from 'react'
-import { api, ENTRY_KINDS, TIERS, type Entry, type Project, type ProjectInput } from '../api'
+import { api, describeError, ENTRY_KINDS, TIERS, type DeletionPreview, type Entry, type Project, type ProjectInput } from '../api'
 import { useToast } from '../components/Toast'
+import { ConfirmDialog } from '../components/ConfirmDialog'
+import { useUndo } from '../hooks/useUndo'
 import { EmptyState, ErrorState, Icon, KindBadge, Loading, StaleNotice, TierBadge, Timestamp } from '../components/ui'
 import { useResource } from '../hooks/useResource'
 import { Link, navigate } from '../router'
@@ -183,7 +185,7 @@ function Composer({ slug, onAppended }: { slug: string; onAppended: (entry: Entr
         </p>
       )}
       <div className="form-actions">
-        <span className="muted small">Entries are permanent and attributed to this console session.</span>
+        <span className="muted small">Entries can't be edited and are attributed to this console session.</span>
         <button type="submit" className="btn btn-primary" disabled={!ready || busy}>
           {busy ? 'Appending…' : 'Append'}
         </button>
@@ -245,6 +247,58 @@ function ProjectFiles({ slug }: { slug: string }) {
   )
 }
 
+/** Deletes a project after the owner types its slug; it goes to Trash. */
+function DeleteProject({ project }: { project: Project }) {
+  const [open, setOpen] = useState(false)
+  const [typed, setTyped] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [preview, setPreview] = useState<DeletionPreview | null>(null)
+  const toast = useToast()
+  const undo = useUndo()
+  const start = async () => {
+    setOpen(true)
+    setTyped('')
+    setPreview(null)
+    try {
+      setPreview(await api.deletionPreview(project.slug))
+    } catch (failure) {
+      toast(describeError(failure), 'error')
+    }
+  }
+  const confirm = async () => {
+    setBusy(true)
+    try {
+      const result = await api.deleteProject(project.slug)
+      setOpen(false)
+      undo(`${project.name} moved to Trash.`, result.action_id)
+      navigate('/projects')
+    } catch (failure) {
+      toast(describeError(failure), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <>
+      <button type="button" className="btn btn-danger-quiet" onClick={() => void start()}>
+        <Icon name="trash" /> Delete project
+      </button>
+      <ConfirmDialog open={open} title={`Delete ${project.name}?`} confirmLabel="Delete project" busy={busy} confirmDisabled={typed !== project.slug}
+        onConfirm={() => void confirm()} onCancel={() => setOpen(false)}>
+        <p>
+          {preview
+            ? `This moves the project and its ${preview.entries} ${preview.entries === 1 ? 'entry' : 'entries'} to Trash for 30 days. ${preview.handoffs} ${preview.handoffs === 1 ? 'handoff' : 'handoffs'} (${preview.files} ${preview.files === 1 ? 'file' : 'files'}) stay but are unlinked until you restore it.`
+            : 'Counting what this project contains…'}
+        </p>
+        <label>
+          Type <code>{project.slug}</code> to confirm
+          <input value={typed} onChange={(event) => setTyped(event.target.value)} autoComplete="off" spellCheck={false} />
+        </label>
+      </ConfirmDialog>
+    </>
+  )
+}
+
 function ProjectDetail({ slug, view, onSaved, onEntryAppended }: { slug: string; view: ProjectView; onSaved: (project: Project) => void; onEntryAppended: (entry: Entry) => void }) {
   const detail = useResource(() => api.getProject(slug), `project:${slug}`, 'project entry')
   const [editing, setEditing] = useState(false)
@@ -297,9 +351,12 @@ function ProjectDetail({ slug, view, onSaved, onEntryAppended }: { slug: string;
           </div>
         </div>
         {!editing && view === 'overview' && (
-          <button type="button" className="btn" onClick={() => setEditing(true)}>
-            Edit project
-          </button>
+          <div className="detail-actions">
+            <button type="button" className="btn" onClick={() => setEditing(true)}>
+              Edit project
+            </button>
+            <DeleteProject project={project} />
+          </div>
         )}
       </header>
       {detail.stale && <StaleNotice message="Showing the last loaded version; refresh failed." onRetry={detail.reload} />}

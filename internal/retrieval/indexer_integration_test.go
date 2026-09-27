@@ -307,3 +307,30 @@ func TestEmbeddingFailuresDoNotStarveSiblingDirtyRefs(t *testing.T) {
 		t.Fatalf("failed sibling refs = chunks %d dirty %d", chunks, dirty)
 	}
 }
+
+func TestIndexerDropsChunksOfDeletedEntries(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	infer, _ := fakeInfer(t)
+	defer infer.Close()
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	entry, err := db.AppendEntry(ctx, "atlas", "note", "Soon deleted", "codex", "c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker := NewIndexer(db, NewInferClient(infer.URL, "qwen3-embedding", "qwen3-reranker", 4096, ""))
+	if _, err := worker.ProcessBatch(ctx, 50); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := db.TrashEntry(ctx, entry.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := worker.ProcessBatch(ctx, 50); err != nil {
+		t.Fatalf("indexing a deleted entry failed: %v", err)
+	}
+	var chunks, dirty int
+	if err := db.Pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM chunk WHERE ref=$1),(SELECT count(*) FROM chunk_dirty)`, "entry:"+strconv.FormatInt(entry.ID, 10)).Scan(&chunks, &dirty); err != nil || chunks != 0 || dirty != 0 {
+		t.Fatalf("chunks=%d dirty=%d %v", chunks, dirty, err)
+	}
+}

@@ -693,7 +693,7 @@ func TestTodoResolutionAndProjectSummaries(t *testing.T) {
 	results := make(chan error, 2)
 	for range 2 {
 		go func() {
-			_, err := db.ResolveTodo(ctx, todo.ID, "ledger-admin", "c")
+			_, _, err := db.ResolveTodo(ctx, todo.ID, "ledger-admin", "c")
 			results <- err
 		}()
 	}
@@ -983,13 +983,13 @@ func TestFocusFieldsOwnerTriageAndInbox(t *testing.T) {
 		t.Fatalf("after snoozing an ask: asks=%s needs=%d", ids(asks), projects[0].NeedsYou)
 	}
 	// Console bookkeeping statuses ("Done: …") do not erase blocked health.
-	if _, err := db.ResolveTodo(ctx, lowTodo, "ledger-admin", "c"); err != nil {
+	if _, _, err := db.ResolveTodo(ctx, lowTodo, "ledger-admin", "c"); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, _, projects := inbox(); projects[0].StatusState != "blocked" || projects[0].StatusDetail != "Waiting on legal" {
 		t.Fatalf("health after a Done entry = %q %q", projects[0].StatusState, projects[0].StatusDetail)
 	}
-	if _, err := db.ReopenTodo(ctx, lowTodo, "ledger-admin", "c"); err != nil {
+	if _, _, err := db.ReopenTodo(ctx, lowTodo, "ledger-admin", "c"); err != nil {
 		t.Fatal(err)
 	}
 	owner(dueTodo, `{"snooze_days":2}`, http.StatusOK)
@@ -1092,3 +1092,144 @@ func TestSearchAddsProvenanceFiltersAndDegradesGracefully(t *testing.T) {
 }
 
 func itoa(id int64) string { return strconv.FormatInt(id, 10) }
+
+func TestUndoEachActionAndRestoreFromTrash(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
+	_, s := login(t, server, "correct horse", "")
+	for _, p := range []store.Project{{Slug: "atlas", Name: "Atlas", Tier: "focus"}, {Slug: "beacon", Name: "Beacon", Tier: "park"}} {
+		if _, err := db.UpsertProject(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	todo, _ := db.AppendEntry(ctx, "atlas", "todo", "Add export", "codex", "c")
+	note, _ := db.AppendEntry(ctx, "atlas", "note", "Kickoff", "codex", "c")
+	if err := db.SaveEntryMeta(ctx, note.ID, store.EntryMeta{Title: "Kickoff title", Importance: "important"}); err != nil {
+		t.Fatal(err)
+	}
+	id := func(v int64) string { return strconv.FormatInt(v, 10) }
+	call := func(method, path, body string, want int) map[string]any {
+		t.Helper()
+		res := request(t, server, method, path, body, authed(s, method != http.MethodGet))
+		if res.Code != want {
+			t.Fatalf("%s %s = %d %s", method, path, res.Code, res.Body.String())
+		}
+		out := map[string]any{}
+		_ = json.Unmarshal(res.Body.Bytes(), &out)
+		return out
+	}
+	count := func(query string, args ...any) int {
+		t.Helper()
+		var n int
+		if err := db.Pool.QueryRow(ctx, query, args...).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	resolved := func() bool { return count(`SELECT count(*) FROM entry_meta WHERE resolves=$1`, todo.ID) == 1 }
+	undo := func(action any, want int) {
+		t.Helper()
+		call(http.MethodPost, "/admin/api/actions/"+action.(string)+"/undo", "", want)
+	}
+
+	// Mark done, undo: the todo reopens and the Done entry is gone entirely.
+	entries := count(`SELECT count(*) FROM entry`)
+	done := call(http.MethodPost, "/admin/api/entries/"+id(todo.ID)+"/resolve", "", http.StatusCreated)
+	if !resolved() || count(`SELECT count(*) FROM entry`) != entries+1 {
+		t.Fatal("resolve did not close the todo")
+	}
+	undo(done["action_id"], http.StatusOK)
+	if resolved() || count(`SELECT count(*) FROM entry`) != entries {
+		t.Fatal("undoing done left the todo closed or the Done entry behind")
+	}
+	undo(done["action_id"], http.StatusConflict)
+
+	// Reopen, undo: the same Done entry closes the todo again.
+	call(http.MethodPost, "/admin/api/entries/"+id(todo.ID)+"/resolve", "", http.StatusCreated)
+	reopened := call(http.MethodPost, "/admin/api/entries/"+id(todo.ID)+"/reopen", "", http.StatusCreated)
+	undo(reopened["action_id"], http.StatusOK)
+	if !resolved() || count(`SELECT count(*) FROM entry WHERE body LIKE 'Reopened:%'`) != 0 {
+		t.Fatal("undoing reopen did not restore the resolution")
+	}
+
+	// Two triage actions undo independently; a stale undo is refused.
+	first := call(http.MethodPost, "/admin/api/entries/"+id(note.ID)+"/owner", `{"read":true,"starred":true}`, http.StatusOK)
+	second := call(http.MethodPost, "/admin/api/entries/"+id(note.ID)+"/owner", `{"starred":false}`, http.StatusOK)
+	undo(first["action_id"], http.StatusConflict)
+	undo(second["action_id"], http.StatusOK)
+	if count(`SELECT count(*) FROM entry_owner_state WHERE entry_id=$1 AND starred AND read_at IS NOT NULL`, note.ID) != 1 {
+		t.Fatal("undoing unstar did not restore the star")
+	}
+	undo(first["action_id"], http.StatusOK)
+	if count(`SELECT count(*) FROM entry_owner_state WHERE entry_id=$1`, note.ID) != 0 {
+		t.Fatal("undoing the first triage did not restore the untouched state")
+	}
+	actions := call(http.MethodGet, "/admin/api/actions", "", http.StatusOK)["actions"].([]any)
+	// Newest first: resolve, resolve, reopen, then the two triage actions.
+	if len(actions) != 5 || actions[0].(map[string]any)["label"] != "Unstarred: Kickoff title" || actions[1].(map[string]any)["label"] != "Marked read, Starred: Kickoff title" ||
+		actions[1].(map[string]any)["undoable"] != false || actions[4].(map[string]any)["label"] != "Marked done: Add export" {
+		t.Fatalf("actions = %v", actions)
+	}
+
+	// Delete an entry: it leaves every list and returns whole on restore.
+	call(http.MethodPost, "/admin/api/entries/"+id(note.ID)+"/owner", `{"starred":true}`, http.StatusOK)
+	trashed := call(http.MethodDelete, "/admin/api/entries/"+id(note.ID), "", http.StatusOK)
+	if count(`SELECT count(*) FROM entry WHERE id=$1`, note.ID) != 0 || count(`SELECT count(*) FROM chunk_dirty WHERE ref=$1`, "entry:"+id(note.ID)) != 1 {
+		t.Fatal("trashed entry still live or not queued for index cleanup")
+	}
+	items := call(http.MethodGet, "/admin/api/trash", "", http.StatusOK)["items"].([]any)
+	if len(items) != 1 || items[0].(map[string]any)["label"] != "Kickoff title" {
+		t.Fatalf("trash = %v", items)
+	}
+	call(http.MethodPost, "/admin/api/trash/"+trashed["trash_id"].(string)+"/restore", "", http.StatusOK)
+	if count(`SELECT count(*) FROM entry e JOIN entry_meta m ON m.entry_id=e.id JOIN entry_owner_state o ON o.entry_id=e.id
+		WHERE e.id=$1 AND m.title='Kickoff title' AND m.importance='important' AND o.starred`, note.ID) != 1 {
+		t.Fatal("restored entry lost its metadata or triage state")
+	}
+	undo(trashed["action_id"], http.StatusConflict)
+
+	// Deleting a done todo drops the link; restoring it closes it again.
+	todoTrash := call(http.MethodDelete, "/admin/api/entries/"+id(todo.ID), "", http.StatusOK)
+	undo(todoTrash["action_id"], http.StatusOK)
+	if !resolved() {
+		t.Fatal("restored todo is not closed by its Done entry")
+	}
+
+	// Deleting a project needs the slug repeated, and moves everything.
+	h, err := db.CreateHandoff(ctx, store.Handoff{ProjectSlug: "atlas", Title: "Plan", Description: "d", Scope: "s", Source: "codex", ClientID: "c"}, store.HandoffMessage{Body: "b", WorkState: "ready", Source: "codex", ClientID: "c"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview := call(http.MethodGet, "/admin/api/projects/atlas/deletion", "", http.StatusOK)
+	if preview["name"] != "Atlas" || preview["entries"] != float64(3) || preview["handoffs"] != float64(1) {
+		t.Fatalf("preview = %v", preview)
+	}
+	call(http.MethodDelete, "/admin/api/projects/atlas", `{"confirm":"atlas-typo"}`, http.StatusBadRequest)
+	gone := call(http.MethodDelete, "/admin/api/projects/atlas", `{"confirm":"atlas"}`, http.StatusOK)
+	if count(`SELECT count(*) FROM entry WHERE slug='atlas'`) != 0 || count(`SELECT count(*) FROM handoff WHERE id=$1 AND project_slug IS NULL`, h.Handoff.ID) != 1 {
+		t.Fatal("project delete left entries or kept the handoff link")
+	}
+	undo(gone["action_id"], http.StatusOK)
+	if count(`SELECT count(*) FROM entry WHERE slug='atlas'`) != 3 || !resolved() || count(`SELECT count(*) FROM handoff WHERE id=$1 AND project_slug='atlas'`, h.Handoff.ID) != 1 {
+		t.Fatal("project restore lost entries, resolutions, or the handoff link")
+	}
+
+	// An entry cannot come back into a deleted project.
+	orphan := call(http.MethodDelete, "/admin/api/entries/"+id(note.ID), "", http.StatusOK)
+	call(http.MethodDelete, "/admin/api/projects/atlas", `{"confirm":"atlas"}`, http.StatusOK)
+	call(http.MethodPost, "/admin/api/trash/"+orphan["trash_id"].(string)+"/restore", "", http.StatusConflict)
+
+	// Past retention, trash is purged for good.
+	if _, err := db.Pool.Exec(ctx, `UPDATE trash SET deleted_at=now()-interval '31 days' WHERE id=$1`, orphan["trash_id"]); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := db.PurgeTrash(ctx); err != nil || n != 1 {
+		t.Fatalf("purge = %d %v", n, err)
+	}
+	if n, _ := db.PurgeTrash(ctx); n != 0 {
+		t.Fatal("second purge removed more")
+	}
+	if len(call(http.MethodGet, "/admin/api/trash", "", http.StatusOK)["items"].([]any)) != 1 {
+		t.Fatal("unexpired project should remain in trash")
+	}
+}

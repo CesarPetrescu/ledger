@@ -139,6 +139,10 @@ func buildRef(ctx context.Context, tx pgx.Tx, ref string) ([]Chunk, error) {
 		var p store.Project
 		err := tx.QueryRow(ctx, `SELECT slug,name,tier,hours_wk,type,description,goal,deadline,needs_me,automate,stack,updated_at FROM project WHERE slug=$1`, slug).
 			Scan(&p.Slug, &p.Name, &p.Tier, &p.HoursWK, &p.Type, &p.Description, &p.Goal, &p.Deadline, &p.NeedsMe, &p.Automate, &p.Stack, &p.UpdatedAt)
+		// A deleted project has no chunks; the caller removes any left over.
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -154,6 +158,10 @@ func buildRef(ctx context.Context, tx pgx.Tx, ref string) ([]Chunk, error) {
 		var projectName string
 		err = tx.QueryRow(ctx, `SELECT e.id,e.slug,e.kind,e.body,e.source,e.client_id,e.created_at,p.name FROM entry e JOIN project p ON p.slug=e.slug WHERE e.id=$1`, entryID).
 			Scan(&e.ID, &e.Slug, &e.Kind, &e.Body, &e.Source, &e.ClientID, &e.CreatedAt, &projectName)
+		// A deleted entry has no chunks; the caller removes any left over.
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
 		if err != nil {
 			return nil, err
 		}

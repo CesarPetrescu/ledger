@@ -19,7 +19,12 @@ ASK = dict(id='70', slug='atlas', project_name='Atlas', kind='note', body='Prici
            owner=dict(OWNER), meta=dict(title='Pricing claims unverified', tags=[], refs=[], origin='model', ask='Confirm the fixture pricing', importance='important'))
 NEWS = dict(id='60', slug='atlas', project_name='Atlas', kind='note', body='Title: Fixture model ships\nWhy it matters: Faster tests.\nURL: https://example.com/news', source='claude-code', created_at='2026-09-06T07:00:00Z',
             owner=dict(OWNER), meta=dict(title='Fixture model ships', tags=[], refs=[], origin='model', why='Faster tests.', source='Example', link='https://example.com/news'))
+ACTIONS = []
 EVENT = dict(id='event-1', calendar_id='calendar-1', calendar_name='Planning', title='Plan the week', start='2026-09-06T10:00:00Z', end='2026-09-06T11:00:00Z', all_day=False, recurring=False, etag='"v1"')
+
+def record(kind, label, undo):
+    ACTIONS.append(dict(id=str(len(ACTIONS) + 1), kind=kind, label=label, project_slug='atlas', created_at='2026-09-06T13:00:00Z', undoable=True, undo=undo))
+    return ACTIONS[-1]['id']
 
 class Handler(BaseHTTPRequestHandler):
     # Match production's persistent HTTP/1.1 responses, including large exports.
@@ -143,17 +148,32 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(200, {'entries': ENTRIES, 'sources': ['owner'], 'tags': []})
         if re.fullmatch(r'/entries/(60|70)/owner', path) and method == 'POST':
             target = NEWS if path.startswith('/entries/60') else ASK
+            before = dict(target['owner'])
             for key in ('read', 'starred', 'handled'):
                 if key in body:
                     target['owner'][key] = bool(body[key])
-            return self.send_json(200, target['owner'])
+            action_id = record('owner', 'Marked read' if body.get('read') else 'Updated', undo=lambda: target['owner'].update(before))
+            return self.send_json(200, dict(target['owner'], action_id=action_id))
         if re.fullmatch(r'/entries/(50|60|70)/related', path):
             return self.send_json(200, {'related': []})
         if path == '/entries/50/resolve' and method == 'POST':
             if 'resolved_by' in TODO:
                 return self.send_json(409, {'error': 'todo is already done'})
             TODO['resolved_by'] = dict(entry_id='51', origin='owner', created_at='2026-09-06T13:00:00Z')
-            return self.send_json(201, dict(id='51', slug='atlas', kind='status', body='Done: Write the fixture todo', source='ledger-admin', created_at='2026-09-06T13:00:00Z'))
+            action_id = record('resolve', 'Done: Write the fixture todo', undo=lambda: TODO.pop('resolved_by', None))
+            return self.send_json(201, dict(action_id=action_id, id='51', slug='atlas', kind='status', body='Done: Write the fixture todo', source='ledger-admin', created_at='2026-09-06T13:00:00Z'))
+        if path == '/actions':
+            return self.send_json(200, {'actions': [{k: v for k, v in a.items() if k != 'undo'} for a in reversed(ACTIONS)]})
+        match = re.fullmatch(r'/actions/(\d+)/undo', path)
+        if match and method == 'POST':
+            action = next((a for a in ACTIONS if a['id'] == match.group(1)), None)
+            if action is None or not action['undoable']:
+                return self.send_json(409, {'error': 'this action can no longer be undone'})
+            action['undo']()
+            action.update(undoable=False, undone_at='2026-09-06T14:00:00Z')
+            return self.send_json(200, {'undone': True})
+        if path == '/trash':
+            return self.send_json(200, {'items': []})
         if path == '/calendar/connection':
             return self.send_json(200, {'connected': True, 'server_url': 'https://cloud.example.com', 'username': 'Atlas owner', 'selected_calendars': 1})
         if path == '/calendar/calendars':
