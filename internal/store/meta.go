@@ -123,6 +123,11 @@ func (db *DB) saveEntryMeta(ctx context.Context, entryID int64, m EntryMeta) err
 		return err
 	}
 	defer tx.Rollback(ctx)
+	// The entry lock first, as label edits and Trash take it, so extraction
+	// and corrections run one after the other.
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM entry WHERE id=$1 FOR UPDATE`, entryID); err != nil {
+		return err
+	}
 	// An upgrade re-extraction keeps an existing resolution: the todo it closed
 	// is no longer offered as a candidate, so the model could not re-pick it.
 	if _, err := tx.Exec(ctx, `INSERT INTO entry_meta(entry_id,title,tags,priority,refs,resolves,origin,model,attempts,error,
