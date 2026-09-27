@@ -150,3 +150,24 @@ func TestChangeCursorDoesNotSkipLateLowerEntryID(t *testing.T) {
 		t.Fatalf("late entry was skipped: %+v %v", second, err)
 	}
 }
+
+func TestChangeCursorSurvivesDeletingTheNewestEntry(t *testing.T) {
+	db, ctx := glassFixtures(t)
+	newest, err := db.AppendEntry(ctx, "atlas", "note", "Newest", "owner", "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := db.Changes(ctx, "glass-a", "glass", "", "", 10)
+	if err != nil || len(page.Entries) == 0 {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	if _, err := db.AcknowledgeChanges(ctx, "glass-a", "glass", page.Through); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := db.TrashEntry(ctx, newest.ID); err != nil {
+		t.Fatal(err)
+	}
+	if next, err := db.Changes(ctx, "glass-a", "glass", "", "", 10); err != nil || len(next.Entries) != 0 {
+		t.Fatalf("after delete: %+v %v", next, err)
+	}
+}

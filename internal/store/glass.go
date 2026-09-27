@@ -138,7 +138,9 @@ func (db *DB) Changes(ctx context.Context, clientID, reader, after, through stri
 	if a < checkpoint || a > delivered {
 		return result, errors.New("cursor would skip unfetched changes or precedes acknowledgement")
 	}
-	if err = tx.QueryRow(ctx, `SELECT COALESCE(max(change_id),0) FROM entry_change`).Scan(&high); err != nil {
+	// Deleting the newest entries removes their change rows; what this
+	// reader was already given stays a valid boundary.
+	if err = tx.QueryRow(ctx, `SELECT GREATEST(COALESCE(max(change_id),0),$1) FROM entry_change`, delivered).Scan(&high); err != nil {
 		return result, err
 	}
 	if through == "" {

@@ -87,10 +87,13 @@ const entryPayload = `jsonb_build_object(
  'receipts',(SELECT jsonb_agg(to_jsonb(w)) FROM entry_write_receipt w WHERE w.entry_id=e.id),
  'resolved_by',(SELECT r.entry_id FROM entry_meta r WHERE r.resolves=e.id))`
 
-// lockEntries locks the entries matching cond (on alias e) and their triage
-// rows, so a snapshot taken afterwards includes writes that were in flight.
+// lockEntries locks the entries matching cond (on alias e) and their
+// metadata and triage rows, so a snapshot taken afterwards includes writes that were in flight.
 func lockEntries(ctx context.Context, tx pgx.Tx, cond string, arg any) error {
 	if _, err := tx.Exec(ctx, `SELECT 1 FROM entry e WHERE `+cond+` FOR UPDATE`, arg); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM entry_meta m JOIN entry e ON e.id=m.entry_id WHERE `+cond+` FOR UPDATE OF m`, arg); err != nil {
 		return err
 	}
 	_, err := tx.Exec(ctx, `SELECT 1 FROM entry_owner_state o JOIN entry e ON e.id=o.entry_id WHERE `+cond+` FOR UPDATE OF o`, arg)
