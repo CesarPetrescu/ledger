@@ -101,6 +101,7 @@ fun LedgerApp(model: LedgerModel = viewModel()) {
         "clients" -> "Connected clients"
         "device" -> "Approve a device"
         "more" -> "More"
+        "table" -> "Table"
         "history" -> "Recent actions"
         "trash" -> "Trash"
         else -> "Settings"
@@ -157,6 +158,7 @@ fun LedgerApp(model: LedgerModel = viewModel()) {
                             "reading" -> ReadingScreen(model)
                             "todos" -> TodosScreen(model)
                             "more" -> MoreScreen(model)
+                            "table" -> TableScreen(model)
                             "history" -> HistoryScreen(model)
                             "trash" -> TrashScreen(model)
                             "table-add" -> route.split('/').let { TableAdd(model, it.getOrElse(1) { "note" }, it.getOrElse(2) { "" }) }
@@ -295,6 +297,7 @@ fun Glyph(name: String, description: String) {
         "handoffs" -> "M2,3h20v14H6l-4,4zM6,7v2h12V7zM6,11v2h8v-2z"
         "calendar" -> "M19,4h-1V2h-2v2H8V2H6v2H5c-1.1,0 -2,.9 -2,2v14c0,1.1 .9,2 2,2h14c1.1,0 2,-.9 2,-2V6c0,-1.1 -.9,-2 -2,-2zM19,20H5V9h14z"
         "search" -> "M9.5,3a6.5,6.5 0,1 0,3.9,11.7L20,21l1,-1 -6.3,-6.6A6.5,6.5 0,0 0,9.5,3zM9.5,5a4.5,4.5 0,1 1,0,9 4.5,4.5 0,0 1,0,-9z"
+        "filter" -> "M10,18h4v-2h-4v2zM3,6v2h18V6H3zM6,13h12v-2H6v2z"
         "back" -> "M20,11H7.83l5.59,-5.59L12,4 4,12l8,8 1.41,-1.41L7.83,13H20z"
         "refresh" -> "M17.65,6.35A7.95,7.95 0,0 0,12,4a8,8 0,1 0,7.93,9h-2.02A6,6 0,1 1,12,6c1.66,0 3.14,.69 4.22,1.78L13,11h8V3z"
         else -> "M4,5h16v2H4zM4,11h16v2H4zM4,17h16v2H4zM8,3h2v6H8zM14,9h2v6h-2zM7,15h2v6H7z"

@@ -8,6 +8,8 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -20,6 +22,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
@@ -624,10 +627,72 @@ fun ReadingScreen(model: LedgerModel) {
     EntrySheetHost(model, sheet)
 }
 
+private val tableViews = listOf("activity" to "Activity", "decisions" to "Decisions", "todos" to "Todos")
+
+/** Every project's entries in one filterable list, like the web console's Table. */
+@Composable
+fun TableScreen(model: LedgerModel) = Load(model, "table-projects", { it.request("GET", "/projects") }) { data ->
+    val projects = data.rows("projects")
+    var view by rememberSaveable { mutableStateOf("activity") }
+    var project by rememberSaveable { mutableStateOf("") }
+    var source by rememberSaveable { mutableStateOf("") }
+    var tag by rememberSaveable { mutableStateOf("") }
+    var kind by rememberSaveable { mutableStateOf("") }
+    var todoState by rememberSaveable { mutableStateOf("open") }
+    var showRoutine by rememberSaveable { mutableStateOf(false) }
+    var typed by rememberSaveable { mutableStateOf("") }
+    var q by rememberSaveable { mutableStateOf("") }
+    var filtersOpen by rememberSaveable { mutableStateOf(false) }
+    val sheet = remember { SheetState() }
+    // A search looks everywhere, routine entries included.
+    val query = tableQuery(view, project = project, source = source, tag = tag, status = todoState, q = q, kind = kind, hideRoutine = !showRoutine && q.isBlank())
+    val pager = rememberPager(model, query)
+    val active = listOf(project, source, tag, if (view == "activity") kind else "").count { it.isNotBlank() }
+    PagedEntries(model, pager, query, empty = if (view == "todos" && todoState == "open") "No open todos. Nice." else "No entries match.", header = {
+        item {
+            Column(Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                FilterChips(tableViews, view) { view = it }
+                Row(Modifier.padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(typed, { if (validFieldText(it, 200, false)) typed = it }, Modifier.weight(1f).testTag("table-search"), singleLine = true,
+                        placeholder = { Text("Search every project") },
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), keyboardActions = KeyboardActions(onSearch = { q = typed.trim() }),
+                        trailingIcon = { IconButton(onClick = { q = typed.trim() }) { Glyph("search", "Search") } })
+                    BadgedBox(badge = { if (active > 0) Badge { Text("$active") } }) {
+                        FilledTonalIconButton(onClick = { filtersOpen = !filtersOpen }) { Glyph("filter", "Filters") }
+                    }
+                }
+                if (filtersOpen) Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Choice("Project", project, listOf("" to "All projects") + projects.map { it.text("slug") to it.text("name") }) { project = it }
+                    Choice("Agent", source, listOf("" to "All agents") + pager.data?.strings("sources").orEmpty().map { it to it }) { source = it }
+                    Choice("Tag", tag, listOf("" to "All tags") + pager.data?.strings("tags").orEmpty().map { it to it }) { tag = it }
+                    if (view == "activity") Choice("Kind", kind, listOf("" to "All kinds") + entryKinds) { kind = it }
+                    if (active > 0) TextButton(onClick = { project = ""; source = ""; tag = ""; kind = "" }) { Text("Clear filters") }
+                }
+                Row(Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (view == "todos") listOf("open" to "Open", "done" to "Done", "" to "All").forEach { (id, name) ->
+                        FilterChip(selected = todoState == id, onClick = { todoState = id }, label = { Text(name) })
+                    } else FilterChip(selected = showRoutine, onClick = { showRoutine = !showRoutine }, label = { Text("Show routine") })
+                    if (q.isNotBlank()) AssistChip(onClick = { q = ""; typed = "" }, label = { Text("Search: $q ✕") })
+                }
+            }
+        }
+    }) { entries ->
+        val folded = foldRepeats(entries).let { heads -> if (view == "todos") heads.sortedWith(compareBy({ it.entry.text("project_name") }, { it.entry.text("slug") }, { priorityRank(it.entry) })) else heads }
+        runsBy(folded) { if (view == "todos") it.entry.text("slug") else dayLabel(it.entry.text("created_at")) }.forEach { (key, group) ->
+            item(key = "h:$key:${group.first().entry.text("id")}") { SectionHeader(if (view == "todos") group.first().entry.text("project_name") else key) }
+            items(group, key = { it.entry.text("id") }) { f ->
+                EntryItem(model, f.entry, view, f.repeats, showProject = view != "todos" && project.isBlank()) { e, r -> sheet.entry = e; sheet.repeats = r }
+            }
+        }
+    }
+    EntrySheetHost(model, sheet)
+}
+
 @Composable
 fun MoreScreen(model: LedgerModel) {
     Page {
         listOf(
+            Triple("Table", "Every project's activity, decisions, and todos, with filters", "table"),
             Triple("Calendar", "Your Nextcloud events", "calendar"),
             Triple("Search", "Find projects, decisions, and notes", "search"),
             Triple("Recent actions", "Undo what you marked, snoozed, or deleted", "history"),
