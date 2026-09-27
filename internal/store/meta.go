@@ -154,8 +154,8 @@ func (db *DB) RecordMetaFailure(ctx context.Context, entryID int64, model, messa
 	// A failed upgrade keeps the older metadata and is not retried endlessly.
 	_, err := db.Pool.Exec(ctx, `INSERT INTO entry_meta(entry_id,origin,model,attempts,error) VALUES($1,'model',$2,1,$3)
 ON CONFLICT(entry_id) DO UPDATE SET attempts=entry_meta.attempts+1,model=EXCLUDED.model,error=EXCLUDED.error,updated_at=now(),
- version=CASE WHEN entry_meta.title<>'' THEN $4 ELSE entry_meta.version END
-WHERE entry_meta.origin='model'`, entryID, model, message, MetaVersion)
+ version=CASE WHEN entry_meta.version=-1 AND entry_meta.attempts+1<$5 THEN -1 WHEN entry_meta.title<>'' THEN $4 ELSE entry_meta.version END
+WHERE entry_meta.origin='model'`, entryID, model, message, MetaVersion, MetaMaxAttempts)
 	return err
 }
 

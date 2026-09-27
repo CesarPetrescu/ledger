@@ -134,12 +134,24 @@ ON CONFLICT(entry_id) DO UPDATE SET fields=(entry_meta_override.fields-$3::text[
 		return err
 	}
 	if len(reset) > 0 {
-		// Re-extract so reset fields get the model's reading back.
-		if _, err := tx.Exec(ctx, `UPDATE entry_meta SET version=0,edited=ARRAY(SELECT f FROM unnest(edited) f WHERE f<>ALL($2)) WHERE entry_id=$1`, entryID, reset); err != nil {
+		// Re-extract so reset fields get the model's reading back. Version -1
+		// marks a requested re-extraction that failures retry, unlike an
+		// upgrade, which gives up after one failure.
+		if _, err := tx.Exec(ctx, `UPDATE entry_meta SET version=-1,attempts=0,edited=ARRAY(SELECT f FROM unnest(edited) f WHERE f<>ALL($2)) WHERE entry_id=$1`, entryID, reset); err != nil {
 			return err
 		}
 	}
 	if err := applyLabels(ctx, tx, entryID); err != nil {
+		return err
+	}
+	// Anything derived from the labels is rebuilt: a new title re-embeds and
+	// rechecks repeats, and the project digest is rewritten.
+	if _, ok := set["title"]; ok || slices.Contains(reset, "title") {
+		if _, err := tx.Exec(ctx, `UPDATE entry_meta SET embedding=NULL,embed_model='',duplicate_of=NULL,duplicate_checked=false,duplicate_threshold=NULL WHERE entry_id=$1`, entryID); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM project_digest WHERE slug=(SELECT slug FROM entry WHERE id=$1)`, entryID); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -157,7 +169,10 @@ func applyLabels(ctx context.Context, db execer, entryID int64) error {
 	_, err := db.Exec(ctx, `UPDATE entry_meta m SET `+strings.Join([]string{text("title"), text("gist"), text("priority"), text("importance"), text("ask"),
 		text("state"), text("next_step"), text("blocker"), text("why"), text("size"), text("category")}, ",")+`,
  due=CASE WHEN o.fields ? 'due' THEN NULLIF(o.fields->>'due','')::date ELSE m.due END,
- tags=CASE WHEN o.fields ? 'tags' THEN ARRAY(SELECT jsonb_array_elements_text(o.fields->'tags')) ELSE m.tags END,
+ tags=CASE WHEN o.fields ? 'tags' THEN (SELECT COALESCE(array_agg(tag ORDER BY first),'{}') FROM (
+   -- Owner tags follow merges too: an alias becomes its canonical tag.
+   SELECT COALESCE(v.canonical,t.tag) tag,min(t.ord) first FROM jsonb_array_elements_text(o.fields->'tags') WITH ORDINALITY t(tag,ord)
+   LEFT JOIN tag_vocab v ON v.tag=t.tag GROUP BY 1) merged) ELSE m.tags END,
  edited=ARRAY(SELECT jsonb_object_keys(o.fields) ORDER BY 1),
  unsure=ARRAY(SELECT u FROM unnest(m.unsure) u WHERE NOT o.fields ? u),
  updated_at=now()

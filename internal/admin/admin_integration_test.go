@@ -1469,11 +1469,26 @@ func TestOwnerLabelsSurviveReextractionAndTeachTheExtractor(t *testing.T) {
 	call(`{"reset":["importance","ask","tags","category"]}`, http.StatusOK)
 	var version int
 	var overrides int
-	if err := db.Pool.QueryRow(ctx, `SELECT m.version,(SELECT count(*) FROM entry_meta_override) FROM entry_meta m WHERE entry_id=$1`, entry.ID).Scan(&version, &overrides); err != nil || version != 0 || overrides != 0 {
+	if err := db.Pool.QueryRow(ctx, `SELECT m.version,(SELECT count(*) FROM entry_meta_override) FROM entry_meta m WHERE entry_id=$1`, entry.ID).Scan(&version, &overrides); err != nil || version != -1 || overrides != 0 {
 		t.Fatalf("version=%d overrides=%d err=%v", version, overrides, err)
 	}
 	if got := meta(); len(got.Edited) != 0 {
 		t.Fatalf("edited after reset: %v", got.Edited)
+	}
+	// A failed re-extraction after a reset is retried, not given up.
+	if err := db.RecordMetaFailure(ctx, entry.ID, "m", "bad json"); err != nil {
+		t.Fatal(err)
+	}
+	if next, err := db.NextUnlabeledEntry(ctx); err != nil || next == nil || next.ID != entry.ID {
+		t.Fatalf("reset entry not retried: %v %v", next, err)
+	}
+	// Owner tags follow tag merges.
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO tag_vocab(tag,canonical) VALUES('pricing',NULL),('prices','pricing')`); err != nil {
+		t.Fatal(err)
+	}
+	call(`{"set":{"tags":["prices","web"]}}`, http.StatusOK)
+	if got := meta(); !reflect.DeepEqual(got.Tags, []string{"pricing", "web"}) {
+		t.Fatalf("alias kept: %v", got.Tags)
 	}
 	// The console's own bookkeeping entries have no AI labels to correct.
 	todo, _ := db.AppendEntry(ctx, "atlas", "todo", "Add export", "codex", "c")
