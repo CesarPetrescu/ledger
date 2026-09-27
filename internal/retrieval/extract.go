@@ -329,7 +329,9 @@ func parseExtraction(content string, entry *store.PendingEntry, todos []store.To
 	meta.Details = details(out, entry)
 	meta.Unsure = []string{}
 	for _, field := range out.Unsure {
-		if slices.Contains(labelFields, field) && !slices.Contains(meta.Unsure, field) {
+		// Only fields this kind has (and the owner can edit) can be in doubt.
+		applies := (field != "state" || entry.Kind == "status") && (!slices.Contains([]string{"size", "due", "priority"}, field) || entry.Kind == "todo")
+		if applies && slices.Contains(labelFields, field) && !slices.Contains(meta.Unsure, field) {
 			meta.Unsure = append(meta.Unsure, field)
 		}
 	}

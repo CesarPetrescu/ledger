@@ -37,7 +37,7 @@ func TestParseExtractionGroundsDetails(t *testing.T) {
 	meta, err := parseExtraction(`{"title":"Use Stripe","tags":[],"priority":"normal","refs":[],"resolves":null,"category":" Billing ",
 "checklist":[{"text":" wire  webhooks ","done":false},{"text":"","done":true}],
 "numbers":[{"label":"Plan price","value":"$49/mo"},{"label":"Invented","value":"$99"}],
-"entities":["Stripe","Dana","Braintree"],"chosen":"Stripe","rejected":"Paddle","unsure":["category","category","bogus"]}`, entry, nil, "")
+"entities":["Stripe","Dana","Braintree"],"chosen":"Stripe","rejected":"Paddle","unsure":["category","category","bogus","state","due"]}`, entry, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
