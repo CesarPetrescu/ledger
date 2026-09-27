@@ -80,7 +80,18 @@ const entryPayload = `jsonb_build_object(
  'entry',to_jsonb(e),
  'meta',(SELECT (to_jsonb(m)-'embedding')||'{"embed_model":"","duplicate_checked":false,"duplicate_of":null,"duplicate_threshold":null}'::jsonb FROM entry_meta m WHERE m.entry_id=e.id),
  'owner',(SELECT to_jsonb(o) FROM entry_owner_state o WHERE o.entry_id=e.id),
+ 'receipts',(SELECT jsonb_agg(to_jsonb(w)) FROM entry_write_receipt w WHERE w.entry_id=e.id),
  'resolved_by',(SELECT r.entry_id FROM entry_meta r WHERE r.resolves=e.id))`
+
+// lockEntries locks the entries matching cond (on alias e) and their triage
+// rows, so a snapshot taken afterwards includes writes that were in flight.
+func lockEntries(ctx context.Context, tx pgx.Tx, cond string, arg any) error {
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM entry e WHERE `+cond+` FOR UPDATE`, arg); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `SELECT 1 FROM entry_owner_state o JOIN entry e ON e.id=o.entry_id WHERE `+cond+` FOR UPDATE OF o`, arg)
+	return err
+}
 
 // TrashEntry moves an entry to the trash and records an undoable action.
 func (db *DB) TrashEntry(ctx context.Context, entryID int64) (trashID, actionID int64, err error) {
@@ -91,6 +102,9 @@ func (db *DB) TrashEntry(ctx context.Context, entryID int64) (trashID, actionID 
 	defer tx.Rollback(ctx)
 	var slug, label string
 	var payload []byte
+	if err := lockEntries(ctx, tx, "e.id=$1", entryID); err != nil {
+		return 0, 0, err
+	}
 	if err := tx.QueryRow(ctx, `SELECT e.slug,COALESCE(NULLIF(m.title,''),left(e.body,120)),`+entryPayload+`
 FROM entry e LEFT JOIN entry_meta m ON m.entry_id=e.id WHERE e.id=$1 FOR UPDATE OF e`, entryID).Scan(&slug, &label, &payload); err != nil {
 		return 0, 0, err
@@ -139,6 +153,12 @@ func (db *DB) TrashProject(ctx context.Context, slug string) (trashID, actionID 
 	var count int
 	var payload []byte
 	var refs []string
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM project WHERE slug=$1 FOR UPDATE`, slug); err != nil {
+		return 0, 0, err
+	}
+	if err := lockEntries(ctx, tx, "e.slug=$1", slug); err != nil {
+		return 0, 0, err
+	}
 	if err := tx.QueryRow(ctx, `SELECT p.name,(SELECT count(*) FROM entry WHERE slug=p.slug),jsonb_build_object(
  'project',to_jsonb(p),
  'entries',COALESCE((SELECT jsonb_agg(`+entryPayload+` ORDER BY e.id) FROM entry e WHERE e.slug=p.slug),'[]'::jsonb),
@@ -193,6 +213,7 @@ type storedEntry struct {
 	Entry      json.RawMessage `json:"entry"`
 	Meta       json.RawMessage `json:"meta"`
 	Owner      json.RawMessage `json:"owner"`
+	Receipts   json.RawMessage `json:"receipts"`
 	ResolvedBy *int64          `json:"resolved_by"`
 }
 
@@ -248,6 +269,12 @@ func restore(ctx context.Context, tx pgx.Tx, trashID int64) error {
   CASE WHEN EXISTS (SELECT 1 FROM entry WHERE id=($1::jsonb->>'resolves')::bigint)
         AND NOT EXISTS (SELECT 1 FROM entry_meta WHERE resolves=($1::jsonb->>'resolves')::bigint)
    THEN $1::jsonb ELSE $1::jsonb||'{"resolves":null}' END)).*`, []byte(e.Meta)); err != nil {
+				return err
+			}
+		}
+		// Idempotent writes stay idempotent: a retried request finds its entry.
+		if len(e.Receipts) > 0 && string(e.Receipts) != "null" {
+			if _, err := tx.Exec(ctx, `INSERT INTO entry_write_receipt SELECT * FROM jsonb_populate_recordset(NULL::entry_write_receipt,$1) ON CONFLICT DO NOTHING`, []byte(e.Receipts)); err != nil {
 				return err
 			}
 		}
@@ -389,6 +416,13 @@ func (db *DB) UndoAction(ctx context.Context, actionID int64) error {
 			return err
 		}
 	case "owner":
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM entry WHERE id=$1 FOR UPDATE)`, undo.EntryID).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return &UndoConflict{"The entry was deleted since. Restore it from Trash first."}
+		}
 		var current ownerRow
 		err := tx.QueryRow(ctx, `SELECT read_at,starred,handled_at,to_char(snoozed_until,'YYYY-MM-DD') FROM entry_owner_state WHERE entry_id=$1 FOR UPDATE`, undo.EntryID).
 			Scan(&current.ReadAt, &current.Starred, &current.HandledAt, &current.SnoozedUntil)

@@ -1269,4 +1269,35 @@ func TestUndoRefusesTriageRedoneSince(t *testing.T) {
 	if res := request(t, server, http.MethodPost, "/admin/api/actions/"+first+"/undo", "", authed(s, true)); res.Code != http.StatusConflict {
 		t.Fatalf("stale undo = %d %s", res.Code, res.Body.String())
 	}
+	// Triage of a deleted entry cannot be undone until it is restored.
+	unread := act(`{"read":false}`)
+	trashID, _, err := db.TrashEntry(ctx, note.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res := request(t, server, http.MethodPost, "/admin/api/actions/"+unread+"/undo", "", authed(s, true)); res.Code != http.StatusConflict {
+		t.Fatalf("undo on deleted entry = %d %s", res.Code, res.Body.String())
+	}
+	if err := db.RestoreTrash(ctx, trashID); err != nil {
+		t.Fatal(err)
+	}
+	if res := request(t, server, http.MethodPost, "/admin/api/actions/"+unread+"/undo", "", authed(s, true)); res.Code != http.StatusOK {
+		t.Fatalf("undo after restore = %d %s", res.Code, res.Body.String())
+	}
+
+	// An idempotent write stays idempotent after its entry is restored.
+	once, err := db.AppendEntryOnce(ctx, "atlas", "note", "Glass capture", "glass", "c", "request-0001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	onceTrash, _, err := db.TrashEntry(ctx, once.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RestoreTrash(ctx, onceTrash); err != nil {
+		t.Fatal(err)
+	}
+	if retry, err := db.AppendEntryOnce(ctx, "atlas", "note", "Glass capture", "glass", "c", "request-0001"); err != nil || retry.ID != once.ID {
+		t.Fatalf("retry after restore = %v %v, want entry %d", retry.ID, err, once.ID)
+	}
 }

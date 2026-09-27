@@ -20,9 +20,13 @@ class LedgerModel(application: Application) : AndroidViewModel(application) {
     var reauthRequired by mutableStateOf(false); private set
     var starting by mutableStateOf(true); private set
     var busy by mutableStateOf(false); private set
-    var notice by mutableStateOf<String?>(null)
+    private var message by mutableStateOf<String?>(null)
     /** The action the current notice can undo, if any. */
     var undoId by mutableStateOf<String?>(null); private set
+    /** A new notice never carries the previous one's Undo. */
+    var notice: String?
+        get() = message
+        set(value) { message = value; undoId = null }
     var theme by mutableStateOf(themes.read()); private set
     var revision by mutableStateOf(0); private set
     var stack by mutableStateOf(listOf("inbox")); private set
@@ -77,7 +81,6 @@ class LedgerModel(application: Application) : AndroidViewModel(application) {
                 withContext(Dispatchers.IO) { block(client) }
                 revision++
                 notice = success
-                undoId = null
                 busy = false
                 after()
             } catch (e: Exception) {
@@ -101,7 +104,6 @@ class LedgerModel(application: Application) : AndroidViewModel(application) {
             reauthRequired = true
         }
         notice = errorMessage(error)
-        undoId = null
     }
 
     fun logout() = act("Signed out", after = { api = null; stack = listOf("inbox") }) { client ->
