@@ -657,7 +657,7 @@ fun TableScreen(model: LedgerModel) = Load(model, "table-projects", { it.request
             Column(Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 FilterChips(tableViews, view) { view = it }
                 Row(Modifier.padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(typed, { if (validFieldText(it, 200, false)) typed = it }, Modifier.weight(1f).testTag("table-search"), singleLine = true,
+                    OutlinedTextField(typed, { if (validFieldText(it, 1000, false)) typed = it }, Modifier.weight(1f).testTag("table-search"), singleLine = true,
                         placeholder = { Text("Search every project") },
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), keyboardActions = KeyboardActions(onSearch = { q = typed.trim() }),
                         trailingIcon = { IconButton(onClick = { q = typed.trim() }) { Glyph("search", "Search") } })
@@ -683,7 +683,7 @@ fun TableScreen(model: LedgerModel) = Load(model, "table-projects", { it.request
     }) { entries ->
         val folded = foldRepeats(entries).let { heads -> if (view == "todos") heads.sortedWith(compareBy({ it.entry.text("project_name") }, { it.entry.text("slug") }, { priorityRank(it.entry) })) else heads }
         runsBy(folded) { if (view == "todos") it.entry.text("slug") else dayLabel(it.entry.text("created_at")) }.forEach { (key, group) ->
-            item(key = "h:$key:${group.first().entry.text("id")}") { SectionHeader(if (view == "todos") group.first().entry.text("project_name") else key) }
+            item(key = "h:$key:${group.first().entry.text("id")}") { SectionHeader(if (view == "todos") projects.firstOrNull { it.text("slug") == key }?.let { projectName(it, projects) } ?: group.first().entry.text("project_name") else key) }
             items(group, key = { it.entry.text("id") }) { f ->
                 EntryItem(model, f.entry, view, f.repeats, showProject = view != "todos" && project.isBlank()) { e, r -> sheet.entry = e; sheet.repeats = r }
             }
