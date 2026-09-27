@@ -220,9 +220,9 @@ fun Tag(text: String, tone: Tone) {
     val scheme = MaterialTheme.colorScheme
     val (background, foreground) = when (tone) {
         Tone.Danger -> scheme.errorContainer to scheme.onErrorContainer
-        Tone.Warn -> Color(0xFFFFF0D6) to Color(0xFF7A4E00)
+        Tone.Warn -> if (isDark()) Color(0xFF3A2C13) to Color(0xFFF3C46E) else Color(0xFFFFF0D6) to Color(0xFF7A4E00)
         Tone.Accent -> scheme.primaryContainer to scheme.onPrimaryContainer
-        Tone.Good -> Color(0xFFDDF3E6) to Color(0xFF1E6B45)
+        Tone.Good -> if (isDark()) Color(0xFF163326) to Color(0xFF82D8AA) else Color(0xFFDDF3E6) to Color(0xFF1E6B45)
         Tone.Neutral -> scheme.surfaceVariant to scheme.onSurfaceVariant
     }
     Surface(color = background, contentColor = foreground, shape = MaterialTheme.shapes.small) {
@@ -233,10 +233,10 @@ fun Tag(text: String, tone: Tone) {
 private fun owner(entry: JSONObject) = entry.optJSONObject("owner") ?: JSONObject()
 
 private fun resolve(model: LedgerModel, entry: JSONObject) =
-    model.act("Todo marked done") { it.request("POST", "/entries/${segment(entry.text("id"))}/resolve") }
+    model.undoable("Todo marked done") { it.request("POST", "/entries/${segment(entry.text("id"))}/resolve") }
 
 private fun ownerAction(model: LedgerModel, entry: JSONObject, message: String, vararg patch: Pair<String, Any?>) =
-    model.act(message) { it.request("POST", "/entries/${segment(entry.text("id"))}/owner", json(*patch)) }
+    model.undoable(message) { it.request("POST", "/entries/${segment(entry.text("id"))}/owner", json(*patch)) }
 
 /** The two swipe actions a row offers, if any: start-to-end, then end-to-start. */
 private fun swipeActions(model: LedgerModel, entry: JSONObject, view: String): Pair<Pair<String, () -> Unit>?, Pair<String, () -> Unit>?> {
@@ -304,7 +304,7 @@ private fun EntryRowContent(entry: JSONObject, view: String, repeats: List<JSONO
             Text(headline ?: entryTitle(entry), Modifier.weight(1f), style = MaterialTheme.typography.titleSmall,
                 fontWeight = if (done) FontWeight.Normal else FontWeight.SemiBold, color = if (done) muted else MaterialTheme.colorScheme.onSurface,
                 maxLines = 2, overflow = TextOverflow.Ellipsis)
-            if (reading && owner(entry).optBoolean("starred")) Text("★", color = Color(0xFFB88A00))
+            if (reading && owner(entry).optBoolean("starred")) Text("★", color = if (isDark()) Color(0xFFF2C14E) else Color(0xFFB88A00))
         }
         val summary = if (headline != null) entryTitle(entry) else entrySummary(entry, reading)
         if (summary.isNotBlank()) Text(summary, style = MaterialTheme.typography.bodyMedium, color = muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -342,7 +342,7 @@ private fun EntrySheet(model: LedgerModel, entry: JSONObject, repeats: List<JSON
         if (labels.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) { labels.forEach { (t, tone) -> Tag(t, tone) } }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (openTodo) Button(onClick = { act { resolve(model, entry) } }, enabled = !model.busy) { Text("Mark done") }
-            entry.optJSONObject("resolved_by")?.let { OutlinedButton(onClick = { act { model.act("Todo reopened") { it.request("POST", "/entries/${segment(id)}/reopen") } } }, enabled = !model.busy) { Text("Reopen") } }
+            entry.optJSONObject("resolved_by")?.let { OutlinedButton(onClick = { act { model.undoable("Todo reopened") { it.request("POST", "/entries/${segment(id)}/reopen") } } }, enabled = !model.busy) { Text("Reopen") } }
             if (meta?.text("ask")?.isNotBlank() == true && !owner(entry).optBoolean("handled")) Button(onClick = { act { ownerAction(model, entry, "Marked handled", "handled" to true) } }, enabled = !model.busy) { Text("Handled") }
             if (openTodo || (meta?.text("ask")?.isNotBlank() == true && !owner(entry).optBoolean("handled"))) OutlinedButton(onClick = { act { ownerAction(model, entry, "Snoozed until tomorrow", "snooze_days" to 1) } }, enabled = !model.busy) { Text("Snooze") }
             if (meta?.text("link")?.isNotBlank() == true) {
@@ -355,6 +355,9 @@ private fun EntrySheet(model: LedgerModel, entry: JSONObject, repeats: List<JSON
             }
             if (openTodo && meta?.text("due")?.isNotBlank() == true) OutlinedButton(onClick = { act { addToCalendar(model, entry) } }, enabled = !model.busy) { Text("Add to calendar") }
             TextButton(onClick = { close(); model.go(projectRoute(entry.text("slug"))) }) { Text("Open project") }
+            ConfirmButton("Delete", "Move this entry to Trash? You can undo it or restore it from Trash for 30 days.", !model.busy) {
+                act { model.undoable("Entry moved to Trash") { it.request("DELETE", "/entries/${segment(id)}") } }
+            }
         }
         if (meta != null) listOf(
             "Asks you" to meta.text("ask"), "Summary" to meta.text("gist"), "Next step" to meta.text("next_step"), "Blocked by" to meta.text("blocker"),
@@ -548,6 +551,7 @@ fun ProjectScreen(model: LedgerModel, slug: String, initialTab: String = "activi
                     FilledTonalButton(onClick = { model.go("entry/$slug") }, enabled = !model.busy, contentPadding = PaddingValues(horizontal = 14.dp)) { Text("Add entry") }
                     TextButton(onClick = { model.go("project-edit/$slug") }, enabled = !model.busy) { Text("Edit") }
                     TextButton(onClick = { model.go("project-files/$slug") }) { Text("Files") }
+                    DeleteProject(model, slug)
                 }
             }
             PrimaryTabRow(selectedTabIndex = projectTabs.indexOfFirst { it.first == tab }) {
@@ -615,6 +619,8 @@ fun MoreScreen(model: LedgerModel) {
         listOf(
             Triple("Calendar", "Your Nextcloud events", "calendar"),
             Triple("Search", "Find projects, decisions, and notes", "search"),
+            Triple("Recent actions", "Undo what you marked, snoozed, or deleted", "history"),
+            Triple("Trash", "Restore deleted projects and entries", "trash"),
             Triple("Connected clients", "Review and revoke agent access", "clients"),
             Triple("Approve a device", "Enter the code shown by the Ledger CLI", "device"),
             Triple("Settings", "Version, updates, sign out", "settings"),
@@ -638,7 +644,7 @@ fun TableAdd(model: LedgerModel, defaultKind: String, initialProject: String) = 
             item { Choice("Project", slug, projects.map { p -> p.text("slug") to if (projects.count { it.text("name") == p.text("name") } > 1) "${p.text("name")} (${p.text("slug")})" else p.text("name") }) { slug = it } }
             item { Choice("Kind", kind, entryKinds) { kind = it } }
             item { Field("Text", body, { body = it }, multiline = true, max = 4000) }
-            item { Text("Entries are permanent. Add a correction as a new entry.", style = MaterialTheme.typography.bodySmall) }
+            item { Text("Entries can't be edited. Add a correction as a new entry.", style = MaterialTheme.typography.bodySmall) }
             item { Button(onClick = { model.act("Entry added", after = model::back) { it.request("POST", "/projects/${segment(slug)}/entries", json("kind" to kind, "body" to body.trim())) } },
                 enabled = !model.busy && validProjectSlug(slug) && body.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Add") } }
         }

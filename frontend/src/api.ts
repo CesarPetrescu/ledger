@@ -152,6 +152,39 @@ export interface ProjectSummary {
   needs_you: number
 }
 
+/** A quick action the owner took, undoable on its own for a week. */
+export interface OwnerAction {
+  id: string
+  kind: 'resolve' | 'reopen' | 'owner' | 'trash'
+  label: string
+  project_slug: string
+  created_at: string
+  undone_at?: string
+  undoable: boolean
+}
+
+export interface TrashItem {
+  id: string
+  kind: 'entry' | 'project'
+  label: string
+  project_slug: string
+  entry_count: number
+  deleted_at: string
+  purge_at: string
+}
+
+export interface DeletionPreview {
+  name: string
+  entries: number
+  handoffs: number
+  files: number
+}
+
+/** Responses of undoable actions carry the action to undo. */
+export interface Undoable {
+  action_id: string
+}
+
 export interface InboxResponse {
   needs_you: TableEntry[]
   todos: TableEntry[]
@@ -448,11 +481,19 @@ export const api = {
   appendEntry: (slug: string, kind: string, body: string) => request<Entry>('POST', `/projects/${encodeURIComponent(slug)}/entries`, { kind, body }),
   listEntries: (filter: EntryFilter, before?: string) => request<EntryTablePage>('GET', `/entries${entryQuery(filter, { limit: '200', ...(before ? { before } : {}) })}`),
   getProjectSummaries: () => request<ProjectSummaries>('GET', '/table/projects'),
-  resolveTodo: (id: string) => request<Entry>('POST', `/entries/${encodeURIComponent(id)}/resolve`),
+  resolveTodo: (id: string) => request<Entry & Undoable>('POST', `/entries/${encodeURIComponent(id)}/resolve`),
   inbox: () => request<InboxResponse>('GET', '/inbox'),
-  setOwner: (id: string, patch: OwnerPatch) => request<OwnerState>('POST', `/entries/${encodeURIComponent(id)}/owner`, patch),
+  setOwner: (id: string, patch: OwnerPatch) => request<OwnerState & Undoable>('POST', `/entries/${encodeURIComponent(id)}/owner`, patch),
+  deleteEntry: (id: string) => request<Undoable & { trash_id: string }>('DELETE', `/entries/${encodeURIComponent(id)}`),
+  deletionPreview: (slug: string) => request<DeletionPreview>('GET', `/projects/${encodeURIComponent(slug)}/deletion`),
+  deleteProject: (slug: string) => request<Undoable & { trash_id: string }>('DELETE', `/projects/${encodeURIComponent(slug)}`, { confirm: slug }),
+  listActions: () => request<{ actions: OwnerAction[] }>('GET', '/actions').then((r) => r.actions),
+  undoAction: (id: string) => request<{ undone: boolean }>('POST', `/actions/${encodeURIComponent(id)}/undo`),
+  listTrash: () => request<{ items: TrashItem[] }>('GET', '/trash').then((r) => r.items),
+  restoreTrash: (id: string) => request<{ restored: boolean }>('POST', `/trash/${encodeURIComponent(id)}/restore`),
+  purgeTrash: (id: string) => request<void>('DELETE', `/trash/${encodeURIComponent(id)}`),
   relatedEntries: (id: string) => request<{ related: RelatedEntry[] }>('GET', `/entries/${encodeURIComponent(id)}/related`).then((response) => response.related),
-  reopenTodo: (id: string) => request<Entry>('POST', `/entries/${encodeURIComponent(id)}/reopen`),
+  reopenTodo: (id: string) => request<Entry & Undoable>('POST', `/entries/${encodeURIComponent(id)}/reopen`),
   entriesCsvUrl: (filter: EntryFilter) => `/admin/api/entries.csv${entryQuery(filter)}`,
   search: (input: SearchRequest) => request<SearchResponse>('POST', '/search', input),
   listClients: (offset = 0) => request<ClientPage>('GET', `/oauth/clients?limit=50&offset=${offset}`),

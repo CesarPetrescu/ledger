@@ -32,6 +32,7 @@ fun Settings(model: LedgerModel) {
     val context = LocalContext.current
     Page {
         item { SummaryCard("Ledger ${BuildConfig.VERSION_NAME}", "Owner console", model.api?.origin ?: "") }
+        item { ThemeChoice(model) }
         item { SummaryCard("Connected clients", body = "Review ChatGPT, Claude, CLI, and other clients. Revoke access when needed.") { model.go("clients") } }
         item { SummaryCard("Approve a device", body = "Enter the code shown by the Ledger CLI.") { model.go("device") } }
         item { SummaryCard("Calendars", body = "Connect Nextcloud and choose visible calendars.") { model.go("calendar-settings") } }

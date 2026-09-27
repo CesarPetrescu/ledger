@@ -48,6 +48,11 @@ func main() {
 			}
 		}()
 		go func() {
+			if err := handler.RunTrashPurge(eventsCtx); err != nil && eventsCtx.Err() == nil {
+				log.Printf("trash purge stopped: %v", err)
+			}
+		}()
+		go func() {
 			if err := handler.RunCalendarSync(eventsCtx); err != nil && eventsCtx.Err() == nil {
 				log.Printf("calendar sync watcher stopped: %v", err)
 			}

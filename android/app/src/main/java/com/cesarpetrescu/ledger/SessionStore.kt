@@ -48,3 +48,12 @@ class SessionStore(context: Context) {
 
     fun clear() { check(preferences.edit().clear().commit()) { "Could not clear the saved session." } }
 }
+
+/** The owner's light/dark choice; "system" follows the phone. */
+class ThemeStore(context: Context) {
+    private val preferences = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+    fun read(): String = preferences.getString("theme", "system")?.takeIf { it in THEMES } ?: "system"
+    fun save(value: String) { preferences.edit().putString("theme", value).apply() }
+}
+
+val THEMES = listOf("system", "light", "dark")

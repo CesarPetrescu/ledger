@@ -76,6 +76,11 @@ export function startLiveUpdates(): () => void {
   }
 }
 
+/** Reloads every live resource, for changes made without a live event (e.g. while offline). */
+export function refreshAll(): void {
+  for (const listener of changeListeners) listener('*')
+}
+
 export function subscribeLiveChanges(listener: (entity: string) => void): () => void {
   changeListeners.add(listener)
   return () => changeListeners.delete(listener)

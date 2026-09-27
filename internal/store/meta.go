@@ -159,72 +159,93 @@ func (db *DB) ClearModelMeta(ctx context.Context) (int64, error) {
 	return tag.RowsAffected(), tx.Commit(ctx)
 }
 
-// ResolveTodo appends an owner "Done" status entry that closes the todo.
-func (db *DB) ResolveTodo(ctx context.Context, todoID int64, source, clientID string) (Entry, error) {
+// ResolveTodo appends an owner "Done" status entry that closes the todo, and
+// records an undoable action.
+func (db *DB) ResolveTodo(ctx context.Context, todoID int64, source, clientID string) (Entry, int64, error) {
 	tx, err := db.Pool.Begin(ctx)
 	if err != nil {
-		return Entry{}, err
+		return Entry{}, 0, err
 	}
 	defer tx.Rollback(ctx)
+	if err := lockProjectOf(ctx, tx, todoID); err != nil {
+		return Entry{}, 0, err
+	}
 	var slug, kind, text string
 	var resolved bool
 	if err := tx.QueryRow(ctx, `SELECT e.slug,e.kind,COALESCE(NULLIF(m.title,''),e.body),EXISTS (SELECT 1 FROM entry_meta r WHERE r.resolves=e.id)
 FROM entry e LEFT JOIN entry_meta m ON m.entry_id=e.id WHERE e.id=$1 FOR UPDATE OF e`, todoID).Scan(&slug, &kind, &text, &resolved); err != nil {
-		return Entry{}, err
+		return Entry{}, 0, err
 	}
 	if kind != "todo" {
-		return Entry{}, ErrNotTodo
+		return Entry{}, 0, ErrNotTodo
 	}
 	if resolved {
-		return Entry{}, ErrAlreadyResolved
+		return Entry{}, 0, ErrAlreadyResolved
 	}
 	var e Entry
 	if err := tx.QueryRow(ctx, `INSERT INTO entry(slug,kind,body,source,client_id) VALUES($1,'status',$2,$3,$4) RETURNING id,slug,kind,body,source,client_id,created_at`,
 		slug, truncateRunes("Done: "+text, 4000), source, clientID).Scan(&e.ID, &e.Slug, &e.Kind, &e.Body, &e.Source, &e.ClientID, &e.CreatedAt); err != nil {
-		return Entry{}, err
+		return Entry{}, 0, err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO entry_meta(entry_id,title,resolves,origin) VALUES($1,$2,$3,'owner')`, e.ID, truncateRunes("Done: "+text, 120), todoID); err != nil {
 		// Another session resolved it after our check; the unique index decides.
 		if pgErrorCode(err) == "23505" {
-			return Entry{}, ErrAlreadyResolved
+			return Entry{}, 0, ErrAlreadyResolved
 		}
-		return Entry{}, err
+		return Entry{}, 0, err
 	}
-	return e, tx.Commit(ctx)
+	actionID, err := recordAction(ctx, tx, "resolve", &todoID, slug, "Marked done: "+text, map[string]int64{"todo_id": todoID, "done_entry_id": e.ID})
+	if err != nil {
+		return Entry{}, 0, err
+	}
+	return e, actionID, tx.Commit(ctx)
 }
 
 // ReopenTodo detaches the todo's resolution, pins that choice so the model
-// cannot re-link it, and appends a "Reopened" status entry so the timeline,
-// latest status, and digests record the reversal.
-func (db *DB) ReopenTodo(ctx context.Context, todoID int64, source, clientID string) (Entry, error) {
+// cannot re-link it, appends a "Reopened" status entry so the timeline,
+// latest status, and digests record the reversal, and records an undoable
+// action.
+func (db *DB) ReopenTodo(ctx context.Context, todoID int64, source, clientID string) (Entry, int64, error) {
 	tx, err := db.Pool.Begin(ctx)
 	if err != nil {
-		return Entry{}, err
+		return Entry{}, 0, err
 	}
 	defer tx.Rollback(ctx)
+	if err := lockProjectOf(ctx, tx, todoID); err != nil {
+		return Entry{}, 0, err
+	}
 	var slug, text string
 	if err := tx.QueryRow(ctx, `SELECT e.slug,COALESCE(NULLIF(m.title,''),e.body) FROM entry e LEFT JOIN entry_meta m ON m.entry_id=e.id WHERE e.id=$1 AND e.kind='todo' FOR UPDATE OF e`, todoID).Scan(&slug, &text); err != nil {
 		if IsNotFound(err) {
-			return Entry{}, ErrNotResolved
+			return Entry{}, 0, ErrNotResolved
 		}
-		return Entry{}, err
+		return Entry{}, 0, err
 	}
-	tag, err := tx.Exec(ctx, `UPDATE entry_meta SET resolves=NULL,origin='owner',updated_at=now() WHERE resolves=$1`, todoID)
-	if err != nil {
-		return Entry{}, err
+	var resolverID int64
+	var resolverOrigin string
+	if err := tx.QueryRow(ctx, `SELECT entry_id,origin FROM entry_meta WHERE resolves=$1 FOR UPDATE`, todoID).Scan(&resolverID, &resolverOrigin); err != nil {
+		if IsNotFound(err) {
+			return Entry{}, 0, ErrNotResolved
+		}
+		return Entry{}, 0, err
 	}
-	if tag.RowsAffected() == 0 {
-		return Entry{}, ErrNotResolved
+	if _, err := tx.Exec(ctx, `UPDATE entry_meta SET resolves=NULL,origin='owner',updated_at=now() WHERE entry_id=$1`, resolverID); err != nil {
+		return Entry{}, 0, err
 	}
 	var e Entry
 	if err := tx.QueryRow(ctx, `INSERT INTO entry(slug,kind,body,source,client_id) VALUES($1,'status',$2,$3,$4) RETURNING id,slug,kind,body,source,client_id,created_at`,
 		slug, truncateRunes("Reopened: "+text, 4000), source, clientID).Scan(&e.ID, &e.Slug, &e.Kind, &e.Body, &e.Source, &e.ClientID, &e.CreatedAt); err != nil {
-		return Entry{}, err
+		return Entry{}, 0, err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO entry_meta(entry_id,title,origin) VALUES($1,$2,'owner')`, e.ID, truncateRunes("Reopened: "+text, 120)); err != nil {
-		return Entry{}, err
+		return Entry{}, 0, err
 	}
-	return e, tx.Commit(ctx)
+	actionID, err := recordAction(ctx, tx, "reopen", &todoID, slug, "Reopened: "+text, map[string]any{
+		"todo_id": todoID, "resolver_id": resolverID, "resolver_origin": resolverOrigin, "reopened_entry_id": e.ID})
+	if err != nil {
+		return Entry{}, 0, err
+	}
+	return e, actionID, tx.Commit(ctx)
 }
 
 // MetaProgress reports how many entries have finished metadata extraction.
@@ -315,4 +336,11 @@ func truncateRunes(value string, limit int) string {
 		return value
 	}
 	return string([]rune(value)[:limit-1]) + "…"
+}
+
+// lockProjectOf takes the project lock before any entry lock, the order
+// TrashProject uses, so the two cannot deadlock.
+func lockProjectOf(ctx context.Context, tx pgx.Tx, entryID int64) error {
+	_, err := tx.Exec(ctx, `SELECT 1 FROM project p JOIN entry e ON e.slug=p.slug WHERE e.id=$1 FOR KEY SHARE OF p`, entryID)
+	return err
 }

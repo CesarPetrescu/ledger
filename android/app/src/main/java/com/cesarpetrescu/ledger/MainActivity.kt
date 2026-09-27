@@ -5,6 +5,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -19,6 +20,7 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.graphics.vector.path
@@ -41,22 +43,48 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            val dark = isSystemInDarkTheme()
-            MaterialTheme(colorScheme = if (dark) darkColorScheme(primary = Color(0xFFACC7FF)) else lightColorScheme(
-                primary = Color(0xFF1769E0), background = Color(0xFFF7F6F2), surface = Color(0xFFF7F6F2),
-                onSurface = Color(0xFF172033), primaryContainer = Color(0xFFDCE8FF))) {
-                LedgerApp()
+            val model: LedgerModel = viewModel()
+            val dark = when (model.theme) { "light" -> false; "dark" -> true; else -> isSystemInDarkTheme() }
+            DisposableEffect(dark) {
+                val bars = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT) { dark }
+                enableEdgeToEdge(bars, bars)
+                onDispose {}
             }
+            MaterialTheme(colorScheme = if (dark) DarkColors else LightColors) { LedgerApp(model) }
         }
     }
 }
+
+// Matches the web console's palette.
+private val LightColors = lightColorScheme(
+    primary = Color(0xFF1769E0), background = Color(0xFFF7F6F2), surface = Color(0xFFF7F6F2),
+    onSurface = Color(0xFF172033), primaryContainer = Color(0xFFDCE8FF))
+private val DarkColors = darkColorScheme(
+    primary = Color(0xFF74AAFF), onPrimary = Color(0xFF0B1220), primaryContainer = Color(0xFF1A2940), onPrimaryContainer = Color(0xFF93BDFF),
+    secondaryContainer = Color(0xFF1A2940), onSecondaryContainer = Color(0xFFD5DCE6),
+    background = Color(0xFF0F141B), onBackground = Color(0xFFE7ECF3), surface = Color(0xFF0F141B), onSurface = Color(0xFFE7ECF3),
+    surfaceVariant = Color(0xFF1D2430), onSurfaceVariant = Color(0xFFA0ABBC), outline = Color(0xFF3A4556), outlineVariant = Color(0xFF283140),
+    surfaceContainerLowest = Color(0xFF0B1016), surfaceContainerLow = Color(0xFF131922), surfaceContainer = Color(0xFF161C25),
+    surfaceContainerHigh = Color(0xFF1D2430), surfaceContainerHighest = Color(0xFF242C39),
+    error = Color(0xFFFF8A93), errorContainer = Color(0xFF3A1D22), onErrorContainer = Color(0xFFFFC2C7), tertiary = Color(0xFFF0A64A))
+
+/** Whether the app is drawing its dark palette, for the few colors outside the scheme. */
+@Composable
+fun isDark() = MaterialTheme.colorScheme.background.luminance() < 0.5f
 
 val LocalEditingEnabled = compositionLocalOf { true }
 
 @Composable
 fun LedgerApp(model: LedgerModel = viewModel()) {
     val snackbar = remember { SnackbarHostState() }
-    LaunchedEffect(model.notice) { model.notice?.let { snackbar.showSnackbar(it); model.clearNotice() } }
+    LaunchedEffect(model.notice, model.undoId) {
+        val message = model.notice ?: return@LaunchedEffect
+        val undo = model.undoId
+        val result = snackbar.showSnackbar(message, actionLabel = undo?.let { "Undo" }, withDismissAction = undo != null,
+            duration = if (undo != null) SnackbarDuration.Long else SnackbarDuration.Short)
+        model.clearNotice()
+        if (result == SnackbarResult.ActionPerformed && undo != null) model.undo(undo)
+    }
     BackHandler(model.stack.size > 1 || model.busy) { model.back() }
     val focus = LocalFocusManager.current
     LaunchedEffect(model.busy) { if (model.busy) focus.clearFocus() }
@@ -73,6 +101,8 @@ fun LedgerApp(model: LedgerModel = viewModel()) {
         "clients" -> "Connected clients"
         "device" -> "Approve a device"
         "more" -> "More"
+        "history" -> "Recent actions"
+        "trash" -> "Trash"
         else -> "Settings"
     }
     if (model.reauthRequired && session != null) {
@@ -127,6 +157,8 @@ fun LedgerApp(model: LedgerModel = viewModel()) {
                             "reading" -> ReadingScreen(model)
                             "todos" -> TodosScreen(model)
                             "more" -> MoreScreen(model)
+                            "history" -> HistoryScreen(model)
+                            "trash" -> TrashScreen(model)
                             "table-add" -> route.split('/').let { TableAdd(model, it.getOrElse(1) { "note" }, it.getOrElse(2) { "" }) }
                             "project-edit" -> ProjectEditor(model, route.substringAfter('/', ""))
                             "entry" -> EntryEditor(model, route.substringAfter('/'))

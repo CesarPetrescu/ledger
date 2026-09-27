@@ -51,6 +51,18 @@ func (db *DB) AppendEntryOnce(ctx context.Context, slug, kind, body, source, cli
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return Entry{}, err
 	}
+	// A retry of a write whose entry the owner moved to Trash must not
+	// recreate it; the receipt lives on in the trash payload.
+	var trashed bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM trash t,
+ jsonb_array_elements(CASE WHEN t.kind='entry' THEN jsonb_build_array(t.payload) ELSE t.payload->'entries' END) e,
+ jsonb_array_elements(COALESCE(NULLIF(e->'receipts','null'),'[]')) r
+ WHERE r->>'client_id'=$1 AND r->>'request_id'=$2)`, clientID, requestID).Scan(&trashed); err != nil {
+		return Entry{}, err
+	}
+	if trashed {
+		return Entry{}, ErrEntryTrashed
+	}
 	err = tx.QueryRow(ctx, `INSERT INTO entry(slug,kind,body,source,client_id) VALUES($1,$2,$3,$4,$5) RETURNING id,slug,kind,body,source,client_id,created_at`, slug, kind, body, source, clientID).Scan(&entry.ID, &entry.Slug, &entry.Kind, &entry.Body, &entry.Source, &entry.ClientID, &entry.CreatedAt)
 	if err != nil {
 		return Entry{}, err
@@ -138,7 +150,12 @@ func (db *DB) Changes(ctx context.Context, clientID, reader, after, through stri
 	if a < checkpoint || a > delivered {
 		return result, errors.New("cursor would skip unfetched changes or precedes acknowledgement")
 	}
-	if err = tx.QueryRow(ctx, `SELECT COALESCE(max(change_id),0) FROM entry_change`).Scan(&high); err != nil {
+	// The high-water mark is the last change ID allocated, read under the
+	// writers' lock so every lower ID is committed or rolled back. Unlike
+	// max(change_id), deleting the newest entries never lowers it, so issued
+	// cursors and snapshot bounds stay valid.
+	// ponytail: waits for in-flight writers; fine at this write rate.
+	if err = tx.QueryRow(ctx, `SELECT COALESCE(pg_sequence_last_value(pg_get_serial_sequence('entry_change','change_id')),0) FROM pg_advisory_xact_lock(7103376)`).Scan(&high); err != nil {
 		return result, err
 	}
 	if through == "" {

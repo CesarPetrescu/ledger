@@ -8,6 +8,7 @@ import {
   IconCalendarEvent,
   IconClipboardText,
   IconCopy,
+  IconDeviceDesktop,
   IconEye,
   IconEyeOff,
   IconFolder,
@@ -16,10 +17,12 @@ import {
   IconKey,
   IconLogout,
   IconMenu2,
+  IconMoon,
   IconPlus,
   IconPaperclip,
   IconRefresh,
   IconSearch,
+  IconSun,
   IconTable,
   IconWifi,
   IconWifiOff,
@@ -28,7 +31,7 @@ import {
   type IconProps,
 } from '@tabler/icons-react'
 
-export type IconName = 'eye' | 'eye-off' | 'menu' | 'close' | 'search' | 'arrow' | 'filter' | 'logout' | 'plus' | 'alert' | 'back' | 'refresh' | 'book' | 'home' | 'projects' | 'calendar' | 'handoffs' | 'copy' | 'paperclip' | 'clients' | 'external' | 'trash' | 'live' | 'offline' | 'table'
+export type IconName = 'eye' | 'eye-off' | 'menu' | 'close' | 'search' | 'arrow' | 'filter' | 'logout' | 'plus' | 'alert' | 'back' | 'refresh' | 'book' | 'home' | 'projects' | 'calendar' | 'handoffs' | 'copy' | 'paperclip' | 'clients' | 'external' | 'trash' | 'live' | 'offline' | 'table' | 'system' | 'light' | 'dark'
 
 const icons: Record<IconName, ComponentType<IconProps>> = {
   eye: IconEye,
@@ -56,6 +59,9 @@ const icons: Record<IconName, ComponentType<IconProps>> = {
   live: IconWifi,
   offline: IconWifiOff,
   table: IconTable,
+  system: IconDeviceDesktop,
+  light: IconSun,
+  dark: IconMoon,
 }
 
 export function Icon({ name, ...props }: { name: IconName } & IconProps) {

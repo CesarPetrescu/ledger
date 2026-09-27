@@ -68,7 +68,7 @@ fun EntryEditor(model: LedgerModel, slug: String) {
         item { Text("Add to $slug", style = MaterialTheme.typography.headlineSmall) }
         item { Choice("Entry kind", kind, kinds) { kind = it } }
         item { Field("Entry", body, { body = it }, multiline = true, max = 4000) }
-        item { Text("Entries are permanent. Add a correction as a new entry.", style = MaterialTheme.typography.bodySmall) }
+        item { Text("Entries can't be edited. Add a correction as a new entry.", style = MaterialTheme.typography.bodySmall) }
         item { Button(onClick = { model.act("Entry added", after = model::back) { it.request("POST", "/projects/${segment(slug)}/entries", json("kind" to kind, "body" to body.trim())) } },
             enabled = !model.busy && body.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Add entry") } }
     }

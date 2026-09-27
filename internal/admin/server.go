@@ -98,6 +98,14 @@ func NewServer(config Config, db *store.DB) *Server {
 	s.mux.HandleFunc("GET /admin/api/entries/{id}/related", s.relatedEntries)
 	s.mux.HandleFunc("POST /admin/api/entries/{id}/owner", s.setOwnerState)
 	s.mux.HandleFunc("GET /admin/api/inbox", s.inbox)
+	s.mux.HandleFunc("DELETE /admin/api/entries/{id}", s.trashEntry)
+	s.mux.HandleFunc("GET /admin/api/projects/{slug}/deletion", s.projectDeletionPreview)
+	s.mux.HandleFunc("DELETE /admin/api/projects/{slug}", s.trashProject)
+	s.mux.HandleFunc("GET /admin/api/trash", s.listTrash)
+	s.mux.HandleFunc("POST /admin/api/trash/{id}/restore", s.restoreTrash)
+	s.mux.HandleFunc("DELETE /admin/api/trash/{id}", s.deleteTrash)
+	s.mux.HandleFunc("GET /admin/api/actions", s.listActions)
+	s.mux.HandleFunc("POST /admin/api/actions/{id}/undo", s.undoAction)
 	s.mux.HandleFunc("GET /admin/api/table/projects", s.projectSummaries)
 	s.mux.HandleFunc("GET /admin/api/handoffs", s.listHandoffs)
 	s.mux.HandleFunc("POST /admin/api/handoffs", s.createHandoff)
@@ -626,10 +634,10 @@ func (s *Server) resolveTodo(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	entry, err := s.db.ResolveTodo(r.Context(), id, writeSource, clientIdentifier(sessionFrom(r)))
+	entry, actionID, err := s.db.ResolveTodo(r.Context(), id, writeSource, clientIdentifier(sessionFrom(r)))
 	switch {
 	case err == nil:
-		writeJSON(w, http.StatusCreated, entryResponse(entry))
+		writeJSON(w, http.StatusCreated, withAction(entryResponse(entry), actionID))
 	case store.IsNotFound(err):
 		writeError(w, http.StatusNotFound, "entry not found")
 	case errors.Is(err, store.ErrNotTodo):
@@ -646,10 +654,10 @@ func (s *Server) reopenTodo(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	entry, err := s.db.ReopenTodo(r.Context(), id, writeSource, clientIdentifier(sessionFrom(r)))
+	entry, actionID, err := s.db.ReopenTodo(r.Context(), id, writeSource, clientIdentifier(sessionFrom(r)))
 	switch {
 	case err == nil:
-		writeJSON(w, http.StatusCreated, entryResponse(entry))
+		writeJSON(w, http.StatusCreated, withAction(entryResponse(entry), actionID))
 	case errors.Is(err, store.ErrNotResolved):
 		writeError(w, http.StatusConflict, "todo is not done")
 	default:
@@ -676,10 +684,10 @@ func (s *Server) setOwnerState(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "set at least one of read, starred, handled, snooze_days")
 		return
 	}
-	state, err := s.db.SetOwnerState(r.Context(), id, store.OwnerPatch{Read: input.Read, Starred: input.Starred, Handled: input.Handled, SnoozeDays: input.SnoozeDays})
+	state, actionID, err := s.db.SetOwnerState(r.Context(), id, store.OwnerPatch{Read: input.Read, Starred: input.Starred, Handled: input.Handled, SnoozeDays: input.SnoozeDays})
 	switch {
 	case err == nil:
-		writeJSON(w, http.StatusOK, state)
+		writeJSON(w, http.StatusOK, withAction(map[string]any{"read": state.Read, "starred": state.Starred, "handled": state.Handled, "snoozed_until": state.SnoozedUntil}, actionID))
 	case errors.Is(err, store.ErrInvalidSnooze):
 		writeError(w, http.StatusBadRequest, err.Error())
 	case store.IsNotFound(err):

@@ -10,15 +10,24 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.io.IOException
 
 class LedgerModel(application: Application) : AndroidViewModel(application) {
     private val sessions = SessionStore(application)
+    private val themes = ThemeStore(application)
     var api by mutableStateOf<Api?>(null); private set
     var reauthRequired by mutableStateOf(false); private set
     var starting by mutableStateOf(true); private set
     var busy by mutableStateOf(false); private set
-    var notice by mutableStateOf<String?>(null)
+    private var message by mutableStateOf<String?>(null)
+    /** The action the current notice can undo, if any. */
+    var undoId by mutableStateOf<String?>(null); private set
+    /** A new notice never carries the previous one's Undo. */
+    var notice: String?
+        get() = message
+        set(value) { message = value; undoId = null }
+    var theme by mutableStateOf(themes.read()); private set
     var revision by mutableStateOf(0); private set
     var stack by mutableStateOf(listOf("inbox")); private set
     val route get() = stack.last()
@@ -35,7 +44,8 @@ class LedgerModel(application: Application) : AndroidViewModel(application) {
     fun tab(route: String) { if (!busy) stack = listOf(route) }
     fun back() { if (!busy && stack.size > 1) stack = stack.dropLast(1) }
     fun refresh() { revision++ }
-    fun clearNotice() { notice = null }
+    fun clearNotice() { notice = null; undoId = null }
+    fun chooseTheme(value: String) { themes.save(value); theme = value }
 
     fun login(origin: String, password: String) {
         if (busy) return
@@ -79,6 +89,14 @@ class LedgerModel(application: Application) : AndroidViewModel(application) {
             } finally { busy = false }
         }
     }
+
+    /** Runs an action the server records as undoable, offering Undo in the notice. */
+    fun undoable(success: String, after: () -> Unit = {}, block: (Api) -> JSONObject) {
+        var id = ""
+        act(success, after = { undoId = id.ifBlank { null }; after() }) { id = block(it).text("action_id") }
+    }
+
+    fun undo(id: String) = act("Undone") { it.request("POST", "/actions/${segment(id)}/undo") }
 
     suspend fun failed(error: Exception, client: Api) {
         if (error is ApiError && error.status == 401 && api === client) {

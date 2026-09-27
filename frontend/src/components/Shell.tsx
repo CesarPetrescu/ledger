@@ -5,6 +5,9 @@ import { Link, navigate, useLocation } from '../router'
 import { useToast } from './Toast'
 import { Icon, formatRelative, type IconName } from './ui'
 import { useLiveUpdates } from '../live'
+import { applyTheme, readTheme, THEME_ORDER, type ThemeChoice } from '../theme'
+
+const THEME_LABEL: Record<ThemeChoice, string> = { system: 'System', light: 'Light', dark: 'Dark' }
 
 const NAV: { to: string; label: string; icon: IconName; match: (path: string) => boolean; mobileHidden?: boolean }[] = [
   { to: '/', label: 'Overview', icon: 'home', match: (path) => path === '/' },
@@ -27,6 +30,12 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
   const [signingOut, setSigningOut] = useState(false)
   const toast = useToast()
   const live = useLiveUpdates()
+  const [theme, setTheme] = useState<ThemeChoice>(readTheme)
+  const nextTheme = THEME_ORDER[(THEME_ORDER.indexOf(theme) + 1) % THEME_ORDER.length]!
+  const cycleTheme = () => {
+    applyTheme(nextTheme)
+    setTheme(nextTheme)
+  }
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -65,6 +74,10 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
           <Icon name={live === 'live' ? 'live' : 'offline'} />
           <span>{live === 'live' ? 'Live' : live === 'connecting' ? 'Connecting' : 'Offline'}</span>
         </p>
+        <button type="button" className="icon-button theme-toggle" onClick={cycleTheme}
+          aria-label={`Theme: ${THEME_LABEL[theme]}. Switch to ${THEME_LABEL[nextTheme]}`} title={`Theme: ${THEME_LABEL[theme]}`}>
+          <Icon name={theme} />
+        </button>
         <button type="button" className="search-trigger" onClick={() => navigate('/search')}>
           <Icon name="search" />
           <span>Search</span>
