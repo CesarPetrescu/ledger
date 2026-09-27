@@ -1317,3 +1317,58 @@ func TestUndoRefusesTriageRedoneSince(t *testing.T) {
 		t.Fatalf("retry after restore = %v %v, want entry %d", retry.ID, err, once.ID)
 	}
 }
+
+func TestTrashKeepsResolutionsAndProjectIdentity(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	resolved := func(todo int64) bool {
+		var n int
+		_ = db.Pool.QueryRow(ctx, `SELECT count(*) FROM entry_meta WHERE resolves=$1`, todo).Scan(&n)
+		return n == 1
+	}
+	// Todo and the entry that closed it, trashed separately, restored in either order.
+	for _, todoFirst := range []bool{true, false} {
+		todo, _ := db.AppendEntry(ctx, "atlas", "todo", "Add export", "codex", "c")
+		done, _, err := db.ResolveTodo(ctx, todo.ID, "ledger-admin", "c")
+		if err != nil {
+			t.Fatal(err)
+		}
+		todoTrash, _, err := db.TrashEntry(ctx, todo.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		doneTrash, _, err := db.TrashEntry(ctx, done.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		order := []int64{todoTrash, doneTrash}
+		if !todoFirst {
+			order = []int64{doneTrash, todoTrash}
+		}
+		for _, id := range order {
+			if err := db.RestoreTrash(ctx, id); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if !resolved(todo.ID) {
+			t.Fatalf("todo reopened after restoring both (todo first=%v)", todoFirst)
+		}
+	}
+	// An entry does not go back into a different project with its slug.
+	note, _ := db.AppendEntry(ctx, "atlas", "note", "Kickoff", "codex", "c")
+	noteTrash, _, err := db.TrashEntry(ctx, note.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := db.TrashProject(ctx, "atlas"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "New Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RestoreTrash(ctx, noteTrash); !errors.Is(err, store.ErrProjectGone) {
+		t.Fatalf("restore into replacement project = %v", err)
+	}
+}

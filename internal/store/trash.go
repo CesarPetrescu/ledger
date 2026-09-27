@@ -18,7 +18,7 @@ const UndoWindow = 7 * 24 * time.Hour
 
 var (
 	ErrNotUndoable  = errors.New("this action can no longer be undone")
-	ErrProjectGone  = errors.New("restore the project first: it is not in Ledger")
+	ErrProjectGone  = errors.New("restore its original project first")
 	ErrProjectTaken = errors.New("a project with this slug exists; rename or delete it first")
 )
 
@@ -82,7 +82,10 @@ func requeue(ctx context.Context, tx pgx.Tx, refs ...string) error {
 // vector is dropped (it is rebuilt) and duplicate links are rechecked.
 const entryPayload = `jsonb_build_object(
  'entry',to_jsonb(e),
- 'meta',(SELECT (to_jsonb(m)-'embedding')||'{"embed_model":"","duplicate_checked":false,"duplicate_of":null,"duplicate_threshold":null}'::jsonb FROM entry_meta m WHERE m.entry_id=e.id),
+ 'meta',(SELECT (to_jsonb(m)-'embedding')||'{"embed_model":"","duplicate_checked":false,"duplicate_of":null,"duplicate_threshold":null}'::jsonb
+   -- A todo this entry closed may already be in Trash; remember it so restoring both, in any order, closes it again.
+   ||jsonb_build_object('resolves',COALESCE(m.resolves,(SELECT (t.payload->'entry'->>'id')::bigint FROM trash t WHERE t.kind='entry' AND (t.payload->>'resolved_by')::bigint=e.id LIMIT 1)))
+  FROM entry_meta m WHERE m.entry_id=e.id),
  'owner',(SELECT to_jsonb(o) FROM entry_owner_state o WHERE o.entry_id=e.id),
  'receipts',(SELECT jsonb_agg(to_jsonb(w)) FROM entry_write_receipt w WHERE w.entry_id=e.id),
  'resolved_by',(SELECT r.entry_id FROM entry_meta r WHERE r.resolves=e.id))`
@@ -254,8 +257,11 @@ func restore(ctx context.Context, tx pgx.Tx, trashID int64) error {
 		if err := json.Unmarshal(payload, &e); err != nil {
 			return err
 		}
+		// While its project is in Trash, a live project with the same slug is
+		// a different one; the entry goes back only with its own project.
 		var exists bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM project WHERE slug=$1)`, slug).Scan(&exists); err != nil || !exists {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM project WHERE slug=$1 FOR SHARE)
+ AND NOT EXISTS (SELECT 1 FROM trash WHERE kind='project' AND project_slug=$1)`, slug).Scan(&exists); err != nil || !exists {
 			if err == nil {
 				err = ErrProjectGone
 			}
