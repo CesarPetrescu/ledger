@@ -335,13 +335,23 @@ func (db *DB) DeleteTrash(ctx context.Context, trashID int64) error {
 	return err
 }
 
-// PurgeTrash permanently removes items past retention. It writes only when
+// PurgeTrash permanently removes trash past retention and actions past the
+// undo window, returning the trash items removed. It writes only when
 // something is due, so an idle purge emits no change events.
 func (db *DB) PurgeTrash(ctx context.Context) (int64, error) {
-	var due bool
-	cutoff := time.Now().Add(-TrashRetention)
-	if err := db.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM trash WHERE deleted_at<$1)`, cutoff).Scan(&due); err != nil || !due {
+	var due, actionsDue bool
+	cutoff, actionCutoff := time.Now().Add(-TrashRetention), time.Now().Add(-UndoWindow)
+	if err := db.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM trash WHERE deleted_at<$1),EXISTS (SELECT 1 FROM owner_action WHERE created_at<$2)`,
+		cutoff, actionCutoff).Scan(&due, &actionsDue); err != nil {
 		return 0, err
+	}
+	if actionsDue {
+		if _, err := db.Pool.Exec(ctx, `DELETE FROM owner_action WHERE created_at<$1`, actionCutoff); err != nil {
+			return 0, err
+		}
+	}
+	if !due {
+		return 0, nil
 	}
 	tag, err := db.Pool.Exec(ctx, `DELETE FROM trash WHERE deleted_at<$1`, cutoff)
 	return tag.RowsAffected(), err
@@ -368,6 +378,9 @@ type ownerRow struct {
 	Starred      bool       `json:"starred"`
 	HandledAt    *time.Time `json:"handled_at"`
 	SnoozedUntil *string    `json:"snoozed_until"`
+	// UpdatedAt changes on every triage write, so star-unstar-star or
+	// snoozing back to the same date still counts as a later change.
+	UpdatedAt *time.Time `json:"updated_at"`
 }
 
 // UndoAction reverses one owner action if nothing has changed it since.
@@ -442,20 +455,22 @@ func (db *DB) UndoAction(ctx context.Context, actionID int64) error {
 			return &UndoConflict{"The entry was deleted since. Restore it from Trash first."}
 		}
 		var current ownerRow
-		err := tx.QueryRow(ctx, `SELECT read_at,starred,handled_at,to_char(snoozed_until,'YYYY-MM-DD') FROM entry_owner_state WHERE entry_id=$1 FOR UPDATE`, undo.EntryID).
-			Scan(&current.ReadAt, &current.Starred, &current.HandledAt, &current.SnoozedUntil)
+		err := tx.QueryRow(ctx, `SELECT read_at,starred,handled_at,to_char(snoozed_until,'YYYY-MM-DD'),updated_at FROM entry_owner_state WHERE entry_id=$1 FOR UPDATE`, undo.EntryID).
+			Scan(&current.ReadAt, &current.Starred, &current.HandledAt, &current.SnoozedUntil, &current.UpdatedAt)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
 		if !sameTime(current.ReadAt, undo.After.ReadAt) || current.Starred != undo.After.Starred ||
-			!sameTime(current.HandledAt, undo.After.HandledAt) || !sameDate(current.SnoozedUntil, undo.After.SnoozedUntil) {
+			!sameTime(current.HandledAt, undo.After.HandledAt) || !sameDate(current.SnoozedUntil, undo.After.SnoozedUntil) ||
+			!sameTime(current.UpdatedAt, undo.After.UpdatedAt) {
 			return &UndoConflict{"This entry's read, star, handled, or snooze state changed since."}
 		}
+		// Restoring the earlier revision exactly lets the action before it be undone too.
 		if undo.Before == nil {
 			_, err = tx.Exec(ctx, `DELETE FROM entry_owner_state WHERE entry_id=$1`, undo.EntryID)
 		} else {
-			_, err = tx.Exec(ctx, `UPDATE entry_owner_state SET read_at=$2,starred=$3,handled_at=$4,snoozed_until=$5::date,updated_at=now() WHERE entry_id=$1`,
-				undo.EntryID, undo.Before.ReadAt, undo.Before.Starred, undo.Before.HandledAt, undo.Before.SnoozedUntil)
+			_, err = tx.Exec(ctx, `UPDATE entry_owner_state SET read_at=$2,starred=$3,handled_at=$4,snoozed_until=$5::date,updated_at=COALESCE($6,now()) WHERE entry_id=$1`,
+				undo.EntryID, undo.Before.ReadAt, undo.Before.Starred, undo.Before.HandledAt, undo.Before.SnoozedUntil, undo.Before.UpdatedAt)
 		}
 		if err != nil {
 			return err

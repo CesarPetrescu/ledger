@@ -1269,6 +1269,24 @@ func TestUndoRefusesTriageRedoneSince(t *testing.T) {
 	if res := request(t, server, http.MethodPost, "/admin/api/actions/"+first+"/undo", "", authed(s, true)); res.Code != http.StatusConflict {
 		t.Fatalf("stale undo = %d %s", res.Code, res.Body.String())
 	}
+	// Star, unstar, star: same value, but a later change all the same.
+	star := act(`{"starred":true}`)
+	act(`{"starred":false}`)
+	act(`{"starred":true}`)
+	if res := request(t, server, http.MethodPost, "/admin/api/actions/"+star+"/undo", "", authed(s, true)); res.Code != http.StatusConflict {
+		t.Fatalf("ABA undo = %d %s", res.Code, res.Body.String())
+	}
+	// Actions past the undo window are purged.
+	if _, err := db.Pool.Exec(ctx, `UPDATE owner_action SET created_at=now()-interval '8 days' WHERE id=$1`, star); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.PurgeTrash(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var left int
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM owner_action WHERE id=$1`, star).Scan(&left); err != nil || left != 0 {
+		t.Fatalf("expired action kept: %d %v", left, err)
+	}
 	// Triage of a deleted entry cannot be undone until it is restored.
 	unread := act(`{"read":false}`)
 	trashID, _, err := db.TrashEntry(ctx, note.ID)

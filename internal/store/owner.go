@@ -46,8 +46,8 @@ func (db *DB) SetOwnerState(ctx context.Context, entryID int64, p OwnerPatch) (O
 	}
 	snapshot := func() (*ownerRow, error) {
 		var r ownerRow
-		err := tx.QueryRow(ctx, `SELECT read_at,starred,handled_at,to_char(snoozed_until,'YYYY-MM-DD') FROM entry_owner_state WHERE entry_id=$1`, entryID).
-			Scan(&r.ReadAt, &r.Starred, &r.HandledAt, &r.SnoozedUntil)
+		err := tx.QueryRow(ctx, `SELECT read_at,starred,handled_at,to_char(snoozed_until,'YYYY-MM-DD'),updated_at FROM entry_owner_state WHERE entry_id=$1`, entryID).
+			Scan(&r.ReadAt, &r.Starred, &r.HandledAt, &r.SnoozedUntil, &r.UpdatedAt)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
