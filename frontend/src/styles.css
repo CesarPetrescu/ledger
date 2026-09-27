@@ -114,6 +114,7 @@
   --star: #f2c14e;
   }
 }
+:root[data-theme='light'] { color-scheme: light; }
 :root[data-theme='dark'] {
   color-scheme: dark;
   --bg: #0f141b;

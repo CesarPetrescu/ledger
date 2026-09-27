@@ -172,6 +172,10 @@ func (db *DB) TrashProject(ctx context.Context, slug string) (trashID, actionID 
 	if err := lockEntries(ctx, tx, "e.slug=$1", slug); err != nil {
 		return 0, 0, err
 	}
+	// Its handoffs too, so the saved links are exactly the ones this unlinks.
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM handoff WHERE project_slug=$1 FOR UPDATE`, slug); err != nil {
+		return 0, 0, err
+	}
 	if err := tx.QueryRow(ctx, `SELECT p.name,(SELECT count(*) FROM entry WHERE slug=p.slug),jsonb_build_object(
  'project',to_jsonb(p),
  'entries',COALESCE((SELECT jsonb_agg(`+entryPayload+` ORDER BY e.id) FROM entry e WHERE e.slug=p.slug),'[]'::jsonb),
