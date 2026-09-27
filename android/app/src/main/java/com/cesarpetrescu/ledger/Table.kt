@@ -453,7 +453,7 @@ fun InboxScreen(model: LedgerModel) {
                 items(todos, key = { "t" + it.text("id") }) { e -> EntryItem(model, e, "inbox") { entry, r -> sheet.entry = entry; sheet.repeats = r } }
                 if (blocked.isNotEmpty()) {
                     item { SectionHeader("Blocked · ${blocked.size}") }
-                    items(blocked, key = { "b" + it.text("slug") }) { p -> ProjectLine(model, p, p.text("status_title").ifBlank { p.text("status_body") }) }
+                    items(blocked, key = { "b" + it.text("slug") }) { p -> ProjectLine(model, p, p.text("status_detail").ifBlank { p.text("status_title") }) }
                 }
                 if (digests.isNotEmpty()) {
                     item { SectionHeader("This week") }
@@ -528,7 +528,8 @@ fun ProjectScreen(model: LedgerModel, slug: String, initialTab: String = "activi
     var showRoutine by rememberSaveable { mutableStateOf(initialQuery.isNotBlank()) }
     var todoState by rememberSaveable { mutableStateOf("open") }
     val sheet = remember { SheetState() }
-    val query = tableQuery(tab, project = slug, q = q, status = todoState, hideRoutine = !showRoutine)
+    // A search looks everywhere, routine entries included.
+    val query = tableQuery(tab, project = slug, q = q, status = todoState, hideRoutine = !showRoutine && q.isBlank())
     val pager = rememberPager(model, query)
     Load(model, "project-summary:$slug", { api -> api.request("GET", "/table/projects").rows("projects").firstOrNull { it.text("slug") == slug } ?: throw ApiError(404, "Project not found.") }) { p ->
         Column {

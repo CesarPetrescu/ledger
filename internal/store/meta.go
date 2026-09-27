@@ -269,6 +269,9 @@ type ProjectSummary struct {
 	// StatusState is the state of the latest status that has one (health);
 	// bookkeeping statuses such as "Done: …" from the console carry none.
 	StatusState string `json:"status_state"`
+	// StatusDetail describes that same health-bearing status: its blocker
+	// if it names one, otherwise its title.
+	StatusDetail string `json:"status_detail"`
 	// NeedsYou counts entries asking something of the owner that are neither
 	// handled nor snoozed, matching the inbox.
 	NeedsYou int `json:"needs_you"`
@@ -281,21 +284,22 @@ func (db *DB) ProjectSummaries(ctx context.Context) ([]ProjectSummary, error) {
  (SELECT count(*) FROM entry WHERE slug=p.slug AND created_at>now()-interval '7 days'),
  COALESCE((SELECT array_agg(DISTINCT source ORDER BY source) FROM entry WHERE slug=p.slug AND created_at>now()-interval '7 days'),'{}'),
  s.id,COALESCE(sm.title,''),COALESCE(s.body,''),s.created_at,COALESCE(s.source,''),COALESCE(d.summary,''),d.generated_at,
- COALESCE((SELECT hm.state FROM entry h JOIN entry_meta hm ON hm.entry_id=h.id
-  WHERE h.slug=p.slug AND h.kind='status' AND hm.state<>'' ORDER BY h.created_at DESC,h.id DESC LIMIT 1),''),
+ COALESCE(hs.state,''),COALESCE(hs.detail,''),
  (SELECT count(*) FROM entry a JOIN entry_meta am ON am.entry_id=a.id LEFT JOIN entry_owner_state ao ON ao.entry_id=a.id
   WHERE a.slug=p.slug AND am.ask<>'' AND ao.handled_at IS NULL AND (ao.snoozed_until IS NULL OR ao.snoozed_until<=current_date))
 FROM project p
 LEFT JOIN project_digest d ON d.slug=p.slug
 LEFT JOIN LATERAL (SELECT id,body,created_at,source FROM entry WHERE slug=p.slug AND kind='status' ORDER BY created_at DESC,id DESC LIMIT 1) s ON true
 LEFT JOIN entry_meta sm ON sm.entry_id=s.id
+LEFT JOIN LATERAL (SELECT hm.state,COALESCE(NULLIF(hm.blocker,''),hm.title) detail FROM entry h JOIN entry_meta hm ON hm.entry_id=h.id
+  WHERE h.slug=p.slug AND h.kind='status' AND hm.state<>'' ORDER BY h.created_at DESC,h.id DESC LIMIT 1) hs ON true
 ORDER BY 6 DESC NULLS LAST,p.slug`)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (ProjectSummary, error) {
 		var s ProjectSummary
-		return s, row.Scan(&s.Slug, &s.Name, &s.Tier, &s.Deadline, &s.NeedsMe, &s.LastEntryAt, &s.OpenTodos, &s.WeekEntries, &s.WeekAgents, &s.StatusID, &s.StatusTitle, &s.StatusBody, &s.StatusAt, &s.StatusSource, &s.Digest, &s.DigestAt, &s.StatusState, &s.NeedsYou)
+		return s, row.Scan(&s.Slug, &s.Name, &s.Tier, &s.Deadline, &s.NeedsMe, &s.LastEntryAt, &s.OpenTodos, &s.WeekEntries, &s.WeekAgents, &s.StatusID, &s.StatusTitle, &s.StatusBody, &s.StatusAt, &s.StatusSource, &s.Digest, &s.DigestAt, &s.StatusState, &s.StatusDetail, &s.NeedsYou)
 	})
 }
 

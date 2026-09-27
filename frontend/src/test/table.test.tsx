@@ -8,8 +8,8 @@ const now = new Date().toISOString()
 const owner = { read: false, starred: false, handled: false }
 const summaries: ProjectSummaries = {
   projects: [
-    { slug: 'atlas', name: 'Atlas', tier: 'focus', deadline: 'Friday', needs_me: 'Review the migration', last_entry_at: now, open_todos: 2, week_entries: 5, week_agents: ['claude-code', 'codex'], status_title: 'Deployed table page', status_body: 'long text', status_at: now, status_source: 'codex', digest: 'Shipped the table page; two todos remain.', digest_at: now, status_state: 'in_progress', needs_you: 1 },
-    { slug: 'beacon', name: 'Beacon', tier: 'park', deadline: '', needs_me: '', open_todos: 0, week_entries: 0, week_agents: [], status_title: '', status_body: '', status_source: '', digest: '', status_state: '', needs_you: 0 },
+    { slug: 'atlas', name: 'Atlas', tier: 'focus', deadline: 'Friday', needs_me: 'Review the migration', last_entry_at: now, open_todos: 2, week_entries: 5, week_agents: ['claude-code', 'codex'], status_title: 'Deployed table page', status_body: 'long text', status_at: now, status_source: 'codex', digest: 'Shipped the table page; two todos remain.', digest_at: now, status_state: 'in_progress', status_detail: 'Deployed table page', needs_you: 1 },
+    { slug: 'beacon', name: 'Beacon', tier: 'park', deadline: '', needs_me: '', open_todos: 0, week_entries: 0, week_agents: [], status_title: '', status_body: '', status_source: '', digest: '', status_state: '', status_detail: '', needs_you: 0 },
   ],
   metadata: { total: 10, ready: 4, failed: 0, active: true },
 }
@@ -41,7 +41,7 @@ describe('table', () => {
 
   it('opens on the inbox: asks, urgent todos, blocked projects, and digests', async () => {
     const ask: TableEntry = { ...noteEntry, owner, id: '70', created_at: now, project_name: 'Atlas', meta: { title: 'Pricing question', tags: [], refs: [], origin: 'model', ask: 'Confirm the pricing claims', importance: 'important' } }
-    const blockedSummary = { ...summaries.projects[1]!, status_state: 'blocked', status_title: 'Waiting on legal' }
+    const blockedSummary = { ...summaries.projects[1]!, status_state: 'blocked', status_title: 'Done: unrelated', status_detail: 'Waiting on legal' }
     const { calls } = mockApi({
       ...base,
       'GET /admin/api/inbox': { body: { needs_you: [ask], todos: [todo], todos_total: 5, projects: [summaries.projects[0]!, blockedSummary] } },
@@ -216,6 +216,13 @@ describe('table', () => {
     await userEvent.setup().click(screen.getByRole('checkbox', { name: /show routine entries/i }))
     await screen.findByText('No entries match.')
     expect(calls.filter((call) => call.path === '/admin/api/entries').at(-1)?.url.searchParams.get('hide_routine')).toBeNull()
+    // A search always includes routine entries, even with the box unchecked.
+    await userEvent.setup().click(screen.getByRole('checkbox', { name: /show routine entries/i }))
+    await userEvent.setup().type(screen.getByRole('searchbox', { name: /search text/i }), 'checkpoint')
+    await screen.findByText('No entries match.')
+    const last = calls.filter((call) => call.path === '/admin/api/entries').at(-1)?.url.searchParams
+    expect(last?.get('q')).toBe('checkpoint')
+    expect(last?.get('hide_routine')).toBeNull()
   })
 
   it('reads the news feed: why it matters, source, external link, read and star', async () => {

@@ -343,7 +343,8 @@ function EntriesView({ view, initialProject, initialQuery }: { view: Exclude<Vie
     kind: view === 'todos' ? 'todo' : view === 'decisions' ? 'decision' : view === 'reading' ? '' : filter.kind ?? '',
     status: view === 'todos' ? filter.status ?? '' : '',
     reading: view === 'reading' ? filter.reading || 'unread' : '',
-    hide_routine: view === 'todos' || view === 'reading' ? '' : filter.hide_routine ?? '',
+    // A search looks everywhere, routine entries included.
+    hide_routine: view === 'todos' || view === 'reading' || filter.q?.trim() ? '' : filter.hide_routine ?? '',
   }
   const key = `entries:${view}:${JSON.stringify(effective)}`
   const table = useResource(() => api.listEntries(effective), key, LIVE)
@@ -472,7 +473,7 @@ function InboxView() {
             {blocked.map((project) => (
               <li key={project.slug}>
                 <Link to={`/table?view=activity&project=${encodeURIComponent(project.slug)}`}>{project.name}</Link>
-                <span className="muted"> · {project.status_title || project.status_body}</span>
+                <span className="muted"> · {project.status_detail || project.status_title || project.status_body}</span>
               </li>
             ))}
           </ul>

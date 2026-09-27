@@ -147,6 +147,8 @@ export interface ProjectSummary {
   digest_at?: string
   /** The latest status entry's state: done, in_progress, blocked, or "". */
   status_state: string
+  /** The blocker (or title) of the status that set status_state. */
+  status_detail: string
   needs_you: number
 }
 

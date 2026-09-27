@@ -121,7 +121,7 @@ class Handler(BaseHTTPRequestHandler):
             summary = dict(slug='atlas', name='Atlas', tier='focus', deadline='', needs_me='', open_todos=0 if 'resolved_by' in TODO else 1,
                            week_entries=1, week_agents=['codex'], status_title='', status_body='', status_source='',
                            digest='Atlas shipped the fixture milestone.', digest_at='2026-09-06T12:00:00Z',
-                           status_state='in_progress', needs_you=0 if ASK['owner']['handled'] else 1)
+                           status_state='in_progress', status_detail='', needs_you=0 if ASK['owner']['handled'] else 1)
             return self.send_json(200, {'projects': [summary], 'metadata': {'total': 1, 'ready': 1, 'failed': 0, 'active': True}})
         if path == '/inbox':
             inbox_summary = dict(slug='atlas', name='Atlas', tier='focus', deadline='', needs_me='', open_todos=0, week_entries=1, week_agents=['codex'],

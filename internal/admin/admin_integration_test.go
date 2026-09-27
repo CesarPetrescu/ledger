@@ -986,8 +986,8 @@ func TestFocusFieldsOwnerTriageAndInbox(t *testing.T) {
 	if _, err := db.ResolveTodo(ctx, lowTodo, "ledger-admin", "c"); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, projects := inbox(); projects[0].StatusState != "blocked" {
-		t.Fatalf("health after a Done entry = %q", projects[0].StatusState)
+	if _, _, _, projects := inbox(); projects[0].StatusState != "blocked" || projects[0].StatusDetail != "Waiting on legal" {
+		t.Fatalf("health after a Done entry = %q %q", projects[0].StatusState, projects[0].StatusDetail)
 	}
 	if _, err := db.ReopenTodo(ctx, lowTodo, "ledger-admin", "c"); err != nil {
 		t.Fatal(err)
