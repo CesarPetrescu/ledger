@@ -308,7 +308,9 @@ func (db *DB) PurgeTrash(ctx context.Context) (int64, error) {
 
 // ListActions returns recent owner actions, newest first.
 func (db *DB) ListActions(ctx context.Context, limit int) ([]OwnerAction, error) {
+	// A deletion whose trash item was since removed for good cannot be undone.
 	rows, err := db.Pool.Query(ctx, `SELECT id,kind,label,project_slug,created_at,undone_at,undone_at IS NULL AND created_at>$2
+ AND (kind<>'trash' OR EXISTS (SELECT 1 FROM trash t WHERE t.id=(undo->>'trash_id')::bigint))
 FROM owner_action WHERE created_at>$2 ORDER BY created_at DESC,id DESC LIMIT $1`, limit, time.Now().Add(-UndoWindow))
 	if err != nil {
 		return nil, err
@@ -393,8 +395,8 @@ func (db *DB) UndoAction(ctx context.Context, actionID int64) error {
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		if (current.ReadAt != nil) != (undo.After.ReadAt != nil) || current.Starred != undo.After.Starred ||
-			(current.HandledAt != nil) != (undo.After.HandledAt != nil) || !sameDate(current.SnoozedUntil, undo.After.SnoozedUntil) {
+		if !sameTime(current.ReadAt, undo.After.ReadAt) || current.Starred != undo.After.Starred ||
+			!sameTime(current.HandledAt, undo.After.HandledAt) || !sameDate(current.SnoozedUntil, undo.After.SnoozedUntil) {
 			return &UndoConflict{"This entry's read, star, handled, or snooze state changed since."}
 		}
 		if undo.Before == nil {
@@ -418,6 +420,10 @@ func (db *DB) UndoAction(ctx context.Context, actionID int64) error {
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+func sameTime(a, b *time.Time) bool {
+	return (a == nil && b == nil) || (a != nil && b != nil && a.Equal(*b))
 }
 
 func sameDate(a, b *string) bool {

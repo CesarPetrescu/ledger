@@ -1232,4 +1232,41 @@ func TestUndoEachActionAndRestoreFromTrash(t *testing.T) {
 	if len(call(http.MethodGet, "/admin/api/trash", "", http.StatusOK)["items"].([]any)) != 1 {
 		t.Fatal("unexpired project should remain in trash")
 	}
+	// A permanently deleted item no longer offers Undo.
+	undoable := func(actionID any) any {
+		for _, a := range call(http.MethodGet, "/admin/api/actions", "", http.StatusOK)["actions"].([]any) {
+			if a.(map[string]any)["id"] == actionID {
+				return a.(map[string]any)["undoable"]
+			}
+		}
+		return nil
+	}
+	if undoable(orphan["action_id"]) != false {
+		t.Fatal("purged deletion still offers undo")
+	}
+}
+
+func TestUndoRefusesTriageRedoneSince(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
+	_, s := login(t, server, "correct horse", "")
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	note, _ := db.AppendEntry(ctx, "atlas", "note", "Kickoff", "codex", "c")
+	path := "/admin/api/entries/" + strconv.FormatInt(note.ID, 10) + "/owner"
+	act := func(body string) string {
+		res := request(t, server, http.MethodPost, path, body, authed(s, true))
+		out := map[string]any{}
+		_ = json.Unmarshal(res.Body.Bytes(), &out)
+		return out["action_id"].(string)
+	}
+	// Read, unread, read again: the state matches the first read in kind but
+	// not in time, so undoing the first read must not clobber the later one.
+	first := act(`{"read":true}`)
+	act(`{"read":false}`)
+	act(`{"read":true}`)
+	if res := request(t, server, http.MethodPost, "/admin/api/actions/"+first+"/undo", "", authed(s, true)); res.Code != http.StatusConflict {
+		t.Fatalf("stale undo = %d %s", res.Code, res.Body.String())
+	}
 }

@@ -101,6 +101,7 @@ class LedgerModel(application: Application) : AndroidViewModel(application) {
             reauthRequired = true
         }
         notice = errorMessage(error)
+        undoId = null
     }
 
     fun logout() = act("Signed out", after = { api = null; stack = listOf("inbox") }) { client ->
