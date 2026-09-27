@@ -20,7 +20,7 @@ class LedgerModel(application: Application) : AndroidViewModel(application) {
     var busy by mutableStateOf(false); private set
     var notice by mutableStateOf<String?>(null)
     var revision by mutableStateOf(0); private set
-    var stack by mutableStateOf(listOf("home")); private set
+    var stack by mutableStateOf(listOf("inbox")); private set
     val route get() = stack.last()
 
     init {
@@ -50,7 +50,7 @@ class LedgerModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                 }
-                if (!reauthRequired || api?.origin != client.origin) stack = listOf("home")
+                if (!reauthRequired || api?.origin != client.origin) stack = listOf("inbox")
                 api = client
                 reauthRequired = false
                 notice = null
@@ -88,7 +88,7 @@ class LedgerModel(application: Application) : AndroidViewModel(application) {
         notice = errorMessage(error)
     }
 
-    fun logout() = act("Signed out", after = { api = null; stack = listOf("home") }) { client ->
+    fun logout() = act("Signed out", after = { api = null; stack = listOf("inbox") }) { client ->
         try { client.request("POST", "/logout") }
         catch (e: ApiError) { if (e.status != 401) throw e }
         sessions.clear()
@@ -102,7 +102,7 @@ class LedgerModel(application: Application) : AndroidViewModel(application) {
                 withContext(Dispatchers.IO) { sessions.clear() }
                 api = null
                 reauthRequired = false
-                stack = listOf("home")
+                stack = listOf("inbox")
                 notice = "Removed from this phone. The server session will expire automatically."
             } catch (e: Exception) { notice = errorMessage(e) }
             finally { busy = false }

@@ -14,12 +14,17 @@ import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 import java.net.URI
 
-fun openBrowser(context: Context, address: String, model: LedgerModel) {
-    try {
+/** Opens an HTTPS link in the browser; reports whether it launched. */
+fun openBrowser(context: Context, address: String, model: LedgerModel): Boolean {
+    return try {
         val uri = URI(address)
         require(uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.rawUserInfo == null) { "The server returned an unsafe link." }
         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(address)))
-    } catch (_: Exception) { model.notice = "Could not open this HTTPS link. Check that a browser is installed." }
+        true
+    } catch (_: Exception) {
+        model.notice = "Could not open this HTTPS link. Check that a browser is installed."
+        false
+    }
 }
 
 @Composable
