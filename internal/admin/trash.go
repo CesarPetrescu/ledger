@@ -137,7 +137,9 @@ func (s *Server) deleteTrash(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listActions(w http.ResponseWriter, r *http.Request) {
-	actions, err := s.db.ListActions(r.Context(), 50)
+	// The whole undo window, so every undoable action stays reachable.
+	// ponytail: capped at 2000 a week; add a cursor if anyone triages faster.
+	actions, err := s.db.ListActions(r.Context(), 2000)
 	if err != nil {
 		s.internalError(w, r, err)
 		return
