@@ -150,6 +150,10 @@ ON CONFLICT(entry_id) DO UPDATE SET fields=(entry_meta_override.fields-$3::text[
 		if _, err := tx.Exec(ctx, `UPDATE entry_meta SET embedding=NULL,embed_model='',duplicate_of=NULL,duplicate_checked=false,duplicate_threshold=NULL WHERE entry_id=$1`, entryID); err != nil {
 			return err
 		}
+		// Its repeats are compared again against the new title.
+		if _, err := tx.Exec(ctx, `UPDATE entry_meta SET duplicate_of=NULL,duplicate_checked=false WHERE duplicate_of=$1`, entryID); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM project_digest WHERE slug=(SELECT slug FROM entry WHERE id=$1)`, entryID); err != nil {
 		return err

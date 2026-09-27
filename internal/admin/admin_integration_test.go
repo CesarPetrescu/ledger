@@ -1433,6 +1433,22 @@ func TestOwnerLabelsSurviveReextractionAndTeachTheExtractor(t *testing.T) {
 		`{"set":{"tags":["a","b","c","d","e"]}}`, `{"set":{"due":"soon"}}`, `{"reset":["title"],"set":{"title":"x"}}`} {
 		call(bad, http.StatusBadRequest)
 	}
+	repeat, _ := db.AppendEntry(ctx, "atlas", "note", "Pricing claims still unverified", "codex", "c")
+	if err := db.SaveEntryMeta(ctx, repeat.ID, store.EntryMeta{Title: "Pricing again"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, `UPDATE entry_meta SET duplicate_of=$1,duplicate_checked=true WHERE entry_id=$2`, entry.ID, repeat.ID); err != nil {
+		t.Fatal(err)
+	}
+	call(`{"set":{"title":"Pricing note"}}`, http.StatusOK)
+	var rechecked bool
+	if err := db.Pool.QueryRow(ctx, `SELECT duplicate_of IS NULL AND NOT duplicate_checked FROM entry_meta WHERE entry_id=$1`, repeat.ID).Scan(&rechecked); err != nil || !rechecked {
+		t.Fatalf("repeat of edited root not requeued: %v", err)
+	}
+	if _, _, err := db.TrashEntry(ctx, repeat.ID); err != nil {
+		t.Fatal(err)
+	}
+	call(`{"reset":["title"]}`, http.StatusOK)
 	call(`{"set":{"importance":"important","ask":"Confirm the pricing","tags":["Pricing","web"],"category":"Marketing Site"}}`, http.StatusOK)
 	got := meta()
 	if got.Importance != "important" || got.Ask != "Confirm the pricing" || !reflect.DeepEqual(got.Tags, []string{"pricing", "web"}) || got.Category != "marketing site" ||
