@@ -138,9 +138,12 @@ func (db *DB) Changes(ctx context.Context, clientID, reader, after, through stri
 	if a < checkpoint || a > delivered {
 		return result, errors.New("cursor would skip unfetched changes or precedes acknowledgement")
 	}
-	// Deleting the newest entries removes their change rows; what this
-	// reader was already given stays a valid boundary.
-	if err = tx.QueryRow(ctx, `SELECT GREATEST(COALESCE(max(change_id),0),$1) FROM entry_change`, delivered).Scan(&high); err != nil {
+	// The high-water mark is the last change ID allocated, read under the
+	// writers' lock so every lower ID is committed or rolled back. Unlike
+	// max(change_id), deleting the newest entries never lowers it, so issued
+	// cursors and snapshot bounds stay valid.
+	// ponytail: waits for in-flight writers; fine at this write rate.
+	if err = tx.QueryRow(ctx, `SELECT COALESCE(pg_sequence_last_value(pg_get_serial_sequence('entry_change','change_id')),0) FROM pg_advisory_xact_lock(7103376)`).Scan(&high); err != nil {
 		return result, err
 	}
 	if through == "" {

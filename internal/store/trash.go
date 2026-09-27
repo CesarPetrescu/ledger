@@ -403,7 +403,8 @@ func (db *DB) UndoAction(ctx context.Context, actionID int64) error {
 	switch kind {
 	case "resolve":
 		var still bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM entry_meta WHERE entry_id=$1 AND resolves=$2)`, undo.DoneEntryID, undo.TodoID).Scan(&still); err != nil {
+		// Locking the link serializes with a concurrent reopen, which clears it.
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM entry_meta WHERE entry_id=$1 AND resolves=$2 FOR UPDATE)`, undo.DoneEntryID, undo.TodoID).Scan(&still); err != nil {
 			return err
 		}
 		if !still {
@@ -415,7 +416,7 @@ func (db *DB) UndoAction(ctx context.Context, actionID int64) error {
 		}
 	case "reopen":
 		var todoExists, resolved, resolverExists bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM entry WHERE id=$1 FOR UPDATE),EXISTS (SELECT 1 FROM entry_meta WHERE resolves=$1),EXISTS (SELECT 1 FROM entry_meta WHERE entry_id=$2)`,
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM entry WHERE id=$1 FOR UPDATE),EXISTS (SELECT 1 FROM entry_meta WHERE resolves=$1),EXISTS (SELECT 1 FROM entry_meta WHERE entry_id=$2 FOR UPDATE)`,
 			undo.TodoID, undo.ResolverID).Scan(&todoExists, &resolved, &resolverExists); err != nil {
 			return err
 		}

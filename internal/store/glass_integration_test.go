@@ -170,4 +170,21 @@ func TestChangeCursorSurvivesDeletingTheNewestEntry(t *testing.T) {
 	if next, err := db.Changes(ctx, "glass-a", "glass", "", "", 10); err != nil || len(next.Entries) != 0 {
 		t.Fatalf("after delete: %+v %v", next, err)
 	}
+	// A paginated snapshot finishes even after its last change is deleted.
+	var last store.Entry
+	for i := 0; i < 3; i++ {
+		if last, err = db.AppendEntry(ctx, "atlas", "note", fmt.Sprintf("Page %d", i), "owner", "owner"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := db.Changes(ctx, "glass-a", "glass", "", "", 1)
+	if err != nil || !first.HasMore {
+		t.Fatalf("first=%+v err=%v", first, err)
+	}
+	if _, _, err := db.TrashEntry(ctx, last.ID); err != nil {
+		t.Fatal(err)
+	}
+	if rest, err := db.Changes(ctx, "glass-a", "glass", first.Entries[0].Cursor, first.Through, 10); err != nil || len(rest.Entries) != 1 {
+		t.Fatalf("rest=%+v err=%v", rest, err)
+	}
 }
