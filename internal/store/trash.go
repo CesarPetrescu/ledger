@@ -231,6 +231,11 @@ type storedEntry struct {
 }
 
 func restore(ctx context.Context, tx pgx.Tx, trashID int64) error {
+	// Restores relink entries across trash items (a todo and the entry that
+	// closed it), so run them one at a time; they are rare and quick.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(7103378)`); err != nil {
+		return err
+	}
 	var kind, slug string
 	var payload []byte
 	if err := tx.QueryRow(ctx, `SELECT kind,project_slug,payload FROM trash WHERE id=$1 FOR UPDATE`, trashID).Scan(&kind, &slug, &payload); err != nil {
