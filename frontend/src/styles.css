@@ -876,6 +876,13 @@ label > textarea {
 .badge[data-focus='ask'] { background: var(--tone-amber-bg); color: var(--tone-amber); }
 .badge[data-focus='important'] { background: var(--tone-purple-bg); color: var(--tone-purple); }
 .badge[data-focus='size'], .badge[data-focus='due'], .badge[data-focus='stale'] { background: var(--surface-soft); color: var(--text-soft); }
+.badge[data-focus='unsure'] { background: var(--tone-purple-bg); color: var(--tone-purple); }
+.category { color: var(--text-soft); font-size: 0.78rem; font-weight: 600; }
+.checklist { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.checklist li[data-done] { color: var(--text-faint); text-decoration: line-through; }
+.label-status { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; margin: 0 0 8px; }
+.label-editor { margin: 4px 0 10px; padding: 16px; }
+@media (max-width: 620px) { .label-editor .form-grid { grid-template-columns: minmax(0, 1fr); } .label-editor .span-2 { grid-column: auto; } }
 .focus-badges { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 .focus-badges .badge { min-height: 20px; padding: 1px 7px; font-size: 0.7rem; }
 .entry-row-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }

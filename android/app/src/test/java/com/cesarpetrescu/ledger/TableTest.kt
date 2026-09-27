@@ -88,4 +88,20 @@ class TableTest {
         assertEquals("2d", ago("2026-09-24T12:00:00Z", now))
         assertEquals("3w", ago("2026-09-01T12:00:00Z", now))
     }
+
+    @Test fun labelPatchSendsOnlyChangedFieldsAndSplitsTags() {
+        val body = labelPatch(mapOf("title" to "Old", "tags" to "a, b", "ask" to ""), mapOf("title" to " Old ", "tags" to "a,  c d", "ask" to "Confirm it"))
+        val set = body.getJSONObject("set")
+        assertEquals(setOf("tags", "ask"), set.keys().asSequence().toSet())
+        assertEquals("""["a","c","d"]""", set.getJSONArray("tags").toString())
+        assertEquals("Confirm it", set.getString("ask"))
+        assertEquals("""{"set":{},"reset":["ask"]}""", labelPatch(mapOf("ask" to "x"), emptyMap(), listOf("ask")).toString())
+        // Saving a doubted field unchanged confirms it.
+        assertEquals("""{"set":{"ask":"x"},"reset":[]}""", labelPatch(mapOf("ask" to "x"), mapOf("ask" to "x"), unsure = listOf("ask")).toString())
+    }
+
+    @Test fun unsureAndCategoryShowAsTags() {
+        val meta = JSONObject().put("title", "t").put("category", "billing").put("unsure", org.json.JSONArray(listOf("importance")))
+        assertEquals(listOf("Check", "billing"), focusLabels(JSONObject().put("kind", "note").put("meta", meta)).map { it.first })
+    }
 }

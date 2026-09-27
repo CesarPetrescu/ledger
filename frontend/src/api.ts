@@ -77,7 +77,28 @@ export interface EntryMeta {
   due?: string
   source?: string
   link?: string
+  /** A per-project grouping such as "billing". */
+  category?: string
+  details?: MetaDetails
+  /** Fields the model was not sure of. */
+  unsure?: LabelField[]
+  /** Fields the owner corrected; extraction never overwrites them. */
+  edited?: LabelField[]
 }
+
+/** Structured extras found in an entry's text. */
+export interface MetaDetails {
+  checklist?: { text: string; done: boolean }[]
+  numbers?: { label: string; value: string }[]
+  entities?: string[]
+  links?: string[]
+  /** Decisions: the option chosen and the alternatives turned down. */
+  chosen?: string
+  rejected?: string
+}
+
+export type LabelField = 'title' | 'gist' | 'tags' | 'priority' | 'importance' | 'ask' | 'state' | 'next_step' | 'blocker' | 'why' | 'size' | 'due' | 'category'
+export type LabelPatch = Partial<Record<Exclude<LabelField, 'tags'>, string> & { tags: string[] }>
 
 /** The owner's own triage of an entry. */
 export interface OwnerState {
@@ -484,6 +505,7 @@ export const api = {
   resolveTodo: (id: string) => request<Entry & Undoable>('POST', `/entries/${encodeURIComponent(id)}/resolve`),
   inbox: () => request<InboxResponse>('GET', '/inbox'),
   setOwner: (id: string, patch: OwnerPatch) => request<OwnerState & Undoable>('POST', `/entries/${encodeURIComponent(id)}/owner`, patch),
+  setLabels: (id: string, set: LabelPatch, reset: LabelField[] = []) => request<{ saved: true }>('POST', `/entries/${encodeURIComponent(id)}/labels`, { set, reset }),
   deleteEntry: (id: string) => request<Undoable & { trash_id: string }>('DELETE', `/entries/${encodeURIComponent(id)}`),
   deletionPreview: (slug: string) => request<DeletionPreview>('GET', `/projects/${encodeURIComponent(slug)}/deletion`),
   deleteProject: (slug: string) => request<Undoable & { trash_id: string }>('DELETE', `/projects/${encodeURIComponent(slug)}`, { confirm: slug }),

@@ -33,11 +33,16 @@ type EntryMeta struct {
 	Due        string `json:"due,omitempty"`  // todos: YYYY-MM-DD
 	SourceName string `json:"source,omitempty"`
 	Link       string `json:"link,omitempty"`
+
+	Category string      `json:"category,omitempty"` // per-project grouping
+	Details  MetaDetails `json:"details"`
+	Unsure   []string    `json:"unsure,omitempty"` // fields the model was not sure of
+	Edited   []string    `json:"edited,omitempty"` // fields the owner corrected
 }
 
 // MetaVersion is the current extraction schema. Model rows with an older
 // version are extracted again so they gain the newer fields.
-const MetaVersion = 2
+const MetaVersion = 3
 
 // Resolution names the entry that closed a todo.
 type Resolution struct {
@@ -113,19 +118,53 @@ func (db *DB) SaveEntryMeta(ctx context.Context, entryID int64, m EntryMeta) err
 }
 
 func (db *DB) saveEntryMeta(ctx context.Context, entryID int64, m EntryMeta) error {
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	// The entry lock first, as label edits and Trash take it, so extraction
+	// and corrections run one after the other.
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM entry WHERE id=$1 FOR UPDATE`, entryID); err != nil {
+		return err
+	}
 	// An upgrade re-extraction keeps an existing resolution: the todo it closed
 	// is no longer offered as a candidate, so the model could not re-pick it.
-	_, err := db.Pool.Exec(ctx, `INSERT INTO entry_meta(entry_id,title,tags,priority,refs,resolves,origin,model,attempts,error,
- gist,importance,ask,state,next_step,blocker,why,size,due,source_name,link,version)
-VALUES($1,$2,$3,$4,$5,$6,'model',$7,1,'',$8,$9,$10,$11,$12,$13,$14,$15,NULLIF($16,'')::date,$17,$18,$19)
+	if _, err := tx.Exec(ctx, `INSERT INTO entry_meta(entry_id,title,tags,priority,refs,resolves,origin,model,attempts,error,
+ gist,importance,ask,state,next_step,blocker,why,size,due,source_name,link,version,category,details,unsure)
+VALUES($1,$2,$3,$4,$5,$6,'model',$7,1,'',$8,$9,$10,$11,$12,$13,$14,$15,NULLIF($16,'')::date,$17,$18,$19,$20,$21,$22)
 ON CONFLICT(entry_id) DO UPDATE SET title=EXCLUDED.title,tags=EXCLUDED.tags,priority=EXCLUDED.priority,refs=EXCLUDED.refs,
  resolves=COALESCE(entry_meta.resolves,EXCLUDED.resolves),model=EXCLUDED.model,attempts=entry_meta.attempts+1,error='',updated_at=now(),
  gist=EXCLUDED.gist,importance=EXCLUDED.importance,ask=EXCLUDED.ask,state=EXCLUDED.state,next_step=EXCLUDED.next_step,
  blocker=EXCLUDED.blocker,why=EXCLUDED.why,size=EXCLUDED.size,due=EXCLUDED.due,source_name=EXCLUDED.source_name,link=EXCLUDED.link,version=EXCLUDED.version,
+ category=EXCLUDED.category,details=EXCLUDED.details,unsure=EXCLUDED.unsure,
  embedding=NULL,embed_model='',duplicate_of=NULL,duplicate_checked=false,duplicate_threshold=NULL
 WHERE entry_meta.origin='model'`, entryID, m.Title, nonNil(m.Tags), m.Priority, nonNil(m.Refs), m.Resolves, m.Model,
-		m.Gist, m.Importance, m.Ask, m.State, m.NextStep, m.Blocker, m.Why, m.Size, m.Due, m.SourceName, m.Link, MetaVersion)
-	return err
+		m.Gist, m.Importance, m.Ask, m.State, m.NextStep, m.Blocker, m.Why, m.Size, m.Due, m.SourceName, m.Link, MetaVersion,
+		m.Category, m.Details, nonNil(m.Unsure)); err != nil {
+		return err
+	}
+	// Repeats folded under this entry are compared again against its new
+	// labels; checked first so a plain extraction writes nothing extra.
+	var hasRepeats bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM entry_meta WHERE duplicate_of=$1)`, entryID).Scan(&hasRepeats); err != nil {
+		return err
+	}
+	if hasRepeats {
+		if _, err := tx.Exec(ctx, `UPDATE entry_meta SET duplicate_of=NULL,duplicate_checked=false WHERE duplicate_of=$1`, entryID); err != nil {
+			return err
+		}
+	}
+	// The owner's corrections always win over the model's reading, which is
+	// kept for "reset to AI".
+	if _, err := tx.Exec(ctx, `UPDATE entry_meta_override o SET original=(SELECT COALESCE(jsonb_object_agg(k,to_jsonb(m)->k),'{}')
+ FROM entry_meta m,jsonb_object_keys(o.fields) k WHERE m.entry_id=o.entry_id) WHERE o.entry_id=$1`, entryID); err != nil {
+		return err
+	}
+	if err := applyLabels(ctx, tx, entryID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // RecordMetaFailure counts a failed extraction so bad entries stop retrying.

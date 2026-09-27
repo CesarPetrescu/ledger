@@ -64,29 +64,47 @@ Reply with one JSON object only. Keep every field short and plain; use "" when a
 - size: todos only: "S" (under an hour), "M" (about a day), or "L" (several days); otherwise "".
 - due: todos only: a date YYYY-MM-DD if the text states a deadline (resolve relative dates from written_on); otherwise "".
 - refs: up to 8 concrete references copied verbatim from the text: file paths, PR or issue numbers, URLs, commands. Empty if none.
-- resolves: the id of an entry in open_todos that this entry clearly says is finished, otherwise null. Only choose from open_todos.`
+- resolves: the id of an entry in open_todos that this entry clearly says is finished, otherwise null. Only choose from open_todos.
+- category: one to three lowercase words grouping this entry within its project (such as "billing", "mobile app", "infrastructure"). Reuse one of project_categories whenever it fits.
+- checklist: when the text lists steps or items to do or done, up to 10 of them as {text, done}; otherwise empty.
+- numbers: up to 5 key figures stated in the text (amounts, counts, versions, durations, percentages) as {label, value}, with value copied verbatim from the text; otherwise empty.
+- entities: up to 6 named people, companies, products, or services the entry is about, spelled as in the text; otherwise empty.
+- chosen: decisions only: the option chosen, at most 120 characters; otherwise "".
+- rejected: decisions only: the alternatives turned down, at most 200 characters; otherwise "".
+- unsure: the names of any fields above you had to guess because the text is ambiguous; empty when confident.
+owner_corrected examples, when given, are entries whose labels the owner fixed by hand: follow the judgement they show (what counts as important, what is an ask, which category) for similar entries.`
 
 var (
-	tagPattern   = regexp.MustCompile(`^[a-z0-9][a-z0-9+#.-]{0,29}$`)
+	linkPattern  = regexp.MustCompile(`https?://[^\s<>()\[\]"'` + "`" + `]+`)
 	errChatRetry = errors.New("chat endpoint unavailable")
 )
 
 type extraction struct {
-	Title      string   `json:"title"`
-	Gist       string   `json:"gist"`
-	Tags       []string `json:"tags"`
-	Priority   string   `json:"priority"`
-	Importance string   `json:"importance"`
-	Ask        string   `json:"ask"`
-	State      string   `json:"state"`
-	NextStep   string   `json:"next_step"`
-	Blocker    string   `json:"blocker"`
-	Why        string   `json:"why"`
-	Size       string   `json:"size"`
-	Due        string   `json:"due"`
-	Refs       []string `json:"refs"`
-	Resolves   *int64   `json:"resolves"`
+	Title      string                `json:"title"`
+	Gist       string                `json:"gist"`
+	Tags       []string              `json:"tags"`
+	Priority   string                `json:"priority"`
+	Importance string                `json:"importance"`
+	Ask        string                `json:"ask"`
+	State      string                `json:"state"`
+	NextStep   string                `json:"next_step"`
+	Blocker    string                `json:"blocker"`
+	Why        string                `json:"why"`
+	Size       string                `json:"size"`
+	Due        string                `json:"due"`
+	Refs       []string              `json:"refs"`
+	Resolves   *int64                `json:"resolves"`
+	Category   string                `json:"category"`
+	Checklist  []store.ChecklistItem `json:"checklist"`
+	Numbers    []store.KeyNumber     `json:"numbers"`
+	Entities   []string              `json:"entities"`
+	Chosen     string                `json:"chosen"`
+	Rejected   string                `json:"rejected"`
+	Unsure     []string              `json:"unsure"`
 }
+
+// labelFields are the extraction fields the model may flag as unsure.
+var labelFields = []string{"title", "gist", "tags", "priority", "importance", "ask", "state", "next_step", "blocker", "why", "size", "due", "category"}
 
 // ProcessOne labels the newest unlabeled entry. It reports false when nothing
 // is waiting. Endpoint outages return errChatRetry without spending an attempt.
@@ -110,7 +128,15 @@ func (x *Extractor) ProcessOne(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	meta, err := x.extract(ctx, entry, todos, tags)
+	examples, err := x.db.LabelExamples(ctx, entry.Slug, entry.Kind, entry.ID, 4)
+	if err != nil {
+		return false, err
+	}
+	categories, err := x.db.ProjectCategories(ctx, entry.Slug, 12)
+	if err != nil {
+		return false, err
+	}
+	meta, err := x.extract(ctx, entry, todos, tags, categories, examples)
 	if errors.Is(err, errChatRetry) {
 		return false, err
 	}
@@ -168,7 +194,7 @@ func canonicalTags(tags []string, aliases map[string]string) []string {
 	return out
 }
 
-func (x *Extractor) extract(ctx context.Context, entry *store.PendingEntry, todos []store.TodoCandidate, existingTags []string) (store.EntryMeta, error) {
+func (x *Extractor) extract(ctx context.Context, entry *store.PendingEntry, todos []store.TodoCandidate, existingTags, categories []string, examples []store.LabelExample) (store.EntryMeta, error) {
 	resolves := []any{nil}
 	for _, todo := range todos {
 		resolves = append(resolves, todo.ID)
@@ -176,9 +202,13 @@ func (x *Extractor) extract(ctx context.Context, entry *store.PendingEntry, todo
 	if todos == nil {
 		todos = []store.TodoCandidate{}
 	}
-	input, _ := json.Marshal(map[string]any{"project": entry.ProjectName, "kind": entry.Kind, "agent": entry.Source,
-		"written_on": entry.CreatedAt.UTC().Format(time.DateOnly), "text": entry.Body, "open_todos": todos, "existing_tags": existingTags})
 	text := func(max int) map[string]any { return map[string]any{"type": "string", "maxLength": max} }
+	input, _ := json.Marshal(map[string]any{"project": entry.ProjectName, "kind": entry.Kind, "agent": entry.Source,
+		"written_on": entry.CreatedAt.UTC().Format(time.DateOnly), "text": entry.Body, "open_todos": todos, "existing_tags": existingTags,
+		"project_categories": nonNilList(categories), "owner_corrected": nonNilList(examples)})
+	pair := func(a, b string, limits ...int) map[string]any {
+		return map[string]any{"type": "object", "properties": map[string]any{a: text(limits[0]), b: text(limits[1])}, "required": []string{a, b}}
+	}
 	schema := map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -196,10 +226,19 @@ func (x *Extractor) extract(ctx context.Context, entry *store.PendingEntry, todo
 			"due":        map[string]any{"type": "string", "pattern": `^$|^[0-9]{4}-[0-9]{2}-[0-9]{2}$`},
 			"refs":       map[string]any{"type": "array", "items": text(300), "maxItems": 8},
 			"resolves":   map[string]any{"enum": resolves},
+			"category":   text(40),
+			"checklist": map[string]any{"type": "array", "maxItems": 10, "items": map[string]any{"type": "object",
+				"properties": map[string]any{"text": text(160), "done": map[string]any{"type": "boolean"}}, "required": []string{"text", "done"}}},
+			"numbers":  map[string]any{"type": "array", "maxItems": 5, "items": pair("label", "value", 60, 60)},
+			"entities": map[string]any{"type": "array", "items": text(60), "maxItems": 6},
+			"chosen":   text(160),
+			"rejected": text(240),
+			"unsure":   map[string]any{"type": "array", "items": map[string]any{"enum": labelFields}, "maxItems": len(labelFields)},
 		},
-		"required": []string{"title", "gist", "tags", "priority", "importance", "ask", "state", "next_step", "blocker", "why", "size", "due", "refs", "resolves"},
+		"required": []string{"title", "gist", "tags", "priority", "importance", "ask", "state", "next_step", "blocker", "why", "size", "due", "refs", "resolves",
+			"category", "checklist", "numbers", "entities", "chosen", "rejected", "unsure"},
 	}
-	content, err := x.chatJSON(ctx, extractPrompt, input, "entry_meta", schema, 900)
+	content, err := x.chatJSON(ctx, extractPrompt, input, "entry_meta", schema, 1400)
 	if err != nil {
 		return store.EntryMeta{}, err
 	}
@@ -265,7 +304,7 @@ func parseExtraction(content string, entry *store.PendingEntry, todos []store.To
 	skip := map[string]bool{entry.Kind: true, strings.ToLower(entry.Slug): true, strings.ToLower(entry.ProjectName): true, strings.ToLower(entry.Source): true}
 	for _, tag := range out.Tags {
 		tag = strings.ToLower(strings.ReplaceAll(strings.TrimSpace(tag), " ", "-"))
-		if tagPattern.MatchString(tag) && !skip[tag] && !slices.Contains(meta.Tags, tag) && len(meta.Tags) < 4 {
+		if store.TagPattern.MatchString(tag) && !skip[tag] && !slices.Contains(meta.Tags, tag) && len(meta.Tags) < 4 {
 			meta.Tags = append(meta.Tags, tag)
 		}
 	}
@@ -286,6 +325,16 @@ func parseExtraction(content string, entry *store.PendingEntry, todos []store.To
 	meta.NextStep = line(out.NextStep, 240)
 	meta.Blocker = line(out.Blocker, 240)
 	meta.Why = line(out.Why, 300)
+	meta.Category = strings.ToLower(line(out.Category, 40))
+	meta.Details = details(out, entry)
+	meta.Unsure = []string{}
+	for _, field := range out.Unsure {
+		// Only fields this kind has (and the owner can edit) can be in doubt.
+		applies := (field != "state" || entry.Kind == "status") && (!slices.Contains([]string{"size", "due", "priority"}, field) || entry.Kind == "todo")
+		if applies && slices.Contains(labelFields, field) && !slices.Contains(meta.Unsure, field) {
+			meta.Unsure = append(meta.Unsure, field)
+		}
+	}
 	if entry.Kind == "status" {
 		meta.State = oneOf(out.State, "", "done", "in_progress", "blocked")
 	}
@@ -307,13 +356,54 @@ func parseExtraction(content string, entry *store.PendingEntry, todos []store.To
 		meta.SourceName, meta.Link = note.Source, note.Link
 		tags := []string{}
 		for _, tag := range append(note.Categories, meta.Tags...) {
-			if tagPattern.MatchString(tag) && !skip[tag] && !slices.Contains(tags, tag) && len(tags) < 4 {
+			if store.TagPattern.MatchString(tag) && !skip[tag] && !slices.Contains(tags, tag) && len(tags) < 4 {
 				tags = append(tags, tag)
 			}
 		}
 		meta.Tags = tags
 	}
 	return meta, nil
+}
+
+// details keeps only extras grounded in the entry's text.
+func details(out extraction, entry *store.PendingEntry) store.MetaDetails {
+	line := func(value string, limit int) string { return clip(strings.Join(strings.Fields(value), " "), limit) }
+	lower := strings.ToLower(entry.Body)
+	var d store.MetaDetails
+	for _, item := range out.Checklist {
+		if text := line(item.Text, 160); text != "" && len(d.Checklist) < 10 {
+			d.Checklist = append(d.Checklist, store.ChecklistItem{Text: text, Done: item.Done})
+		}
+	}
+	for _, n := range out.Numbers {
+		label, value := line(n.Label, 60), line(n.Value, 60)
+		if label != "" && value != "" && strings.Contains(entry.Body, value) && len(d.Numbers) < 5 {
+			d.Numbers = append(d.Numbers, store.KeyNumber{Label: label, Value: value})
+		}
+	}
+	for _, name := range out.Entities {
+		name = line(name, 60)
+		if name != "" && strings.Contains(lower, strings.ToLower(name)) && !slices.Contains(d.Entities, name) && len(d.Entities) < 6 {
+			d.Entities = append(d.Entities, name)
+		}
+	}
+	for _, link := range linkPattern.FindAllString(entry.Body, -1) {
+		link = strings.TrimRight(link, ".,;:!?")
+		if len(link) <= 500 && !slices.Contains(d.Links, link) && len(d.Links) < 8 {
+			d.Links = append(d.Links, link)
+		}
+	}
+	if entry.Kind == "decision" {
+		d.Chosen, d.Rejected = line(out.Chosen, 200), line(out.Rejected, 300)
+	}
+	return d
+}
+
+func nonNilList[T any](values []T) []T {
+	if values == nil {
+		return []T{}
+	}
+	return values
 }
 
 func oneOf(value, fallback string, allowed ...string) string {

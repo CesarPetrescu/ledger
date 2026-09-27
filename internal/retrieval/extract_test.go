@@ -16,7 +16,7 @@ func TestParseExtractionKeepsOnlyValidatedFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := store.EntryMeta{Title: "Shipped CSV export", Tags: []string{"deploy", "two-words", "x", "y"}, Priority: "normal", Refs: []string{"internal/admin/server.go", "PR #33"}, Model: "m", Importance: "useful"}
+	want := store.EntryMeta{Title: "Shipped CSV export", Tags: []string{"deploy", "two-words", "x", "y"}, Priority: "normal", Refs: []string{"internal/admin/server.go", "PR #33"}, Model: "m", Importance: "useful", Unsure: []string{}}
 	resolves := meta.Resolves
 	meta.Resolves = nil
 	if !reflect.DeepEqual(meta, want) || resolves == nil || *resolves != 7 {
@@ -29,6 +29,26 @@ func TestParseExtractionKeepsOnlyValidatedFields(t *testing.T) {
 		if _, err := parseExtraction(bad, entry, todos, ""); err == nil {
 			t.Errorf("accepted %q", bad)
 		}
+	}
+}
+
+func TestParseExtractionGroundsDetails(t *testing.T) {
+	entry := &store.PendingEntry{Kind: "decision", Body: "Chose Stripe over Paddle for $49/mo plans. Ask Dana. Docs: https://stripe.com/docs, then deploy."}
+	meta, err := parseExtraction(`{"title":"Use Stripe","tags":[],"priority":"normal","refs":[],"resolves":null,"category":" Billing ",
+"checklist":[{"text":" wire  webhooks ","done":false},{"text":"","done":true}],
+"numbers":[{"label":"Plan price","value":"$49/mo"},{"label":"Invented","value":"$99"}],
+"entities":["Stripe","Dana","Braintree"],"chosen":"Stripe","rejected":"Paddle","unsure":["category","category","bogus","state","due"]}`, entry, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := store.MetaDetails{Checklist: []store.ChecklistItem{{Text: "wire webhooks"}}, Numbers: []store.KeyNumber{{Label: "Plan price", Value: "$49/mo"}},
+		Entities: []string{"Stripe", "Dana"}, Links: []string{"https://stripe.com/docs"}, Chosen: "Stripe", Rejected: "Paddle"}
+	if !reflect.DeepEqual(meta.Details, want) || meta.Category != "billing" || !reflect.DeepEqual(meta.Unsure, []string{"category"}) {
+		t.Fatalf("details=%#v category=%q unsure=%v", meta.Details, meta.Category, meta.Unsure)
+	}
+	entry.Kind = "note"
+	if meta, _ := parseExtraction(`{"title":"t","chosen":"Stripe","rejected":"Paddle"}`, entry, nil, ""); meta.Details.Chosen != "" || meta.Details.Rejected != "" {
+		t.Fatalf("decision fields kept on a note: %#v", meta.Details)
 	}
 }
 
