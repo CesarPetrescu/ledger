@@ -8,21 +8,23 @@ interface FieldSpec {
   kinds?: string[]
   options?: string[]
   type?: 'date' | 'long'
+  /** The server's limit for this field. */
+  max?: number
 }
 
 const FIELDS: FieldSpec[] = [
-  { field: 'title', label: 'Title' },
+  { field: 'title', label: 'Title', max: 120 },
   { field: 'importance', label: 'Importance', options: ['routine', 'useful', 'important'] },
-  { field: 'gist', label: 'Summary', type: 'long' },
-  { field: 'category', label: 'Category' },
+  { field: 'gist', label: 'Summary', type: 'long', max: 240 },
+  { field: 'category', label: 'Category', max: 40 },
   { field: 'tags', label: 'Tags (comma separated)' },
   { field: 'ask', label: 'Asks you' },
   { field: 'priority', label: 'Priority', kinds: ['todo'], options: ['low', 'normal', 'high'] },
   { field: 'size', label: 'Size', kinds: ['todo'], options: ['', 'S', 'M', 'L'] },
   { field: 'due', label: 'Due', kinds: ['todo'], type: 'date' },
   { field: 'state', label: 'State', kinds: ['status'], options: ['', 'done', 'in_progress', 'blocked'] },
-  { field: 'next_step', label: 'Next step' },
-  { field: 'blocker', label: 'Blocked by' },
+  { field: 'next_step', label: 'Next step', max: 240 },
+  { field: 'blocker', label: 'Blocked by', max: 240 },
   { field: 'why', label: 'Why', type: 'long' },
 ]
 
@@ -68,7 +70,8 @@ export function LabelEditor({ entry, onChanged }: { entry: TableEntry; onChanged
     const set: Record<string, string | string[]> = {}
     for (const spec of fields) {
       const value = (values[spec.field] ?? '').trim()
-      if (value === current(spec.field)) continue
+      // An unchanged value the AI doubted is saved too: the owner confirmed it.
+      if (value === current(spec.field) && !meta.unsure?.includes(spec.field)) continue
       set[spec.field] = spec.field === 'tags' ? value.split(/[,\s]+/).filter(Boolean) : value
     }
     if (Object.keys(set).length === 0) {
@@ -98,9 +101,9 @@ export function LabelEditor({ entry, onChanged }: { entry: TableEntry; onChanged
                 {spec.options.map((option) => <option key={option} value={option}>{shown(option)}</option>)}
               </select>
             ) : spec.type === 'long' ? (
-              <textarea rows={2} value={values[spec.field]} maxLength={300} onChange={(event) => setValues({ ...values, [spec.field]: event.target.value })} />
+              <textarea rows={2} value={values[spec.field]} maxLength={spec.max ?? 300} onChange={(event) => setValues({ ...values, [spec.field]: event.target.value })} />
             ) : (
-              <input type={spec.type === 'date' ? 'date' : 'text'} value={values[spec.field]} maxLength={spec.field === 'category' ? 40 : 300}
+              <input type={spec.type === 'date' ? 'date' : 'text'} value={values[spec.field]} maxLength={spec.max ?? 300}
                 required={spec.field === 'title'} onChange={(event) => setValues({ ...values, [spec.field]: event.target.value })} />
             )}
           </label>

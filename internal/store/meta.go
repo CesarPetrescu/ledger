@@ -144,6 +144,17 @@ WHERE entry_meta.origin='model'`, entryID, m.Title, nonNil(m.Tags), m.Priority, 
 		m.Category, m.Details, nonNil(m.Unsure)); err != nil {
 		return err
 	}
+	// Repeats folded under this entry are compared again against its new
+	// labels; checked first so a plain extraction writes nothing extra.
+	var hasRepeats bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM entry_meta WHERE duplicate_of=$1)`, entryID).Scan(&hasRepeats); err != nil {
+		return err
+	}
+	if hasRepeats {
+		if _, err := tx.Exec(ctx, `UPDATE entry_meta SET duplicate_of=NULL,duplicate_checked=false WHERE duplicate_of=$1`, entryID); err != nil {
+			return err
+		}
+	}
 	// The owner's corrections always win over the model's reading, which is
 	// kept for "reset to AI".
 	if _, err := tx.Exec(ctx, `UPDATE entry_meta_override o SET original=(SELECT COALESCE(jsonb_object_agg(k,to_jsonb(m)->k),'{}')

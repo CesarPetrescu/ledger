@@ -96,6 +96,8 @@ class TableTest {
         assertEquals("""["a","c","d"]""", set.getJSONArray("tags").toString())
         assertEquals("Confirm it", set.getString("ask"))
         assertEquals("""{"set":{},"reset":["ask"]}""", labelPatch(mapOf("ask" to "x"), emptyMap(), listOf("ask")).toString())
+        // Saving a doubted field unchanged confirms it.
+        assertEquals("""{"set":{"ask":"x"},"reset":[]}""", labelPatch(mapOf("ask" to "x"), mapOf("ask" to "x"), unsure = listOf("ask")).toString())
     }
 
     @Test fun unsureAndCategoryShowAsTags() {

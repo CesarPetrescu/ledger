@@ -1445,6 +1445,16 @@ func TestOwnerLabelsSurviveReextractionAndTeachTheExtractor(t *testing.T) {
 	if err := db.Pool.QueryRow(ctx, `SELECT duplicate_of IS NULL AND NOT duplicate_checked FROM entry_meta WHERE entry_id=$1`, repeat.ID).Scan(&rechecked); err != nil || !rechecked {
 		t.Fatalf("repeat of edited root not requeued: %v", err)
 	}
+	// A re-extraction of the root requeues its repeats the same way.
+	if _, err := db.Pool.Exec(ctx, `UPDATE entry_meta SET duplicate_of=$1,duplicate_checked=true WHERE entry_id=$2`, entry.ID, repeat.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SaveEntryMeta(ctx, entry.ID, model); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Pool.QueryRow(ctx, `SELECT duplicate_of IS NULL AND NOT duplicate_checked FROM entry_meta WHERE entry_id=$1`, repeat.ID).Scan(&rechecked); err != nil || !rechecked {
+		t.Fatalf("repeat of re-extracted root not requeued: %v", err)
+	}
 	if _, _, err := db.TrashEntry(ctx, repeat.ID); err != nil {
 		t.Fatal(err)
 	}

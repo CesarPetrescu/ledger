@@ -29,11 +29,12 @@ private val labelSpecs = listOf(
 )
 
 /** The labels request body: changed fields to override, and fields to hand back to the AI. */
-fun labelPatch(current: Map<String, String>, edited: Map<String, String>, reset: List<String> = emptyList()): JSONObject {
+fun labelPatch(current: Map<String, String>, edited: Map<String, String>, reset: List<String> = emptyList(), unsure: List<String> = emptyList()): JSONObject {
     val set = JSONObject()
     edited.forEach { (field, raw) ->
         val value = raw.trim()
-        if (value != current[field].orEmpty()) set.put(field, if (field == "tags") JSONArray(value.split(Regex("[,\\s]+")).filter { it.isNotBlank() }) else value)
+        // An unchanged value the AI doubted is sent too: the owner confirmed it.
+        if (value != current[field].orEmpty() || field in unsure) set.put(field, if (field == "tags") JSONArray(value.split(Regex("[,\\s]+")).filter { it.isNotBlank() }) else value)
     }
     return json("set" to set, "reset" to JSONArray(reset))
 }
@@ -73,7 +74,7 @@ fun LabelEditor(model: LedgerModel, entry: JSONObject, close: () -> Unit) {
         }
     }, confirmButton = {
         TextButton(enabled = !model.busy && values["title"].orEmpty().isNotBlank(), onClick = {
-            val body = labelPatch(current, values)
+            val body = labelPatch(current, values, unsure = unsure)
             open = false
             if (body.getJSONObject("set").length() > 0) model.act("Labels saved. Similar entries will be labelled this way.", after = close) { it.request("POST", path, body) }
         }) { Text("Save") }
