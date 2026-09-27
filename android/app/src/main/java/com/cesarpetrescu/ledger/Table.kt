@@ -627,6 +627,10 @@ fun ReadingScreen(model: LedgerModel) {
     EntrySheetHost(model, sheet)
 }
 
+/** A project's name, with its slug when another project shares the name. */
+private fun projectName(p: JSONObject, all: List<JSONObject>) =
+    if (all.count { it.text("name") == p.text("name") } > 1) "${p.text("name")} (${p.text("slug")})" else p.text("name")
+
 private val tableViews = listOf("activity" to "Activity", "decisions" to "Decisions", "todos" to "Todos")
 
 /** Every project's entries in one filterable list, like the web console's Table. */
@@ -662,7 +666,7 @@ fun TableScreen(model: LedgerModel) = Load(model, "table-projects", { it.request
                     }
                 }
                 if (filtersOpen) Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Choice("Project", project, listOf("" to "All projects") + projects.map { it.text("slug") to it.text("name") }) { project = it }
+                    Choice("Project", project, listOf("" to "All projects") + projects.map { p -> p.text("slug") to projectName(p, projects) }) { project = it }
                     Choice("Agent", source, listOf("" to "All agents") + pager.data?.strings("sources").orEmpty().map { it to it }) { source = it }
                     Choice("Tag", tag, listOf("" to "All tags") + pager.data?.strings("tags").orEmpty().map { it to it }) { tag = it }
                     if (view == "activity") Choice("Kind", kind, listOf("" to "All kinds") + entryKinds) { kind = it }
@@ -717,7 +721,7 @@ fun TableAdd(model: LedgerModel, defaultKind: String, initialProject: String) = 
         item { Text(if (kind == "todo") "Add a todo" else "Add an entry", style = MaterialTheme.typography.headlineSmall) }
         if (projects.isEmpty()) item { Empty("Create a project first.") }
         else {
-            item { Choice("Project", slug, projects.map { p -> p.text("slug") to if (projects.count { it.text("name") == p.text("name") } > 1) "${p.text("name")} (${p.text("slug")})" else p.text("name") }) { slug = it } }
+            item { Choice("Project", slug, projects.map { p -> p.text("slug") to projectName(p, projects) }) { slug = it } }
             item { Choice("Kind", kind, entryKinds) { kind = it } }
             item { Field("Text", body, { body = it }, multiline = true, max = 4000) }
             item { Text("Entries can't be edited. Add a correction as a new entry.", style = MaterialTheme.typography.bodySmall) }
