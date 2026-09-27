@@ -105,8 +105,8 @@ func NormalizeLabel(field string, raw json.RawMessage) (any, error) {
 }
 
 // SetLabels records the owner's corrections: set overrides fields (values
-// from NormalizeLabel), reset drops overrides so the model's reading returns
-// on the next extraction.
+// from NormalizeLabel), reset hands fields back to the model's own reading,
+// which is kept beside each correction.
 func (db *DB) SetLabels(ctx context.Context, entryID int64, set map[string]any, reset []string) error {
 	tx, err := db.Pool.Begin(ctx)
 	if err != nil {
@@ -126,20 +126,28 @@ func (db *DB) SetLabels(ctx context.Context, entryID int64, set map[string]any, 
 	if reset == nil {
 		reset = []string{}
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO entry_meta_override(entry_id,fields) VALUES($1,$2::jsonb-$3::text[])
-ON CONFLICT(entry_id) DO UPDATE SET fields=(entry_meta_override.fields-$3::text[])||$2::jsonb,updated_at=now()`, entryID, set, reset); err != nil {
+	keys := make([]string, 0, len(set))
+	for key := range set {
+		keys = append(keys, key)
+	}
+	// Remember the model's value of each newly corrected field.
+	if _, err := tx.Exec(ctx, `INSERT INTO entry_meta_override(entry_id,fields,original)
+SELECT $1,'{}',COALESCE(jsonb_object_agg(k,to_jsonb(m)->k),'{}') FROM entry_meta m,unnest($2::text[]) k WHERE m.entry_id=$1
+ON CONFLICT(entry_id) DO UPDATE SET original=EXCLUDED.original||entry_meta_override.original`, entryID, keys); err != nil {
+		return err
+	}
+	if len(reset) > 0 {
+		if _, err := tx.Exec(ctx, `UPDATE entry_meta m SET `+labelSet("(SELECT COALESCE(jsonb_object_agg(key,value),'{}') FROM jsonb_each(o.original) WHERE key=ANY($2::text[]))")+`,
+ edited=ARRAY(SELECT f FROM unnest(m.edited) f WHERE f<>ALL($2)),updated_at=now()
+FROM entry_meta_override o WHERE o.entry_id=m.entry_id AND m.entry_id=$1`, entryID, reset); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(ctx, `UPDATE entry_meta_override SET fields=(fields-$3::text[])||$2::jsonb,original=original-$3::text[],updated_at=now() WHERE entry_id=$1`, entryID, set, reset); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM entry_meta_override WHERE entry_id=$1 AND fields='{}'`, entryID); err != nil {
 		return err
-	}
-	if len(reset) > 0 {
-		// Re-extract so reset fields get the model's reading back. Version -1
-		// marks a requested re-extraction that failures retry, unlike an
-		// upgrade, which gives up after one failure.
-		if _, err := tx.Exec(ctx, `UPDATE entry_meta SET version=-1,attempts=0,edited=ARRAY(SELECT f FROM unnest(edited) f WHERE f<>ALL($2)) WHERE entry_id=$1`, entryID, reset); err != nil {
-			return err
-		}
 	}
 	if err := applyLabels(ctx, tx, entryID); err != nil {
 		return err
@@ -165,18 +173,24 @@ type execer interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 }
 
+// labelSet is the SET list that writes label values from the JSON object src
+// over entry_meta m; fields absent from src keep their value.
+func labelSet(src string) string {
+	text := func(field string) string {
+		return fmt.Sprintf("%[1]s=COALESCE(%[2]s->>'%[1]s',m.%[1]s)", field, src)
+	}
+	return strings.Join([]string{text("title"), text("gist"), text("priority"), text("importance"), text("ask"),
+		text("state"), text("next_step"), text("blocker"), text("why"), text("size"), text("category")}, ",") + `,
+ due=CASE WHEN ` + src + ` ? 'due' THEN NULLIF(` + src + `->>'due','')::date ELSE m.due END,
+ tags=CASE WHEN ` + src + ` ? 'tags' THEN (SELECT COALESCE(array_agg(tag ORDER BY first),'{}') FROM (
+   -- Tags follow merges: an alias becomes its canonical tag.
+   SELECT COALESCE(v.canonical,t.tag) tag,min(t.ord) first FROM jsonb_array_elements_text(` + src + `->'tags') WITH ORDINALITY t(tag,ord)
+   LEFT JOIN tag_vocab v ON v.tag=t.tag GROUP BY 1) merged) ELSE m.tags END`
+}
+
 // applyLabels writes an entry's overrides over its current labels.
 func applyLabels(ctx context.Context, db execer, entryID int64) error {
-	text := func(field string) string {
-		return fmt.Sprintf("%[1]s=COALESCE(o.fields->>'%[1]s',m.%[1]s)", field)
-	}
-	_, err := db.Exec(ctx, `UPDATE entry_meta m SET `+strings.Join([]string{text("title"), text("gist"), text("priority"), text("importance"), text("ask"),
-		text("state"), text("next_step"), text("blocker"), text("why"), text("size"), text("category")}, ",")+`,
- due=CASE WHEN o.fields ? 'due' THEN NULLIF(o.fields->>'due','')::date ELSE m.due END,
- tags=CASE WHEN o.fields ? 'tags' THEN (SELECT COALESCE(array_agg(tag ORDER BY first),'{}') FROM (
-   -- Owner tags follow merges too: an alias becomes its canonical tag.
-   SELECT COALESCE(v.canonical,t.tag) tag,min(t.ord) first FROM jsonb_array_elements_text(o.fields->'tags') WITH ORDINALITY t(tag,ord)
-   LEFT JOIN tag_vocab v ON v.tag=t.tag GROUP BY 1) merged) ELSE m.tags END,
+	_, err := db.Exec(ctx, `UPDATE entry_meta m SET `+labelSet("o.fields")+`,
  edited=ARRAY(SELECT jsonb_object_keys(o.fields) ORDER BY 1),
  unsure=ARRAY(SELECT u FROM unnest(m.unsure) u WHERE NOT o.fields ? u),
  updated_at=now()

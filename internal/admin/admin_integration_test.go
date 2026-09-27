@@ -1481,22 +1481,14 @@ func TestOwnerLabelsSurviveReextractionAndTeachTheExtractor(t *testing.T) {
 	if got := meta(); got.Importance != "important" || len(got.Edited) != 4 {
 		t.Fatalf("after restore: %#v", got)
 	}
-	// Reset hands a field back to the model and queues re-extraction.
+	// Reset restores the model's own values at once, with no re-extraction.
 	call(`{"reset":["importance","ask","tags","category"]}`, http.StatusOK)
-	var version int
 	var overrides int
-	if err := db.Pool.QueryRow(ctx, `SELECT m.version,(SELECT count(*) FROM entry_meta_override) FROM entry_meta m WHERE entry_id=$1`, entry.ID).Scan(&version, &overrides); err != nil || version != -1 || overrides != 0 {
-		t.Fatalf("version=%d overrides=%d err=%v", version, overrides, err)
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM entry_meta_override`).Scan(&overrides); err != nil || overrides != 0 {
+		t.Fatalf("overrides=%d err=%v", overrides, err)
 	}
-	if got := meta(); len(got.Edited) != 0 {
-		t.Fatalf("edited after reset: %v", got.Edited)
-	}
-	// A failed re-extraction after a reset is retried, not given up.
-	if err := db.RecordMetaFailure(ctx, entry.ID, "m", "bad json"); err != nil {
-		t.Fatal(err)
-	}
-	if next, err := db.NextUnlabeledEntry(ctx); err != nil || next == nil || next.ID != entry.ID {
-		t.Fatalf("reset entry not retried: %v %v", next, err)
+	if got := meta(); len(got.Edited) != 0 || got.Importance != "routine" || got.Ask != "" || got.Category != "" || !reflect.DeepEqual(got.Tags, []string{"web"}) {
+		t.Fatalf("after reset: %#v", got)
 	}
 	// Owner tags follow tag merges.
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO tag_vocab(tag,canonical) VALUES('pricing',NULL),('prices','pricing')`); err != nil {

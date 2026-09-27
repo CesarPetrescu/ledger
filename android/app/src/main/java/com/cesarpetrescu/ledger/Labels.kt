@@ -81,7 +81,7 @@ fun LabelEditor(model: LedgerModel, entry: JSONObject, close: () -> Unit) {
         Row {
             if (edited.isNotEmpty()) TextButton(enabled = !model.busy, onClick = {
                 open = false
-                model.act("Your edits were removed. The AI will label it again.", after = close) { it.request("POST", path, labelPatch(current, emptyMap(), edited)) }
+                model.act("Back to the AI's labels.", after = close) { it.request("POST", path, labelPatch(current, emptyMap(), edited)) }
             }) { Text("Reset to AI") }
             TextButton(onClick = { open = false }) { Text("Cancel") }
         }

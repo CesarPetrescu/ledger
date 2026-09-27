@@ -109,7 +109,7 @@ export function LabelEditor({ entry, onChanged }: { entry: TableEntry; onChanged
       {error && <p className="field-error" role="alert">{error}</p>}
       <div className="form-actions">
         {meta.edited && meta.edited.length > 0 && (
-          <button type="button" className="link-button" disabled={busy} onClick={() => void save({}, meta.edited ?? [], 'Your edits were removed. The AI will label it again.')}>
+          <button type="button" className="link-button" disabled={busy} onClick={() => void save({}, meta.edited ?? [], "Back to the AI's labels.")}>
             Reset to AI labels
           </button>
         )}

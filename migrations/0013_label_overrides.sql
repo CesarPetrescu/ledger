@@ -14,6 +14,8 @@ ALTER TABLE entry_meta
 CREATE TABLE entry_meta_override (
   entry_id bigint PRIMARY KEY REFERENCES entry(id) ON DELETE CASCADE,
   fields jsonb NOT NULL CHECK (jsonb_typeof(fields) = 'object'),
+  -- The model's own value of each corrected field, restored on reset.
+  original jsonb NOT NULL DEFAULT '{}' CHECK (jsonb_typeof(original) = 'object'),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
