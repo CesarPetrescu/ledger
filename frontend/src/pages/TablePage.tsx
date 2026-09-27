@@ -2,6 +2,7 @@ import { useMemo, useState, type FormEvent } from 'react'
 import { api, describeError, ENTRY_KINDS, type EntryFilter, type OwnerPatch, type ProjectSummary, type TableEntry } from '../api'
 import { useResource } from '../hooks/useResource'
 import { useUndo } from '../hooks/useUndo'
+import { refreshAll } from '../live'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { Link, useLocation } from '../router'
 import { useToast } from '../components/Toast'
@@ -477,7 +478,7 @@ function RecentView() {
     try {
       await api.undoAction(id)
       toast('Undone.')
-      actions.reload()
+      refreshAll()
     } catch (failure) {
       toast(describeError(failure), 'error')
     } finally {
@@ -522,7 +523,7 @@ function TrashView() {
     try {
       await work()
       toast(message)
-      trash.reload()
+      refreshAll()
     } catch (failure) {
       toast(describeError(failure), 'error')
     } finally {

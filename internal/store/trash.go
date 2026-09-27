@@ -89,7 +89,9 @@ const entryPayload = `jsonb_build_object(
   FROM entry_meta m WHERE m.entry_id=e.id),
  'owner',(SELECT to_jsonb(o) FROM entry_owner_state o WHERE o.entry_id=e.id),
  'receipts',(SELECT jsonb_agg(to_jsonb(w)) FROM entry_write_receipt w WHERE w.entry_id=e.id),
- 'resolved_by',(SELECT r.entry_id FROM entry_meta r WHERE r.resolves=e.id))`
+ -- Likewise the entry that closed this todo may already be in Trash.
+ 'resolved_by',COALESCE((SELECT r.entry_id FROM entry_meta r WHERE r.resolves=e.id),
+   (SELECT (t.payload->'entry'->>'id')::bigint FROM trash t WHERE t.kind='entry' AND (t.payload->'meta'->>'resolves')::bigint=e.id LIMIT 1)))`
 
 // lockEntries locks the entries matching cond (on alias e) and their
 // metadata and triage rows, so a snapshot taken afterwards includes writes that were in flight.

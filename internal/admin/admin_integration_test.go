@@ -1350,19 +1350,25 @@ func TestTrashKeepsResolutionsAndProjectIdentity(t *testing.T) {
 		return n == 1
 	}
 	// Todo and the entry that closed it, trashed separately, restored in either order.
-	for _, todoFirst := range []bool{true, false} {
+	for _, c := range []struct{ trashTodoFirst, todoFirst bool }{{true, true}, {true, false}, {false, true}, {false, false}} {
+		todoFirst := c.todoFirst
 		todo, _ := db.AppendEntry(ctx, "atlas", "todo", "Add export", "codex", "c")
 		done, _, err := db.ResolveTodo(ctx, todo.ID, "ledger-admin", "c")
 		if err != nil {
 			t.Fatal(err)
 		}
-		todoTrash, _, err := db.TrashEntry(ctx, todo.ID)
-		if err != nil {
-			t.Fatal(err)
+		var todoTrash, doneTrash int64
+		trash := []struct {
+			id  int64
+			out *int64
+		}{{todo.ID, &todoTrash}, {done.ID, &doneTrash}}
+		if !c.trashTodoFirst {
+			trash[0], trash[1] = trash[1], trash[0]
 		}
-		doneTrash, _, err := db.TrashEntry(ctx, done.ID)
-		if err != nil {
-			t.Fatal(err)
+		for _, item := range trash {
+			if *item.out, _, err = db.TrashEntry(ctx, item.id); err != nil {
+				t.Fatal(err)
+			}
 		}
 		order := []int64{todoTrash, doneTrash}
 		if !todoFirst {
@@ -1374,7 +1380,7 @@ func TestTrashKeepsResolutionsAndProjectIdentity(t *testing.T) {
 			}
 		}
 		if !resolved(todo.ID) {
-			t.Fatalf("todo reopened after restoring both (todo first=%v)", todoFirst)
+			t.Fatalf("todo reopened after restoring both (%+v)", c)
 		}
 	}
 	// An entry does not go back into a different project with its slug.
