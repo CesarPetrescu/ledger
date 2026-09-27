@@ -417,7 +417,11 @@ func (db *DB) UndoAction(ctx context.Context, actionID int64) error {
 	switch kind {
 	case "resolve":
 		var still bool
-		// Locking the link serializes with a concurrent reopen, which clears it.
+		// Lock the Done entry, then the link, in the same order as Trash does;
+		// locking the link serializes with a concurrent reopen, which clears it.
+		if _, err := tx.Exec(ctx, `SELECT 1 FROM entry WHERE id=$1 FOR UPDATE`, undo.DoneEntryID); err != nil {
+			return err
+		}
 		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM entry_meta WHERE entry_id=$1 AND resolves=$2 FOR UPDATE)`, undo.DoneEntryID, undo.TodoID).Scan(&still); err != nil {
 			return err
 		}
@@ -430,6 +434,10 @@ func (db *DB) UndoAction(ctx context.Context, actionID int64) error {
 		}
 	case "reopen":
 		var todoExists, resolved, resolverExists bool
+		// Entries before metadata, as Trash locks them.
+		if _, err := tx.Exec(ctx, `SELECT 1 FROM entry WHERE id=ANY($1) ORDER BY id FOR UPDATE`, []int64{undo.TodoID, undo.ResolverID}); err != nil {
+			return err
+		}
 		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM entry WHERE id=$1 FOR UPDATE),EXISTS (SELECT 1 FROM entry_meta WHERE resolves=$1),EXISTS (SELECT 1 FROM entry_meta WHERE entry_id=$2 FOR UPDATE)`,
 			undo.TodoID, undo.ResolverID).Scan(&todoExists, &resolved, &resolverExists); err != nil {
 			return err
