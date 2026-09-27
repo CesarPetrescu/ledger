@@ -21,6 +21,8 @@ ASK = dict(id='70', slug='atlas', project_name='Atlas', kind='note', body='Prici
 NEWS = dict(id='60', slug='atlas', project_name='Atlas', kind='note', body='Title: Fixture model ships\nWhy it matters: Faster tests.\nURL: https://example.com/news', source='claude-code', created_at='2026-09-06T07:00:00Z',
             owner=dict(OWNER), meta=dict(title='Fixture model ships', tags=[], refs=[], origin='model', why='Faster tests.', source='Example', link='https://example.com/news'))
 ACTIONS = []
+DECISION = dict(id='80', slug='atlas', project_name='Atlas', kind='decision', body='Use SQLite for the fixture cache.', source='codex', created_at='2026-09-06T06:00:00Z',
+                owner=dict(OWNER), meta=dict(title='Use SQLite for the fixture cache', tags=['storage'], refs=[], origin='model', details=dict(chosen='SQLite')))
 EVENT = dict(id='event-1', calendar_id='calendar-1', calendar_name='Planning', title='Plan the week', start='2026-09-06T10:00:00Z', end='2026-09-06T11:00:00Z', all_day=False, recurring=False, etag='"v1"')
 
 def record(kind, label, undo):
@@ -144,6 +146,8 @@ class Handler(BaseHTTPRequestHandler):
                 state = 'done' if 'resolved_by' in TODO else 'open'
                 show = one('status') in ('', state)
                 return self.send_json(200, {'entries': [TODO] if show else [], 'sources': ['codex'], 'tags': ['fixture']})
+            if one('kind') == 'decision':
+                return self.send_json(200, {'entries': [DECISION], 'sources': ['codex'], 'tags': ['storage']})
             if one('kind') not in ('', 'note'):
                 return self.send_json(200, {'entries': [], 'sources': [], 'tags': []})
             return self.send_json(200, {'entries': ENTRIES, 'sources': ['owner'], 'tags': []})
@@ -155,7 +159,7 @@ class Handler(BaseHTTPRequestHandler):
                     target['owner'][key] = bool(body[key])
             action_id = record('owner', 'Marked read' if body.get('read') else 'Updated', undo=lambda: target['owner'].update(before))
             return self.send_json(200, dict(target['owner'], action_id=action_id))
-        if re.fullmatch(r'/entries/(50|60|70)/related', path):
+        if re.fullmatch(r'/entries/(50|60|70|80)/related', path):
             return self.send_json(200, {'related': []})
         if path == '/entries/50/labels' and method == 'POST':
             TODO['meta'].update(body['set'])
