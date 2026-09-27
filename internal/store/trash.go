@@ -70,7 +70,11 @@ func recordAction(ctx context.Context, tx pgx.Tx, kind string, entryID *int64, s
 
 // requeue asks the indexer to rebuild (or, for a removed ref, drop) chunks.
 func requeue(ctx context.Context, tx pgx.Tx, refs ...string) error {
-	_, err := tx.Exec(ctx, `INSERT INTO chunk_dirty(ref) SELECT unnest($1::text[]) ON CONFLICT(ref) DO UPDATE SET queued_at=now()`, refs)
+	if _, err := tx.Exec(ctx, `INSERT INTO chunk_dirty(ref) SELECT unnest($1::text[]) ON CONFLICT(ref) DO UPDATE SET queued_at=now()`, refs); err != nil {
+		return err
+	}
+	// Wake the indexer on commit, as the insert triggers do.
+	_, err := tx.Exec(ctx, `SELECT pg_notify('chunk_dirty',ref) FROM unnest($1::text[]) ref`, refs)
 	return err
 }
 
@@ -401,10 +405,13 @@ func (db *DB) UndoAction(ctx context.Context, actionID int64) error {
 			return err
 		}
 	case "reopen":
-		var resolved, resolverExists bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM entry_meta WHERE resolves=$1),EXISTS (SELECT 1 FROM entry_meta WHERE entry_id=$2)`,
-			undo.TodoID, undo.ResolverID).Scan(&resolved, &resolverExists); err != nil {
+		var todoExists, resolved, resolverExists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM entry WHERE id=$1 FOR UPDATE),EXISTS (SELECT 1 FROM entry_meta WHERE resolves=$1),EXISTS (SELECT 1 FROM entry_meta WHERE entry_id=$2)`,
+			undo.TodoID, undo.ResolverID).Scan(&todoExists, &resolved, &resolverExists); err != nil {
 			return err
+		}
+		if !todoExists {
+			return &UndoConflict{"The todo was deleted since. Restore it from Trash first."}
 		}
 		if resolved || !resolverExists {
 			return &UndoConflict{"The todo was closed again or its Done entry deleted since."}

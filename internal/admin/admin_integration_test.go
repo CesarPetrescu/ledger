@@ -1285,6 +1285,22 @@ func TestUndoRefusesTriageRedoneSince(t *testing.T) {
 		t.Fatalf("undo after restore = %d %s", res.Code, res.Body.String())
 	}
 
+	// Undoing a reopen of a todo deleted since is a conflict, not a failure.
+	todo, _ := db.AppendEntry(ctx, "atlas", "todo", "Temporary todo", "codex", "c")
+	if _, _, err := db.ResolveTodo(ctx, todo.ID, "ledger-admin", "c"); err != nil {
+		t.Fatal(err)
+	}
+	_, reopenID, err := db.ReopenTodo(ctx, todo.ID, "ledger-admin", "c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := db.TrashEntry(ctx, todo.ID); err != nil {
+		t.Fatal(err)
+	}
+	if res := request(t, server, http.MethodPost, "/admin/api/actions/"+strconv.FormatInt(reopenID, 10)+"/undo", "", authed(s, true)); res.Code != http.StatusConflict {
+		t.Fatalf("undo reopen of deleted todo = %d %s", res.Code, res.Body.String())
+	}
+
 	// An idempotent write stays idempotent after its entry is restored.
 	once, err := db.AppendEntryOnce(ctx, "atlas", "note", "Glass capture", "glass", "c", "request-0001")
 	if err != nil {
