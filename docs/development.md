@@ -33,6 +33,16 @@ make test-stack
 
 Use an isolated Compose project and a temporary host-port override when `8080` is taken.
 
+To measure label quality against your chat model, run the opt-in eval. It scores importance, priority, state, size, asks, decisions, and tags per field and overall:
+
+```sh
+LEDGER_EVAL_FILE=$PWD/internal/retrieval/testdata/eval_sample.jsonl \
+LEDGER_CHAT_URL=http://<chat-host>/v1 \
+go test -tags=eval -count=1 -run TestEvalLabels -v ./internal/retrieval
+```
+
+The sample holds 30 fictional entries. To evaluate on your own entries, write them in the same JSONL shape under `.private/` (ignored by Git) and point `LEDGER_EVAL_FILE` there. Never commit real entries.
+
 ### Repository layout
 
 ```text

@@ -135,6 +135,7 @@ func (db *DB) ListEntries(ctx context.Context, f EntryFilter) ([]EntryWithProjec
  m.entry_id IS NOT NULL AND m.title<>'',COALESCE(m.title,''),COALESCE(m.tags,'{}'),COALESCE(m.priority,''),COALESCE(m.refs,'{}'),COALESCE(m.origin,''),m.duplicate_of,
  COALESCE(m.gist,''),COALESCE(m.importance,''),COALESCE(m.ask,''),COALESCE(m.state,''),COALESCE(m.next_step,''),COALESCE(m.blocker,''),
  COALESCE(m.why,''),COALESCE(m.size,''),COALESCE(to_char(m.due,'YYYY-MM-DD'),''),COALESCE(m.source_name,''),COALESCE(m.link,''),
+ COALESCE(m.category,''),COALESCE(m.details,'{}'),COALESCE(m.unsure,'{}'),COALESCE(m.edited,'{}'),
  o.read_at IS NOT NULL,COALESCE(o.starred,false),o.handled_at IS NOT NULL,COALESCE(to_char(o.snoozed_until,'YYYY-MM-DD'),''),
  rb.entry_id,COALESCE(rb.origin,''),rb.created_at
 FROM entry e JOIN project p ON p.slug=e.slug
@@ -168,6 +169,7 @@ ORDER BY e.created_at DESC,e.id DESC LIMIT $8`, f.ProjectSlug, f.Kind, f.Source,
 			&hasMeta, &meta.Title, &meta.Tags, &meta.Priority, &meta.Refs, &meta.Origin, &e.DuplicateOf,
 			&meta.Gist, &meta.Importance, &meta.Ask, &meta.State, &meta.NextStep, &meta.Blocker,
 			&meta.Why, &meta.Size, &meta.Due, &meta.SourceName, &meta.Link,
+			&meta.Category, &meta.Details, &meta.Unsure, &meta.Edited,
 			&e.Owner.Read, &e.Owner.Starred, &e.Owner.Handled, &e.Owner.SnoozedUntil,
 			&resolverID, &resolution.Origin, &resolvedAt); err != nil {
 			return nil, err

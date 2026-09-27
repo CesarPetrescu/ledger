@@ -89,6 +89,7 @@ const entryPayload = `jsonb_build_object(
   FROM entry_meta m WHERE m.entry_id=e.id),
  'owner',(SELECT to_jsonb(o) FROM entry_owner_state o WHERE o.entry_id=e.id),
  'receipts',(SELECT jsonb_agg(to_jsonb(w)) FROM entry_write_receipt w WHERE w.entry_id=e.id),
+ 'labels',(SELECT to_jsonb(l) FROM entry_meta_override l WHERE l.entry_id=e.id),
  -- Likewise the entry that closed this todo may already be in Trash.
  'resolved_by',COALESCE((SELECT r.entry_id FROM entry_meta r WHERE r.resolves=e.id),
    (SELECT (t.payload->'entry'->>'id')::bigint FROM trash t WHERE t.kind='entry' AND (t.payload->'meta'->>'resolves')::bigint=e.id LIMIT 1)))`
@@ -231,6 +232,7 @@ type storedEntry struct {
 	Meta       json.RawMessage `json:"meta"`
 	Owner      json.RawMessage `json:"owner"`
 	Receipts   json.RawMessage `json:"receipts"`
+	Labels     json.RawMessage `json:"labels"`
 	ResolvedBy *int64          `json:"resolved_by"`
 }
 
@@ -300,6 +302,11 @@ func restore(ctx context.Context, tx pgx.Tx, trashID int64) error {
 		// Idempotent writes stay idempotent: a retried request finds its entry.
 		if len(e.Receipts) > 0 && string(e.Receipts) != "null" {
 			if _, err := tx.Exec(ctx, `INSERT INTO entry_write_receipt SELECT * FROM jsonb_populate_recordset(NULL::entry_write_receipt,$1) ON CONFLICT DO NOTHING`, []byte(e.Receipts)); err != nil {
+				return err
+			}
+		}
+		if len(e.Labels) > 0 && string(e.Labels) != "null" {
+			if _, err := tx.Exec(ctx, `INSERT INTO entry_meta_override SELECT * FROM jsonb_populate_record(NULL::entry_meta_override,$1)`, []byte(e.Labels)); err != nil {
 				return err
 			}
 		}

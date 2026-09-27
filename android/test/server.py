@@ -13,7 +13,8 @@ ENTRIES = []
 MESSAGES = [dict(id='1', handoff_id='1', body='Review the Atlas plan', target='', work_state='draft', delivery_state='unseen', source='owner', created_at='2026-09-06T10:00:00Z', files=[])]
 HANDOFF = dict(id='1', title='Atlas handoff', description='A fictional handoff', scope='Planning', project_slug='atlas', project_name='Atlas', updated_at='2026-09-06T10:00:00Z')
 TODO = dict(id='50', slug='atlas', project_name='Atlas', kind='todo', body='Write the fixture todo in full detail', source='codex', created_at='2026-09-06T09:00:00Z',
-            meta=dict(title='Write the fixture todo', tags=['fixture'], priority='high', refs=[], origin='model'))
+            meta=dict(title='Write the fixture todo', tags=['fixture'], priority='high', refs=[], origin='model', unsure=['category'],
+                      details=dict(checklist=[dict(text='Draft the fixture', done=True)])))
 OWNER = dict(read=False, starred=False, handled=False)
 ASK = dict(id='70', slug='atlas', project_name='Atlas', kind='note', body='Pricing claims on the site are unverified.', source='claude-code', created_at='2026-09-06T08:00:00Z',
            owner=dict(OWNER), meta=dict(title='Pricing claims unverified', tags=[], refs=[], origin='model', ask='Confirm the fixture pricing', importance='important'))
@@ -156,6 +157,11 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(200, dict(target['owner'], action_id=action_id))
         if re.fullmatch(r'/entries/(50|60|70)/related', path):
             return self.send_json(200, {'related': []})
+        if path == '/entries/50/labels' and method == 'POST':
+            TODO['meta'].update(body['set'])
+            TODO['meta']['edited'] = sorted(body['set'])
+            TODO['meta']['unsure'] = [f for f in TODO['meta']['unsure'] if f not in body['set']]
+            return self.send_json(200, {'saved': True})
         if path == '/entries/50/resolve' and method == 'POST':
             if 'resolved_by' in TODO:
                 return self.send_json(409, {'error': 'todo is already done'})

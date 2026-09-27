@@ -24,7 +24,7 @@ func TestExtractorLabelsEntriesAndLinksResolvedTodos(t *testing.T) {
 		t.Fatal(err)
 	}
 	var down atomic.Bool
-	var sawTodo atomic.Bool
+	var sawTodo, sawLearning atomic.Bool
 	chat := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if down.Load() {
 			http.Error(w, "loading", http.StatusServiceUnavailable)
@@ -35,9 +35,10 @@ func TestExtractorLabelsEntriesAndLinksResolvedTodos(t *testing.T) {
 		}
 		_ = json.NewDecoder(r.Body).Decode(&request)
 		input := request.Messages[1].Content
-		reply := `{"title":"Add CSV export","tags":["export"],"priority":"high","refs":[],"resolves":null}`
+		reply := `{"title":"Add CSV export","tags":["export"],"priority":"high","refs":[],"resolves":null,"category":"Exports"}`
 		if strings.Contains(input, "Shipped") {
 			sawTodo.Store(strings.Contains(input, `"open_todos":[{"id":`))
+			sawLearning.Store(strings.Contains(input, `"project_categories":["exports"]`) && strings.Contains(input, `"owner_corrected":[{"text":"Add CSV export","owner_corrected":{"importance":"important"}}]`))
 			reply = `{"title":"Shipped CSV export","tags":["export"],"priority":"normal","refs":[],"resolves":` + jsonID(todo.ID) + `}`
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": reply}}}})
@@ -46,6 +47,10 @@ func TestExtractorLabelsEntriesAndLinksResolvedTodos(t *testing.T) {
 	x := NewExtractor(db, chat.URL, "", "", nil, 0.9)
 	if worked, err := x.ProcessOne(ctx); !worked || err != nil {
 		t.Fatalf("todo extraction = %v %v", worked, err)
+	}
+	// The owner's correction becomes an example for the next extraction.
+	if err := db.SetLabels(ctx, todo.ID, map[string]any{"importance": "important"}, nil); err != nil {
+		t.Fatal(err)
 	}
 	done, err := db.AppendEntry(ctx, "atlas", "status", "Shipped the export.", "codex", "c")
 	if err != nil {
@@ -61,8 +66,8 @@ func TestExtractorLabelsEntriesAndLinksResolvedTodos(t *testing.T) {
 		t.Fatalf("outage spent an attempt: %d %v", rows, err)
 	}
 	down.Store(false)
-	if worked, err := x.ProcessOne(ctx); !worked || err != nil || !sawTodo.Load() {
-		t.Fatalf("status extraction = %v %v open todos sent=%v", worked, err, sawTodo.Load())
+	if worked, err := x.ProcessOne(ctx); !worked || err != nil || !sawTodo.Load() || !sawLearning.Load() {
+		t.Fatalf("status extraction = %v %v open todos sent=%v categories and corrections sent=%v", worked, err, sawTodo.Load(), sawLearning.Load())
 	}
 	if worked, err := x.ProcessOne(ctx); worked || err != nil {
 		t.Fatalf("idle = %v %v", worked, err)

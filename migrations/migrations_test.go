@@ -79,7 +79,7 @@ func TestAdminSessionMigrationStoresHashesOnly(t *testing.T) {
 	for _, entry := range entries {
 		names = append(names, entry.Name())
 	}
-	if len(names) != 12 || names[0] != "0001_init.sql" || names[1] != "0002_admin_session.sql" || names[2] != "0003_admin_events.sql" || names[3] != "0004_calendar.sql" || names[4] != "0005_handoffs.sql" || names[5] != "0006_device_auth.sql" || names[6] != "0007_glass.sql" || names[7] != "0008_entry_meta.sql" || names[8] != "0009_entry_insights.sql" || names[9] != "0010_insight_fixes.sql" || names[10] != "0011_focus_metadata.sql" || names[11] != "0012_trash_and_undo.sql" {
+	if len(names) != 13 || names[0] != "0001_init.sql" || names[1] != "0002_admin_session.sql" || names[2] != "0003_admin_events.sql" || names[3] != "0004_calendar.sql" || names[4] != "0005_handoffs.sql" || names[5] != "0006_device_auth.sql" || names[6] != "0007_glass.sql" || names[7] != "0008_entry_meta.sql" || names[8] != "0009_entry_insights.sql" || names[9] != "0010_insight_fixes.sql" || names[10] != "0011_focus_metadata.sql" || names[11] != "0012_trash_and_undo.sql" || names[12] != "0013_label_overrides.sql" {
 		t.Fatalf("migration files = %v, want strictly numbered sequence", names)
 	}
 }

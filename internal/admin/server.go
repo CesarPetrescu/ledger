@@ -97,6 +97,7 @@ func NewServer(config Config, db *store.DB) *Server {
 	s.mux.HandleFunc("POST /admin/api/entries/{id}/reopen", s.reopenTodo)
 	s.mux.HandleFunc("GET /admin/api/entries/{id}/related", s.relatedEntries)
 	s.mux.HandleFunc("POST /admin/api/entries/{id}/owner", s.setOwnerState)
+	s.mux.HandleFunc("POST /admin/api/entries/{id}/labels", s.setLabels)
 	s.mux.HandleFunc("GET /admin/api/inbox", s.inbox)
 	s.mux.HandleFunc("DELETE /admin/api/entries/{id}", s.trashEntry)
 	s.mux.HandleFunc("GET /admin/api/projects/{slug}/deletion", s.projectDeletionPreview)
@@ -690,6 +691,57 @@ func (s *Server) setOwnerState(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, withAction(map[string]any{"read": state.Read, "starred": state.Starred, "handled": state.Handled, "snoozed_until": state.SnoozedUntil}, actionID))
 	case errors.Is(err, store.ErrInvalidSnooze):
 		writeError(w, http.StatusBadRequest, err.Error())
+	case store.IsNotFound(err):
+		writeError(w, http.StatusNotFound, "entry not found")
+	default:
+		s.internalError(w, r, err)
+	}
+}
+
+// setLabels applies the owner's label corrections: set overrides fields,
+// reset returns them to the model's reading.
+func (s *Server) setLabels(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathEntryID(w, r)
+	if !ok {
+		return
+	}
+	var input struct {
+		Set   map[string]json.RawMessage `json:"set"`
+		Reset []string                   `json:"reset"`
+	}
+	if err := decodeJSON(w, r, &input, maxBodyBytes); err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if len(input.Set) == 0 && len(input.Reset) == 0 {
+		writeError(w, http.StatusBadRequest, "set or reset at least one label")
+		return
+	}
+	set := map[string]any{}
+	for field, raw := range input.Set {
+		if !store.EditableLabel(field) {
+			writeError(w, http.StatusBadRequest, "unknown label "+strconv.Quote(field))
+			return
+		}
+		value, err := store.NormalizeLabel(field, raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		set[field] = value
+	}
+	for _, field := range input.Reset {
+		if !store.EditableLabel(field) || set[field] != nil {
+			writeError(w, http.StatusBadRequest, "cannot reset "+strconv.Quote(field))
+			return
+		}
+	}
+	err := s.db.SetLabels(r.Context(), id, set, input.Reset)
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusOK, map[string]any{"saved": true})
+	case errors.Is(err, store.ErrLabelsPending):
+		writeError(w, http.StatusConflict, err.Error())
 	case store.IsNotFound(err):
 		writeError(w, http.StatusNotFound, "entry not found")
 	default:

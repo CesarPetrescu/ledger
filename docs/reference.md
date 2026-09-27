@@ -8,7 +8,7 @@ Project memory, agent handoffs, calendar access, and the MCP interface. For inst
 
 ## How it works
 
-Each **project** has a slug, name, tier (`focus`, `maintain`, or `park`), weekly hours budget, goal, deadline, stack, and description. Each project owns a timeline of immutable **entries** of kind `decision`, `note`, `todo`, or `status`, each attributed to the client that wrote it.
+Each **project** has a slug, name, tier (`focus`, `maintain`, or `park`), weekly hours budget, goal, deadline, stack, and description. Each project owns a timeline of **entries** of kind `decision`, `note`, `todo`, or `status`, each attributed to the client that wrote it. Entries are never edited; the owner can delete an entry or a whole project from the console, which moves it to Trash for 30 days.
 
 **Handoffs** let one assistant leave durable work for another. A handoff contains append-only messages, routing hints, attachments, and independent delivery/work states, so Claude, ChatGPT, Codex, or another MCP client can acknowledge, claim, block, complete, or continue the same thread. Handoffs may be linked to a project; their files then also appear in that project's Files tab.
 
@@ -69,6 +69,9 @@ nginx :8080 (only published port)
 - Optional Nextcloud calendar integration with owner-selected calendars and ETag-safe event updates
 - Responsive operator console with live WebSocket updates across projects, search, calendar, handoffs, files, and OAuth clients
 - Table view with per-project weekly digests, todos you can close or reopen, a decision log, and day-grouped activity; with an optional chat model, entries get short titles, merged tags, priorities, and automatic todo resolution, and embeddings fold repeated entries and suggest related ones. Derived data lives beside the entries and never changes them
+- Richer labels: gist, importance, what an entry asks of you, state, next step, blocker, size, due date, a per-project category, checklists, key numbers, named entities, links, and a decision's chosen and rejected options. Labels the model was unsure of are flagged for a check. The owner can correct any label; corrections survive re-extraction and are shown to the model as examples for similar entries
+- Undo for every quick action (mark done, reopen, read, star, handle, snooze, delete), each on its own, from the notice or from Recent actions for 7 days; a stale undo is refused rather than overwriting newer changes
+- Light, dark, and system themes in the console and the Android app
 - Containerized deployment with non-root runtimes and a single published port
 
 ## MCP surface

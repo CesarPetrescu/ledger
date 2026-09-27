@@ -12,6 +12,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -1397,5 +1398,81 @@ func TestTrashKeepsResolutionsAndProjectIdentity(t *testing.T) {
 	}
 	if err := db.RestoreTrash(ctx, noteTrash); !errors.Is(err, store.ErrProjectGone) {
 		t.Fatalf("restore into replacement project = %v", err)
+	}
+}
+
+func TestOwnerLabelsSurviveReextractionAndTeachTheExtractor(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
+	_, s := login(t, server, "correct horse", "")
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	entry, _ := db.AppendEntry(ctx, "atlas", "note", "Pricing claims on the site are unverified", "codex", "c")
+	path := "/admin/api/entries/" + strconv.FormatInt(entry.ID, 10) + "/labels"
+	call := func(body string, want int) {
+		t.Helper()
+		if res := request(t, server, http.MethodPost, path, body, authed(s, true)); res.Code != want {
+			t.Fatalf("POST %s = %d %s", body, res.Code, res.Body.String())
+		}
+	}
+	meta := func() store.EntryMeta {
+		t.Helper()
+		rows, err := db.ListEntries(ctx, store.EntryFilter{ProjectSlug: "atlas"})
+		if err != nil || len(rows) != 1 || rows[0].Meta == nil {
+			t.Fatalf("rows=%v err=%v", rows, err)
+		}
+		return *rows[0].Meta
+	}
+	call(`{"set":{"title":"Too early"}}`, http.StatusConflict)
+	model := store.EntryMeta{Title: "Pricing note", Importance: "routine", Tags: []string{"web"}, Unsure: []string{"importance", "ask"}}
+	if err := db.SaveEntryMeta(ctx, entry.ID, model); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{`{}`, `{"set":{"model":"x"}}`, `{"set":{"importance":"urgent"}}`, `{"set":{"title":" "}}`,
+		`{"set":{"tags":["a","b","c","d","e"]}}`, `{"set":{"due":"soon"}}`, `{"reset":["title"],"set":{"title":"x"}}`} {
+		call(bad, http.StatusBadRequest)
+	}
+	call(`{"set":{"importance":"important","ask":"Confirm the pricing","tags":["Pricing","web"],"category":"Marketing Site"}}`, http.StatusOK)
+	got := meta()
+	if got.Importance != "important" || got.Ask != "Confirm the pricing" || !reflect.DeepEqual(got.Tags, []string{"pricing", "web"}) || got.Category != "marketing site" ||
+		!reflect.DeepEqual(got.Edited, []string{"ask", "category", "importance", "tags"}) || len(got.Unsure) != 0 || got.Title != "Pricing note" {
+		t.Fatalf("after edit: %#v", got)
+	}
+	// A later extraction keeps the owner's corrections.
+	model.Title = "Pricing claims unverified"
+	if err := db.SaveEntryMeta(ctx, entry.ID, model); err != nil {
+		t.Fatal(err)
+	}
+	if got := meta(); got.Importance != "important" || got.Ask != "Confirm the pricing" || got.Title != "Pricing claims unverified" {
+		t.Fatalf("after re-extraction: %#v", got)
+	}
+	examples, err := db.LabelExamples(ctx, "atlas", "note", 0, 4)
+	if err != nil || len(examples) != 1 || !strings.Contains(string(examples[0].Corrected), `"importance": "important"`) {
+		t.Fatalf("examples=%s err=%v", examples, err)
+	}
+	if categories, err := db.ProjectCategories(ctx, "atlas", 5); err != nil || !reflect.DeepEqual(categories, []string{"marketing site"}) {
+		t.Fatalf("categories=%v err=%v", categories, err)
+	}
+	// Corrections survive Trash and restore.
+	trashID, _, err := db.TrashEntry(ctx, entry.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RestoreTrash(ctx, trashID); err != nil {
+		t.Fatal(err)
+	}
+	if got := meta(); got.Importance != "important" || len(got.Edited) != 4 {
+		t.Fatalf("after restore: %#v", got)
+	}
+	// Reset hands a field back to the model and queues re-extraction.
+	call(`{"reset":["importance","ask","tags","category"]}`, http.StatusOK)
+	var version int
+	var overrides int
+	if err := db.Pool.QueryRow(ctx, `SELECT m.version,(SELECT count(*) FROM entry_meta_override) FROM entry_meta m WHERE entry_id=$1`, entry.ID).Scan(&version, &overrides); err != nil || version != 0 || overrides != 0 {
+		t.Fatalf("version=%d overrides=%d err=%v", version, overrides, err)
+	}
+	if got := meta(); len(got.Edited) != 0 {
+		t.Fatalf("edited after reset: %v", got.Edited)
 	}
 }

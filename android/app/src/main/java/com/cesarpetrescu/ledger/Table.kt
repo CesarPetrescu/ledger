@@ -129,6 +129,8 @@ fun focusLabels(entry: JSONObject, today: LocalDate = LocalDate.now(), now: Offs
         if (due != null && open) add((if (due < today) "Overdue " else "Due ") + due.format(DateTimeFormatter.ofPattern("d MMM")) to if (due < today) Tone.Danger else Tone.Neutral)
         val created = runCatching { OffsetDateTime.parse(entry.text("created_at")) }.getOrNull()
         if (todo && open && created != null && Duration.between(created, now).toDays() > STALE_DAYS) add("Stale" to Tone.Neutral)
+        if (meta.strings("unsure").isNotEmpty()) add("Check" to Tone.Warn)
+        if (meta.text("category").isNotBlank()) add(meta.text("category") to Tone.Neutral)
     }
 }
 
@@ -354,14 +356,23 @@ private fun EntrySheet(model: LedgerModel, entry: JSONObject, repeats: List<JSON
                 OutlinedButton(onClick = { act { ownerAction(model, entry, if (starred) "Unstarred" else "Starred", "starred" to !starred) } }, enabled = !model.busy) { Text(if (starred) "Unstar" else "Star") }
             }
             if (openTodo && meta?.text("due")?.isNotBlank() == true) OutlinedButton(onClick = { act { addToCalendar(model, entry) } }, enabled = !model.busy) { Text("Add to calendar") }
+            if (meta != null && meta.text("title").isNotBlank()) LabelEditor(model, entry, close)
             TextButton(onClick = { close(); model.go(projectRoute(entry.text("slug"))) }) { Text("Open project") }
             ConfirmButton("Delete", "Move this entry to Trash? You can undo it or restore it from Trash for 30 days.", !model.busy) {
                 act { model.undoable("Entry moved to Trash") { it.request("DELETE", "/entries/${segment(id)}") } }
             }
         }
+        meta?.let { LabelNotes(it) }
+        val details = meta?.optJSONObject("details") ?: JSONObject()
         if (meta != null) listOf(
             "Asks you" to meta.text("ask"), "Summary" to meta.text("gist"), "Next step" to meta.text("next_step"), "Blocked by" to meta.text("blocker"),
-            (if (entry.text("kind") == "decision") "Why" else "Why it matters") to meta.text("why"), "Source" to meta.text("source"),
+            (if (entry.text("kind") == "decision") "Why" else "Why it matters") to meta.text("why"),
+            "Chose" to details.text("chosen"), "Turned down" to details.text("rejected"),
+            "Checklist" to details.rows("checklist").joinToString("\n") { (if (it.optBoolean("done")) "☑ " else "☐ ") + it.text("text") },
+            "Key numbers" to details.rows("numbers").joinToString(" · ") { "${it.text("label")}: ${it.text("value")}" },
+            "About" to details.strings("entities").joinToString(", "),
+            "Links" to details.strings("links").filter { it != meta.text("link") }.joinToString("\n"),
+            "Source" to meta.text("source"),
         ).filter { it.second.isNotBlank() }.forEach { (name, value) ->
             Column { Text(name, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant); SelectionContainer { Text(value, style = MaterialTheme.typography.bodyMedium) } }
         }
