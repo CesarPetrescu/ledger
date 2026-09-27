@@ -167,6 +167,9 @@ func (db *DB) ResolveTodo(ctx context.Context, todoID int64, source, clientID st
 		return Entry{}, 0, err
 	}
 	defer tx.Rollback(ctx)
+	if err := lockProjectOf(ctx, tx, todoID); err != nil {
+		return Entry{}, 0, err
+	}
 	var slug, kind, text string
 	var resolved bool
 	if err := tx.QueryRow(ctx, `SELECT e.slug,e.kind,COALESCE(NULLIF(m.title,''),e.body),EXISTS (SELECT 1 FROM entry_meta r WHERE r.resolves=e.id)
@@ -208,6 +211,9 @@ func (db *DB) ReopenTodo(ctx context.Context, todoID int64, source, clientID str
 		return Entry{}, 0, err
 	}
 	defer tx.Rollback(ctx)
+	if err := lockProjectOf(ctx, tx, todoID); err != nil {
+		return Entry{}, 0, err
+	}
 	var slug, text string
 	if err := tx.QueryRow(ctx, `SELECT e.slug,COALESCE(NULLIF(m.title,''),e.body) FROM entry e LEFT JOIN entry_meta m ON m.entry_id=e.id WHERE e.id=$1 AND e.kind='todo' FOR UPDATE OF e`, todoID).Scan(&slug, &text); err != nil {
 		if IsNotFound(err) {
@@ -330,4 +336,11 @@ func truncateRunes(value string, limit int) string {
 		return value
 	}
 	return string([]rune(value)[:limit-1]) + "…"
+}
+
+// lockProjectOf takes the project lock before any entry lock, the order
+// TrashProject uses, so the two cannot deadlock.
+func lockProjectOf(ctx context.Context, tx pgx.Tx, entryID int64) error {
+	_, err := tx.Exec(ctx, `SELECT 1 FROM project p JOIN entry e ON e.slug=p.slug WHERE e.id=$1 FOR KEY SHARE OF p`, entryID)
+	return err
 }
