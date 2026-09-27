@@ -1310,6 +1310,9 @@ func TestUndoRefusesTriageRedoneSince(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := db.AppendEntryOnce(ctx, "atlas", "note", "Glass capture", "glass", "c", "request-0001"); !errors.Is(err, store.ErrEntryTrashed) {
+		t.Fatalf("retry while trashed = %v", err)
+	}
 	if err := db.RestoreTrash(ctx, onceTrash); err != nil {
 		t.Fatal(err)
 	}

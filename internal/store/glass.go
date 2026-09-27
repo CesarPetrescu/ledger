@@ -51,6 +51,18 @@ func (db *DB) AppendEntryOnce(ctx context.Context, slug, kind, body, source, cli
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return Entry{}, err
 	}
+	// A retry of a write whose entry the owner moved to Trash must not
+	// recreate it; the receipt lives on in the trash payload.
+	var trashed bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM trash t,
+ jsonb_array_elements(CASE WHEN t.kind='entry' THEN jsonb_build_array(t.payload) ELSE t.payload->'entries' END) e,
+ jsonb_array_elements(COALESCE(NULLIF(e->'receipts','null'),'[]')) r
+ WHERE r->>'client_id'=$1 AND r->>'request_id'=$2)`, clientID, requestID).Scan(&trashed); err != nil {
+		return Entry{}, err
+	}
+	if trashed {
+		return Entry{}, ErrEntryTrashed
+	}
 	err = tx.QueryRow(ctx, `INSERT INTO entry(slug,kind,body,source,client_id) VALUES($1,$2,$3,$4,$5) RETURNING id,slug,kind,body,source,client_id,created_at`, slug, kind, body, source, clientID).Scan(&entry.ID, &entry.Slug, &entry.Kind, &entry.Body, &entry.Source, &entry.ClientID, &entry.CreatedAt)
 	if err != nil {
 		return Entry{}, err

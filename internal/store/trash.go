@@ -18,6 +18,7 @@ const UndoWindow = 7 * 24 * time.Hour
 
 var (
 	ErrNotUndoable  = errors.New("this action can no longer be undone")
+	ErrEntryTrashed = errors.New("the owner deleted the entry this request wrote; it is in Trash")
 	ErrProjectGone  = errors.New("restore its original project first")
 	ErrProjectTaken = errors.New("a project with this slug exists; rename or delete it first")
 )
