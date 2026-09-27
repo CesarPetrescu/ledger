@@ -356,7 +356,7 @@ private fun EntrySheet(model: LedgerModel, entry: JSONObject, repeats: List<JSON
                 OutlinedButton(onClick = { act { ownerAction(model, entry, if (starred) "Unstarred" else "Starred", "starred" to !starred) } }, enabled = !model.busy) { Text(if (starred) "Unstar" else "Star") }
             }
             if (openTodo && meta?.text("due")?.isNotBlank() == true) OutlinedButton(onClick = { act { addToCalendar(model, entry) } }, enabled = !model.busy) { Text("Add to calendar") }
-            if (meta != null && meta.text("title").isNotBlank()) LabelEditor(model, entry, close)
+            if (meta != null && meta.text("title").isNotBlank() && meta.text("origin") == "model") LabelEditor(model, entry, close)
             TextButton(onClick = { close(); model.go(projectRoute(entry.text("slug"))) }) { Text("Open project") }
             ConfirmButton("Delete", "Move this entry to Trash? You can undo it or restore it from Trash for 30 days.", !model.busy) {
                 act { model.undoable("Entry moved to Trash") { it.request("DELETE", "/entries/${segment(id)}") } }

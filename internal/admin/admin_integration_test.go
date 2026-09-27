@@ -1475,4 +1475,23 @@ func TestOwnerLabelsSurviveReextractionAndTeachTheExtractor(t *testing.T) {
 	if got := meta(); len(got.Edited) != 0 {
 		t.Fatalf("edited after reset: %v", got.Edited)
 	}
+	// The console's own bookkeeping entries have no AI labels to correct.
+	todo, _ := db.AppendEntry(ctx, "atlas", "todo", "Add export", "codex", "c")
+	done, _, err := db.ResolveTodo(ctx, todo.ID, "ledger-admin", "c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path = "/admin/api/entries/" + strconv.FormatInt(done.ID, 10) + "/labels"
+	call(`{"set":{"title":"x"}}`, http.StatusConflict)
+	// Items trashed before these columns existed still restore.
+	legacy, _, err := db.TrashEntry(ctx, entry.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, `UPDATE trash SET payload=jsonb_set(payload,'{meta}',(payload->'meta')-'category'-'details'-'unsure'-'edited') WHERE id=$1`, legacy); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RestoreTrash(ctx, legacy); err != nil {
+		t.Fatalf("legacy restore: %v", err)
+	}
 }

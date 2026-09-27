@@ -38,8 +38,9 @@ type KeyNumber struct {
 // TagPattern is the shape of a tag: short, lowercase, no spaces.
 var TagPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9+#.-]{0,29}$`)
 
-// ErrLabelsPending means an entry has no labels yet to correct.
-var ErrLabelsPending = errors.New("this entry has not been labelled yet")
+// ErrLabelsPending means an entry has no AI labels to correct: none yet, or
+// it is the console's own Done/Reopened bookkeeping.
+var ErrLabelsPending = errors.New("this entry has no AI labels to correct")
 
 // labelLimits are the editable label fields and their maximum lengths.
 var labelLimits = map[string]int{"title": 120, "gist": 240, "ask": 300, "next_step": 240, "blocker": 240, "why": 300, "category": 40,
@@ -113,7 +114,7 @@ func (db *DB) SetLabels(ctx context.Context, entryID int64, set map[string]any, 
 	}
 	defer tx.Rollback(ctx)
 	var labelled bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM entry_meta WHERE entry_id=e.id AND title<>'') FROM entry e WHERE e.id=$1 FOR UPDATE`, entryID).Scan(&labelled); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM entry_meta WHERE entry_id=e.id AND title<>'' AND origin='model') FROM entry e WHERE e.id=$1 FOR UPDATE`, entryID).Scan(&labelled); err != nil {
 		return err
 	}
 	if !labelled {

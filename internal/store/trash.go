@@ -292,7 +292,9 @@ func restore(ctx context.Context, tx pgx.Tx, trashID int64) error {
 	for _, e := range entries {
 		if len(e.Meta) > 0 && string(e.Meta) != "null" {
 			// A resolution target that is gone or already resolved is dropped.
+			// Defaults first: items trashed before a column existed lack its key.
 			if _, err := tx.Exec(ctx, `INSERT INTO entry_meta SELECT (jsonb_populate_record(NULL::entry_meta,
+  '{"category":"","details":{},"unsure":[],"edited":[]}'::jsonb||
   CASE WHEN EXISTS (SELECT 1 FROM entry WHERE id=($1::jsonb->>'resolves')::bigint)
         AND NOT EXISTS (SELECT 1 FROM entry_meta WHERE resolves=($1::jsonb->>'resolves')::bigint)
    THEN $1::jsonb ELSE $1::jsonb||'{"resolves":null}' END)).*`, []byte(e.Meta)); err != nil {

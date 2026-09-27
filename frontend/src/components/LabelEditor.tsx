@@ -42,7 +42,7 @@ export function LabelEditor({ entry, onChanged }: { entry: TableEntry; onChanged
     return Array.isArray(value) ? value.join(', ') : (value ?? '')
   }
   const [values, setValues] = useState<Record<string, string>>({})
-  if (!meta) return null
+  if (!meta || meta.origin !== 'model') return null
 
   const start = () => {
     setValues(Object.fromEntries(fields.map((spec) => [spec.field, current(spec.field)])))
