@@ -90,8 +90,9 @@ val LocalEditingEnabled = compositionLocalOf { true }
 fun LedgerApp(model: LedgerModel = viewModel(), opened: MutableState<String?>? = null) {
     // A notification opens its entry (or the inbox) once the session is ready.
     val requested = opened?.value
-    LaunchedEffect(requested, model.api, model.starting) {
-        if (requested == null || model.starting || model.api == null) return@LaunchedEffect
+    LaunchedEffect(requested, model.api, model.starting, model.busy) {
+        // Navigation is ignored while an action runs; wait for it instead of dropping the request.
+        if (requested == null || model.starting || model.api == null || model.busy) return@LaunchedEffect
         opened.value = null
         if (!Regex("inbox|entry-view/[0-9]+").matches(requested)) return@LaunchedEffect
         model.tab("inbox")

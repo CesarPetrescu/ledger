@@ -150,8 +150,12 @@ class OwnerFlowTest {
             assertEquals(0, onBackground { Notifier.check(context) })
             context.getSharedPreferences("notify", Context.MODE_PRIVATE).edit().remove("seen").commit()
             assertEquals(1, onBackground { Notifier.check(context) })
-            val posted = context.getSystemService(android.app.NotificationManager::class.java).activeNotifications
-            assertTrue(posted.any { it.notification.extras.getString(android.app.Notification.EXTRA_TITLE) == "claude-code asks you" })
+            // Posting is asynchronous; give the system a moment to list it.
+            val manager = context.getSystemService(android.app.NotificationManager::class.java)
+            val shown = { manager.activeNotifications.any { it.notification.extras.getString(android.app.Notification.EXTRA_TITLE) == "claude-code asks you" } }
+            val deadline = System.currentTimeMillis() + 5_000
+            while (!shown() && System.currentTimeMillis() < deadline) Thread.sleep(100)
+            assertTrue(shown())
             assertEquals(0, onBackground { Notifier.check(context) })
             Notifier.setEnabled(context, false)
             context.getSystemService(android.app.NotificationManager::class.java).cancelAll()
@@ -159,7 +163,8 @@ class OwnerFlowTest {
             activity.onActivity { it.startActivity(android.content.Intent(it, MainActivity::class.java).putExtra(MainActivity.ROUTE, "entry-view/70")
                 .addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)) }
             awaitText("Pricing claims unverified")
-            ui.onNodeWithContentDescription("Back").performClick()
+            // The system Back key, not a touch: a notification can briefly cover the top bar.
+            androidx.test.espresso.Espresso.pressBack()
             awaitText("Confirm the fixture pricing")
             tap("Projects")
             tap("Atlas")

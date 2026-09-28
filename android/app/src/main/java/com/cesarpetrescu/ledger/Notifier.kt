@@ -80,9 +80,12 @@ object Notifier {
         val api = SessionStore(context).read() ?: return 0
         val (inbox, todos) = try { api.request("GET", "/inbox") to openTodos(api) } catch (_: Exception) { return 0 }
         val prefs = prefs(context)
-        val (news, remember) = fresh(nudges(inbox, todos), prefs.getStringSet("seen", emptySet()).orEmpty())
-        val seeded = prefs.getBoolean("seeded", false)
-        prefs.edit().putStringSet("seen", remember).putBoolean("seeded", true).apply()
+        // Entry IDs belong to one server: signing in to another starts over.
+        val sameServer = prefs.getString("origin", null) == api.origin
+        val seen = if (sameServer) prefs.getStringSet("seen", emptySet()).orEmpty() else emptySet()
+        val (news, remember) = fresh(nudges(inbox, todos), seen)
+        val seeded = sameServer && prefs.getBoolean("seeded", false)
+        prefs.edit().putStringSet("seen", remember).putBoolean("seeded", true).putString("origin", api.origin).apply()
         // The first check after turning notifications on only learns what is already there.
         if (!seeded || news.isEmpty()) return 0
         val manager = context.getSystemService(NotificationManager::class.java)
