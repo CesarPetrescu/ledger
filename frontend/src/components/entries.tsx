@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { api, describeError, ENTRY_KINDS, type EntryFilter, type OwnerPatch, type ProjectSummary, type TableEntry } from '../api'
+import { api, describeError, ENTRY_KINDS, OWNER_SOURCE, type EntryFilter, type OwnerPatch, type ProjectSummary, type TableEntry } from '../api'
 import { useResource } from '../hooks/useResource'
 import { useUndo } from '../hooks/useUndo'
 import { refreshAll } from '../live'
@@ -203,7 +203,7 @@ export function TodoState({ entry, onChanged }: { entry: TableEntry; onChanged: 
  */
 export function whyHere(entry: TableEntry, now = Date.now()): string {
   const meta = entry.meta
-  if (meta?.ask && !entry.owner.handled) return `${entry.source} asked ${formatRelative(entry.created_at, now)} and is waiting on your answer.`
+  if (meta?.ask && !entry.owner.handled && entry.source !== OWNER_SOURCE) return `${entry.source} asked ${formatRelative(entry.created_at, now)} and is waiting on your answer.`
   if (entry.kind !== 'todo' || entry.resolved_by) return ''
   if (meta?.due) {
     const due = shortDate.format(new Date(`${meta.due}T12:00:00`))
@@ -220,7 +220,7 @@ export function FocusBadges({ entry }: { entry: TableEntry }) {
   const today = localDay()
   return (
     <span className="focus-badges">
-      {meta?.ask && !entry.owner.handled && <span className="badge" data-focus="ask">Asks you</span>}
+      {meta?.ask && !entry.owner.handled && entry.source !== OWNER_SOURCE && <span className="badge" data-focus="ask">Asks you</span>}
       {meta?.importance === 'important' && <span className="badge" data-focus="important">Important</span>}
       {meta?.state && <span className="badge" data-state={meta.state}>{STATE_LABEL[meta.state]}</span>}
       {entry.kind === 'todo' && meta?.priority && meta.priority !== 'normal' && <span className="badge" data-priority={meta.priority}>{meta.priority}</span>}
@@ -326,7 +326,7 @@ export function EntryRow({ entry, repeats = [], view, headline, hideProject = fa
   const owner = useOwnerAction(onChanged)
   const reading = view === 'reading'
   const summary = reading ? entry.meta?.why || entry.meta?.gist : entry.meta?.gist
-  const asking = Boolean(entry.meta?.ask && !entry.owner.handled)
+  const asking = Boolean(entry.meta?.ask && !entry.owner.handled && entry.source !== OWNER_SOURCE)
   const selected = selection.selected === entry.id
   return (
     <li className="entry-row" data-entry-id={entry.id} aria-current={selected ? 'true' : undefined} data-done={entry.resolved_by ? 'true' : undefined} data-read={reading && entry.owner.read ? 'true' : undefined}>

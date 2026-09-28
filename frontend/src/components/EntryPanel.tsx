@@ -112,7 +112,8 @@ export function EntryDetail({ id, onClose }: { id: string; onClose?: () => void 
   }
   const e = entry.data
   const meta = e.meta
-  const asking = Boolean(meta?.ask && !e.owner.handled)
+  // Only an agent asks you something; your own entries never wait on you.
+  const asking = Boolean(meta?.ask && !e.owner.handled && e.source !== OWNER_SOURCE)
   const project = `/projects/${encodeURIComponent(e.slug)}`
   return (
     <article className="entry-detail">
@@ -181,7 +182,7 @@ function PanelBar({ id, onClose }: { id: string; onClose: () => void }) {
 /** Every action that applies to this entry, not only the ones a list row shows. */
 function EntryActions({ entry, onDeleted }: { entry: TableEntry; onDeleted: () => void }) {
   const owner = useOwnerAction(refreshAll)
-  const asking = Boolean(entry.meta?.ask && !entry.owner.handled)
+  const asking = Boolean(entry.meta?.ask && !entry.owner.handled && entry.source !== OWNER_SOURCE)
   const link = entry.meta?.link
   const snoozable = asking || (entry.kind === 'todo' && !entry.resolved_by)
   const snoozed = entry.owner.snoozed_until
@@ -189,7 +190,7 @@ function EntryActions({ entry, onDeleted }: { entry: TableEntry; onDeleted: () =
     <div className="entry-detail-actions">
       {entry.kind === 'todo' && <TodoState entry={entry} onChanged={refreshAll} />}
       {asking && <button type="button" className="btn btn-small" disabled={owner.busy} onClick={() => void owner.act(entry.id, { handled: true }, 'Marked handled.')}>Handled</button>}
-      {entry.meta?.ask && entry.owner.handled && <button type="button" className="btn btn-small" disabled={owner.busy} onClick={() => void owner.act(entry.id, { handled: false }, 'Back in Needs you.')}>Not handled</button>}
+      {entry.meta?.ask && entry.owner.handled && entry.source !== OWNER_SOURCE && <button type="button" className="btn btn-small" disabled={owner.busy} onClick={() => void owner.act(entry.id, { handled: false }, 'Back in Needs you.')}>Not handled</button>}
       {snoozable && !snoozed && (
         <label className="snooze-select">
           <span className="visually-hidden">Snooze</span>

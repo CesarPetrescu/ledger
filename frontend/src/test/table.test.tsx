@@ -50,7 +50,7 @@ describe('table', () => {
   })
 
   it('opens on the inbox: asks, urgent todos, blocked projects, and digests', async () => {
-    const ask: TableEntry = { ...noteEntry, owner, id: '70', created_at: now, project_name: 'Atlas', meta: { title: 'Pricing question', tags: [], refs: [], origin: 'model', ask: 'Confirm the pricing claims', importance: 'important' } }
+    const ask: TableEntry = { ...noteEntry, source: 'claude-code', owner, id: '70', created_at: now, project_name: 'Atlas', meta: { title: 'Pricing question', tags: [], refs: [], origin: 'model', ask: 'Confirm the pricing claims', importance: 'important' } }
     const blockedSummary = { ...summaries.projects[1]!, status_state: 'blocked', status_title: 'Done: unrelated', status_detail: 'Waiting on legal' }
     const { calls } = mockApi({
       ...base,
@@ -64,7 +64,7 @@ describe('table', () => {
     expect(within(asks).getByRole('button', { name: 'Confirm the pricing claims' })).toBeInTheDocument()
     expect(within(asks).getByText('Pricing question')).toBeInTheDocument()
     // Each item says why it is there.
-    expect(within(asks).getByText(/ledger-admin asked .* and is waiting on your answer\./)).toBeInTheDocument()
+    expect(within(asks).getByText(/claude-code asked .* and is waiting on your answer\./)).toBeInTheDocument()
     expect(within(screen.getByRole('region', { name: 'Todos' })).getByText('The AI rated it high priority.')).toBeInTheDocument()
     expect(within(screen.getByRole('region', { name: 'Todos' })).getByText('1 of 5')).toBeInTheDocument()
     expect(within(screen.getByRole('region', { name: 'Blocked' })).getByText(/Waiting on legal/)).toBeInTheDocument()

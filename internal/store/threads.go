@@ -92,8 +92,10 @@ func insertEntry(ctx context.Context, tx pgx.Tx, e NewEntry) (Entry, int64, erro
 		for _, candidate := range []int64{e.ReplyTo, id} {
 			var open bool
 			var title string
-			err := tx.QueryRow(ctx, `SELECT COALESCE(NULLIF(m.title,''),left(e.body,120)),COALESCE(m.ask,'')<>'' AND o.handled_at IS NULL
-FROM entry e LEFT JOIN entry_meta m ON m.entry_id=e.id LEFT JOIN entry_owner_state o ON o.entry_id=e.id WHERE e.id=$1 FOR UPDATE OF e`, candidate).Scan(&title, &open)
+			// Not labelled yet counts too: an ask found later is then already answered.
+			err := tx.QueryRow(ctx, `SELECT COALESCE(NULLIF(m.title,''),left(e.body,120)),
+ o.handled_at IS NULL AND e.source<>$2 AND (COALESCE(m.ask,'')<>'' OR m.entry_id IS NULL OR m.title='')
+FROM entry e LEFT JOIN entry_meta m ON m.entry_id=e.id LEFT JOIN entry_owner_state o ON o.entry_id=e.id WHERE e.id=$1 FOR UPDATE OF e`, candidate, OwnerSource).Scan(&title, &open)
 			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return Entry{}, 0, err
 			}

@@ -315,3 +315,22 @@ func TestPlainRetriesKeepTheirReceipts(t *testing.T) {
 		t.Fatalf("retry = %+v %v", again, err)
 	}
 }
+
+func TestAnAnswerBeforeLabellingStillCounts(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	question, _, _ := db.Append(ctx, store.NewEntry{Slug: "atlas", Kind: "note", Body: "Which plan should we use?", Source: "codex", ClientID: "c"})
+	if _, actionID, err := db.Append(ctx, store.NewEntry{Slug: "atlas", Kind: "note", Body: "The yearly one", Source: store.OwnerSource, ClientID: "o", ReplyTo: question.ID}); err != nil || actionID == 0 {
+		t.Fatalf("reply action=%d err=%v", actionID, err)
+	}
+	// The labeller finds the question afterwards; it is already answered.
+	if err := db.SaveEntryMeta(ctx, question.ID, store.EntryMeta{Title: "Plan", Ask: "Pick a plan"}); err != nil {
+		t.Fatal(err)
+	}
+	needs, err := db.ListEntries(ctx, store.EntryFilter{NeedsYou: true})
+	if err != nil || len(needs) != 0 {
+		t.Fatalf("needs you = %d %v", len(needs), err)
+	}
+}
