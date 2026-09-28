@@ -51,7 +51,11 @@ try {
   await page.goto(`${server}/admin/projects/readme-atlas`)
   await page.getByLabel('Filter projects', { exact: true }).fill('readme-')
   await page.getByRole('heading', { name: 'Atlas', exact: true }).waitFor()
-  // The project page opens on its activity, so wait for an entry from the fixture.
+  // The project page opens on its activity; consecutive entries from one agent
+  // fold into a run, so open it to show every fixture entry.
+  await page.getByText('Web, Android and glasses clients are connected to the same Ledger.', { exact: true }).waitFor()
+  const run = page.getByRole('button', { name: /more from ledger-admin/ })
+  if (await run.count()) await run.click()
   await page.getByText('Review the latest changes, then pick the next useful action.', { exact: true }).waitFor()
   await page.evaluate(() => document.fonts.ready)
   await page.screenshot({ path: join(out, 'readme-website.png'), animations: 'disabled' })
