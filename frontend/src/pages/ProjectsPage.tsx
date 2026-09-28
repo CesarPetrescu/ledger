@@ -359,12 +359,15 @@ export function ProjectsPage({ slug, view = 'activity' }: { slug?: string | unde
   }, [list.data, filter, tier])
   const tierCount = (option: string) => (list.data ?? []).filter((project) => option === 'all' || project.tier === option).length
 
-  const upsertInList = (saved: Project) =>
+  const upsertInList = (saved: Project) => {
     list.update((projects) => {
       const existing = projects.find((project) => project.slug === saved.slug)
       const merged = existing && saved.last_entry_at === undefined && existing.last_entry_at !== undefined ? { ...saved, last_entry_at: existing.last_entry_at } : saved
       return [merged, ...projects.filter((project) => project.slug !== saved.slug)].sort((a, b) => a.slug.localeCompare(b.slug))
     })
+    // The summaries carry the name, tier, and deadline too.
+    summaries.reload()
+  }
   const mode = slug ? 'detail' : 'list'
 
   return (
