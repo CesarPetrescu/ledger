@@ -1518,6 +1518,11 @@ label > textarea {
 .markdown h4 { font-size: 0.92rem; }
 .markdown p, .markdown ul, .markdown ol, .markdown pre, .markdown table, .markdown blockquote { margin: 0 0 0.9em; }
 .markdown ul, .markdown ol { padding-left: 1.4em; }
+.markdown ul { list-style: disc; }
+.markdown ol { list-style: decimal; }
+.markdown ul ul { list-style: circle; }
+/* Checklists show their boxes instead of bullets. */
+.markdown ul.contains-task-list { list-style: none; padding-left: 0.2em; }
 .markdown li + li { margin-top: 0.25em; }
 .markdown li > input[type='checkbox'] { width: auto; min-height: 0; margin: 0 0.4em 0 0; vertical-align: -1px; }
 .markdown code { padding: 0.1em 0.35em; background: var(--surface-soft); border: 1px solid var(--border); font-family: var(--mono); font-size: 0.86em; }

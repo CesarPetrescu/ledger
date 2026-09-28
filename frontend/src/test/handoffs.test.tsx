@@ -117,6 +117,7 @@ describe('handoff inbox', () => {
     renderApp('/admin/handoffs/7')
     const thread = await screen.findByRole('region', { name: /handoff messages/i })
     expect(within(thread).getByRole('heading', { name: 'Plan' })).toBeInTheDocument()
+    expect(thread.querySelector('ul.contains-task-list')).not.toBeNull()
     expect(within(thread).getByText('Contract', { selector: 'strong' })).toBeInTheDocument()
     expect(within(thread).getByRole('table')).toHaveTextContent('M0codex')
     expect(within(thread).getByText('POST /v1/run', { selector: 'code' })).toBeInTheDocument()
