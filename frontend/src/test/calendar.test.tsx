@@ -157,3 +157,22 @@ it('shows an event on every day it covers, even when it started before the view'
   expect(await within(today).findByText('Conference trip')).toBeInTheDocument()
   expect(within(today).getByText('Continues')).toBeInTheDocument()
 })
+
+it('leaves nothing of the connection behind after disconnecting', async () => {
+  mockApi({
+    'GET /admin/api/session': authenticatedSession,
+    'GET /admin/api/calendar/connection': [{ body: { connected: true, server_url: 'https://cloud.example.com', username: 'alex', selected_calendars: 1 } }, { body: { connected: false, selected_calendars: 0 } }],
+    'GET /admin/api/calendar/calendars': { body: { calendars } },
+    'GET /admin/api/calendar/events': { body: { events: [] } },
+    'DELETE /admin/api/calendar/connection': { body: { disconnected: true } },
+    'GET /admin/api/entries': { body: { entries: [], sources: [], tags: [] } },
+    'GET /admin/api/projects': { body: { projects: [] } },
+  })
+  renderApp('/admin/calendar')
+  const user = userEvent.setup()
+  await user.click(await screen.findByRole('button', { name: /^calendars$/i }))
+  await user.click(screen.getByRole('button', { name: /disconnect nextcloud/i }))
+  await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: /^disconnect$/i }))
+  expect(await screen.findByText(/connect a nextcloud calendar/i)).toBeInTheDocument()
+  expect(screen.queryByRole('region', { name: /agent-visible calendars/i })).not.toBeInTheDocument()
+})

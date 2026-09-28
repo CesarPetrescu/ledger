@@ -483,5 +483,6 @@ export function CalendarPage() {
   if (connection.loading) return <Loading label="Loading calendar…" />
   if (!connection.data) return <ErrorState message="Couldn't load calendar connection." onRetry={connection.reload} />
   // Ledger's own dates show even without Nextcloud; clicking a todo opens it beside the calendar.
-  return <EntrySplit><CalendarWorkspace connection={connection.data} onDisconnected={connection.reload} /></EntrySplit>
+  // Keyed by connection, so connecting or disconnecting starts from a clean page.
+  return <EntrySplit><CalendarWorkspace key={String(connection.data.connected)} connection={connection.data} onDisconnected={connection.reload} /></EntrySplit>
 }
