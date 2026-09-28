@@ -285,7 +285,8 @@ func restore(ctx context.Context, tx pgx.Tx, trashID int64) error {
 	}
 	// Entries first, so metadata links between restored entries resolve.
 	for _, e := range entries {
-		if _, err := tx.Exec(ctx, `INSERT INTO entry OVERRIDING SYSTEM VALUE SELECT * FROM jsonb_populate_record(NULL::entry,$1)`, []byte(e.Entry)); err != nil {
+		// Entries trashed before a column existed restore with its default.
+		if _, err := tx.Exec(ctx, `INSERT INTO entry OVERRIDING SYSTEM VALUE SELECT * FROM jsonb_populate_record(NULL::entry,'{"context":""}'::jsonb||$1)`, []byte(e.Entry)); err != nil {
 			return err
 		}
 	}

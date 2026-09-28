@@ -13,3 +13,15 @@ CREATE TABLE entry_label_edit (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX entry_label_edit_entry_idx ON entry_label_edit(entry_id, created_at);
+
+-- Kept through Trash (entries restore with their IDs); gone once an entry is
+-- deleted for good. Checked at commit, after a restore has put entries back.
+CREATE FUNCTION forget_label_edits() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  DELETE FROM entry_label_edit l USING jsonb_array_elements(
+    CASE WHEN OLD.kind='entry' THEN jsonb_build_array(OLD.payload) ELSE COALESCE(OLD.payload->'entries','[]') END) e
+  WHERE l.entry_id=(e->'entry'->>'id')::bigint AND NOT EXISTS (SELECT 1 FROM entry WHERE id=l.entry_id);
+  RETURN OLD;
+END $$;
+CREATE CONSTRAINT TRIGGER trash_forget_label_edits AFTER DELETE ON trash
+  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION forget_label_edits();

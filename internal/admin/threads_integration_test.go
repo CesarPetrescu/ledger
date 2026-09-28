@@ -202,9 +202,68 @@ func TestFollowUpsSnoozesAndThreadHistory(t *testing.T) {
 	if res.Code != http.StatusCreated || !handled(followUp.ID) || handled(root.ID) {
 		t.Fatalf("reply = %d %s; follow-up handled=%v root handled=%v", res.Code, res.Body.String(), handled(followUp.ID), handled(root.ID))
 	}
+	// The agent answers the follow-up: the follow-up needs the owner again.
+	add("Yearly it is; one more thing", "codex", followUp.ID, "")
+	if handled(followUp.ID) {
+		t.Fatal("agent answer did not bring the follow-up back")
+	}
 	// Opened on the follow-up, the history shows the whole conversation.
 	res = request(t, server, http.MethodGet, "/admin/api/entries/"+strconv.FormatInt(followUp.ID, 10)+"/history", "", authed(s, false))
 	if body := res.Body.String(); !strings.Contains(body, `"text":"Yearly"`) || strings.Contains(body, `"text":"Also: monthly or yearly?","entry_id"`) {
 		t.Fatalf("follow-up history = %s", body)
+	}
+}
+
+func TestTrashKeepsLabelHistoryUntilPurgedAndRestoresOlderPayloads(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	edited := func(title string) int64 {
+		e, _, err := db.Append(ctx, store.NewEntry{Slug: "atlas", Kind: "note", Body: title, Source: "codex", ClientID: "c"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := db.SaveEntryMeta(ctx, e.ID, store.EntryMeta{Title: title}); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.SetLabels(ctx, e.ID, map[string]any{"title": title + " fixed"}, nil); err != nil {
+			t.Fatal(err)
+		}
+		return e.ID
+	}
+	edits := func(id int64) (n int) {
+		if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM entry_label_edit WHERE entry_id=$1`, id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	kept, purged := edited("Kept"), edited("Purged")
+	keptTrash, _, err := db.TrashEntry(ctx, kept)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A payload trashed before entries had a context still restores.
+	if _, err := db.Pool.Exec(ctx, `UPDATE trash SET payload=payload #- '{entry,context}' #- '{entry,reply_to}' WHERE id=$1`, keptTrash); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RestoreTrash(ctx, keptTrash); err != nil {
+		t.Fatalf("restore older payload: %v", err)
+	}
+	if edits(kept) != 1 {
+		t.Fatal("restored entry lost its label history")
+	}
+	purgedTrash, _, err := db.TrashEntry(ctx, purged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if edits(purged) != 1 {
+		t.Fatal("label history gone while the entry is still in Trash")
+	}
+	if err := db.DeleteTrash(ctx, purgedTrash); err != nil {
+		t.Fatal(err)
+	}
+	if edits(purged) != 0 {
+		t.Fatal("label history outlived the entry")
 	}
 }

@@ -123,8 +123,8 @@ RETURNING id,slug,kind,body,source,client_id,created_at,reply_to,context`, e.Slu
 		if noRoot {
 			return entry, 0, nil
 		}
-		// An agent answered: the thread needs the owner again, snoozed or not.
-		_, err := tx.Exec(ctx, `UPDATE entry_owner_state SET handled_at=NULL,snoozed_until=NULL,updated_at=now() WHERE entry_id=$1 AND (handled_at IS NOT NULL OR snoozed_until IS NOT NULL)`, *root)
+		// An agent answered: the thread, and the follow-up it answers, need the owner again, snoozed or not.
+		_, err := tx.Exec(ctx, `UPDATE entry_owner_state SET handled_at=NULL,snoozed_until=NULL,updated_at=now() WHERE entry_id IN ($1,$2) AND (handled_at IS NOT NULL OR snoozed_until IS NOT NULL)`, *root, e.ReplyTo)
 		return entry, 0, err
 	}
 	if asked == 0 {
