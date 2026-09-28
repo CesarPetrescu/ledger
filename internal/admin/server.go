@@ -519,6 +519,14 @@ func entryFilter(query url.Values) (store.EntryFilter, error) {
 	default:
 		return f, errors.New("awake must be 0 or 1")
 	}
+	// due_before=YYYY-MM-DD with the asker's today keeps what is overdue.
+	if day := query.Get("due_before"); day != "" {
+		due, err := time.Parse(time.DateOnly, day)
+		if err != nil {
+			return f, errors.New("due_before must be a date like 2026-01-31")
+		}
+		f.DueBefore = &due
+	}
 	return f, nil
 }
 

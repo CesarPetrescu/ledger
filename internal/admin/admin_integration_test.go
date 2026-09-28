@@ -1759,3 +1759,33 @@ func TestEntriesCanLeaveOutSnoozedOnes(t *testing.T) {
 		t.Fatalf("bad awake = %d", res.Code)
 	}
 }
+
+func TestEntriesCanKeepOnlyOverdueOnes(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
+	_, s := login(t, server, "correct horse", "")
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	todo := func(body, due string) string {
+		e, err := db.AppendEntry(ctx, "atlas", "todo", body, "codex", "c")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := db.SaveEntryMeta(ctx, e.ID, store.EntryMeta{Title: body, Due: due}); err != nil {
+			t.Fatal(err)
+		}
+		return `"id":"` + strconv.FormatInt(e.ID, 10) + `"`
+	}
+	today := time.Now()
+	late := todo("Late", today.AddDate(0, 0, -1).Format(time.DateOnly))
+	dueToday := todo("Today", today.Format(time.DateOnly))
+	undated := todo("Undated", "")
+	res := request(t, server, http.MethodGet, "/admin/api/entries?kind=todo&status=open&due_before="+today.Format(time.DateOnly), "", authed(s, false))
+	if body := res.Body.String(); res.Code != http.StatusOK || !strings.Contains(body, late) || strings.Contains(body, dueToday) || strings.Contains(body, undated) {
+		t.Fatalf("overdue = %d %s", res.Code, body)
+	}
+	if res := request(t, server, http.MethodGet, "/admin/api/entries?due_before=soon", "", authed(s, false)); res.Code != http.StatusBadRequest {
+		t.Fatalf("bad due_before = %d", res.Code)
+	}
+}

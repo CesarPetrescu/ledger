@@ -55,8 +55,8 @@ object Notifier {
     }
 
     /**
-     * What deserves a notification: the inbox's open asks, and overdue todos
-     * among all open ones (the inbox lists only the most urgent few).
+     * What deserves a notification: the inbox's open asks, and every overdue
+     * todo (the inbox lists only the most urgent few todos).
      */
     fun nudges(inbox: JSONObject, todos: List<JSONObject>, today: LocalDate = LocalDate.now()): List<Nudge> = buildList {
         val asks = inbox.rows("needs_you")
@@ -97,7 +97,7 @@ object Notifier {
         // Without permission to show them, keep what was seen so items announce once it returns.
         if (!allowed(context)) return 0
         val api = SessionStore(context).read() ?: return 0
-        val (inbox, todos) = try { api.request("GET", "/inbox") to openTodos(api) } catch (_: Exception) { return 0 }
+        val (inbox, todos) = try { api.request("GET", "/inbox") to overdueTodos(api) } catch (_: Exception) { return 0 }
         // Turned off or blocked while this was asking the server: record and announce nothing.
         if (!enabled(context) || !allowed(context)) return 0
         val prefs = prefs(context)
@@ -137,18 +137,18 @@ object Notifier {
         return announce.size
     }
 
-    /** Every open, awake todo, a page at a time. */
-    // ponytail: stops after 2,000 open todos; page further if a backlog ever grows past that.
-    private fun openTodos(api: Api): List<JSONObject> {
+    /** Every open, awake todo due before today, a page at a time. */
+    private fun overdueTodos(api: Api): List<JSONObject> {
         val out = mutableListOf<JSONObject>()
         var before = ""
-        repeat(10) {
-            val page = api.request("GET", "/entries?kind=todo&status=open&awake=1&limit=200" + if (before.isBlank()) "" else "&before=${segment(before)}")
+        while (true) {
+            val page = api.request("GET", "/entries?kind=todo&status=open&awake=1&due_before=${LocalDate.now()}&limit=200" + if (before.isBlank()) "" else "&before=${segment(before)}")
             out += page.rows("entries")
-            before = page.text("next_before")
-            if (before.isBlank()) return out
+            val next = page.text("next_before")
+            // A cursor that does not move would page forever.
+            if (next.isBlank() || next == before) return out
+            before = next
         }
-        return out
     }
 
     /** Android 13+ asks for this permission; older versions grant it. */
