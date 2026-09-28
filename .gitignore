@@ -42,6 +42,7 @@ backups/
 # Frontend tooling
 node_modules/
 /frontend/dist/
+*.tsbuildinfo
 /evenhub/dist/
 /evenhub/app.json
 /evenhub/*.ehpk
