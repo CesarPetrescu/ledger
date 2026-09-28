@@ -411,6 +411,88 @@ select {
   cursor: pointer;
 }
 select:disabled { color: var(--text-muted); background-color: var(--surface-soft); cursor: not-allowed; }
+/* Checkboxes and radios: drawn by the app, not the browser, in both themes. */
+input[type='checkbox']:not([role='switch']),
+input[type='radio'] {
+  appearance: none;
+  display: inline-grid;
+  place-content: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--surface);
+  cursor: pointer;
+  transition: background-color 0.12s, border-color 0.12s, box-shadow 0.12s;
+}
+input[type='radio'] { border-radius: 50%; }
+input[type='checkbox']:not([role='switch'])::before {
+  content: '';
+  width: 11px;
+  height: 11px;
+  background: var(--on-accent);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.2 6.4 4.8 9 9.8 3.4' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.2 6.4 4.8 9 9.8 3.4' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  transform: scale(0);
+  transition: transform 0.12s;
+}
+input[type='radio']::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--on-accent); transform: scale(0); transition: transform 0.12s; }
+input[type='checkbox']:not([role='switch']):checked,
+input[type='radio']:checked { border-color: var(--accent); background: var(--accent); }
+input[type='checkbox']:not([role='switch']):checked::before,
+input[type='radio']:checked::before { transform: scale(1); }
+input[type='checkbox']:not([role='switch']):hover,
+input[type='radio']:hover { border-color: var(--accent); }
+input[type='checkbox']:not([role='switch']):focus,
+input[type='radio']:focus { outline: none; }
+input[type='checkbox']:not([role='switch']):focus-visible,
+input[type='radio']:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+input[type='checkbox']:disabled,
+input[type='radio']:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* The open list of a dropdown, where the browser lets pages style it (Chrome 135+).
+   Other browsers show their own list; the closed box looks the same everywhere. */
+@supports (appearance: base-select) {
+  select, select::picker(select) { appearance: base-select; }
+  select { display: flex; align-items: center; }
+  select::picker-icon { display: none; }
+  select::picker(select) {
+    margin-top: 6px;
+    padding: 5px;
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: 0 18px 40px -16px var(--shadow-strong), 0 2px 6px -2px var(--shadow);
+    max-height: min(360px, 60vh);
+    overflow-y: auto;
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: opacity 0.12s, transform 0.12s, overlay 0.12s allow-discrete, display 0.12s allow-discrete;
+  }
+  select:open::picker(select) { opacity: 1; transform: none; }
+  @starting-style { select:open::picker(select) { opacity: 0; transform: translateY(-4px); } }
+  select option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 36px;
+    padding: 7px 10px;
+    border-radius: 7px;
+    color: var(--text);
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+  select option:hover, select option:focus-visible { outline: none; background: var(--surface-soft); }
+  select option:checked { background: var(--surface-accent); color: var(--accent); font-weight: 600; }
+  select option::checkmark { order: 1; margin-left: auto; color: var(--accent); }
+  select option:disabled { color: var(--text-faint); cursor: default; }
+}
+
 input::file-selector-button {
   min-height: 30px;
   margin: -4px 10px -4px -7px;
@@ -773,7 +855,7 @@ label > textarea {
   background: var(--surface);
 }
 .segmented label { position: relative; display: flex; flex: 1; min-width: 0; margin: 0; }
-.segmented input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+.segmented input { position: absolute; inset: 0; width: auto; height: auto; margin: 0; border: 0; opacity: 0; cursor: pointer; }
 .segmented label > span {
   display: flex;
   flex: 1;
@@ -910,7 +992,6 @@ label > textarea {
 .facts dt { color: var(--text-faint); font-size: 0.72rem; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; }
 .facts dd { margin: 0; overflow-wrap: anywhere; }
 .check { display: inline-flex; flex-direction: row; align-items: center; gap: 8px; margin: -6px 0 16px; font-weight: 500; }
-.check input { width: 16px; height: 16px; }
 .page-links { display: flex; gap: 16px; font-size: 0.82rem; }
 .page-links a[aria-current='page'] { color: var(--text); font-weight: 700; }
 .detail-actions { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -1140,7 +1221,7 @@ label > textarea {
 .calendar-source-list label:nth-child(odd) { border-right: 1px solid var(--border); }
 .calendar-source-list label:nth-last-child(-n + 2) { border-bottom: 0; }
 .calendar-source-list input,
-.calendar-check input { width: 18px; min-height: 18px; margin: 2px 0 0; accent-color: var(--accent); }
+.calendar-check input { margin: 2px 0 0; }
 .calendar-source-list span { display: grid; gap: 2px; }
 .calendar-source-list small { color: var(--text-muted); font-weight: 400; }
 .calendar-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; margin-bottom: 10px; padding: 12px 0; border-bottom: 1px solid var(--border); }
@@ -1565,7 +1646,7 @@ label > textarea {
 /* Checklists show their boxes instead of bullets. */
 .markdown ul.contains-task-list { list-style: none; padding-left: 0.2em; }
 .markdown li + li { margin-top: 0.25em; }
-.markdown li > input[type='checkbox'] { width: auto; min-height: 0; margin: 0 0.4em 0 0; vertical-align: -1px; }
+.markdown li > input[type='checkbox'] { margin: 0 0.5em 0 0; vertical-align: -3px; }
 .markdown code { padding: 0.1em 0.35em; background: var(--surface-soft); border: 1px solid var(--border); font-family: var(--mono); font-size: 0.86em; }
 .markdown pre { overflow-x: auto; padding: 12px 14px; background: var(--surface-soft); border: 1px solid var(--border); line-height: 1.5; }
 .markdown pre code { padding: 0; border: 0; background: none; font-size: 0.84rem; white-space: pre; }
