@@ -1788,4 +1788,17 @@ func TestEntriesCanKeepOnlyOverdueOnes(t *testing.T) {
 	if res := request(t, server, http.MethodGet, "/admin/api/entries?due_before=soon", "", authed(s, false)); res.Code != http.StatusBadRequest {
 		t.Fatalf("bad due_before = %d", res.Code)
 	}
+	// A calendar's range: due from today up to (not including) tomorrow.
+	res = request(t, server, http.MethodGet, "/admin/api/entries?kind=todo&due_from="+today.Format(time.DateOnly)+"&due_before="+today.AddDate(0, 0, 1).Format(time.DateOnly), "", authed(s, false))
+	if body := res.Body.String(); res.Code != http.StatusOK || strings.Contains(body, late) || !strings.Contains(body, dueToday) || strings.Contains(body, undated) {
+		t.Fatalf("range = %d %s", res.Code, body)
+	}
+	lateID, _ := strconv.ParseInt(strings.Trim(strings.TrimPrefix(late, `"id":`), `"`), 10, 64)
+	if _, _, err := db.SetOwnerState(ctx, lateID, store.OwnerPatch{SnoozeDays: ptr(2)}); err != nil {
+		t.Fatal(err)
+	}
+	res = request(t, server, http.MethodGet, "/admin/api/entries?snoozed=1", "", authed(s, false))
+	if body := res.Body.String(); res.Code != http.StatusOK || !strings.Contains(body, late) || strings.Contains(body, dueToday) {
+		t.Fatalf("snoozed = %d %s", res.Code, body)
+	}
 }

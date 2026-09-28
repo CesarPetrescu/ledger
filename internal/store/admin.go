@@ -128,6 +128,10 @@ type EntryFilter struct {
 	RepeatsOf int64
 	// DueBefore keeps entries due before this day; nil means any.
 	DueBefore *time.Time
+	// DueFrom keeps entries due on or after this day; nil means any.
+	DueFrom *time.Time
+	// Snoozed keeps entries snoozed past today.
+	Snoozed bool
 }
 
 // ListEntries returns matching entries from every project, newest first,
@@ -162,9 +166,10 @@ AND ($11='' OR (COALESCE(m.link,'')<>'' AND ($11='all' OR ($11='unread' AND o.re
 AND (NOT ($12 OR $10) OR o.snoozed_until IS NULL OR o.snoozed_until<=current_date)
 AND ($13='' OR (e.kind='status' AND m.state=$13))
 AND ($14::bigint=0 OR e.id=$14) AND ($15::bigint=0 OR m.duplicate_of=$15)
-AND ($16::date IS NULL OR m.due<$16)
+AND ($16::date IS NULL OR m.due<$16) AND ($17::date IS NULL OR m.due>=$17)
+AND (NOT $18 OR o.snoozed_until>current_date)
 ORDER BY e.created_at DESC,e.id DESC LIMIT $8`, f.ProjectSlug, f.Kind, f.Source, f.Tag, f.Status, f.Query, f.Before, limit,
-		f.HideRoutine, f.NeedsYou, f.Reading, f.Awake, f.State, f.ID, f.RepeatsOf, f.DueBefore)
+		f.HideRoutine, f.NeedsYou, f.Reading, f.Awake, f.State, f.ID, f.RepeatsOf, f.DueBefore, f.DueFrom, f.Snoozed)
 	if err != nil {
 		return nil, err
 	}

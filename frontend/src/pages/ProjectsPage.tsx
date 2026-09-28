@@ -5,7 +5,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog'
 import { useUndo } from '../hooks/useUndo'
 import { EmptyState, ErrorState, Icon, Loading, StaleNotice, TierBadge, Timestamp } from '../components/ui'
 import { EntriesView, HealthBadge, LIVE, ProjectSummaryTable } from '../components/entries'
-import { EntrySplit } from '../components/EntryPanel'
+import { EntrySplit, writerName } from '../components/EntryPanel'
 import { useResource } from '../hooks/useResource'
 import { Link, navigate } from '../router'
 
@@ -248,20 +248,34 @@ const PROJECT_TABS: { id: ProjectView; label: string; path: string }[] = [
   { id: 'files', label: 'Files', path: '/files' },
 ]
 
-/** Where the project stands: health, what the agents did this week, what it needs from you. */
-function ProjectStatus({ summary }: { summary: ProjectSummary | undefined }) {
+/** Where the project stands: what needs you, how much is open, who worked on it this week, and its week in a few lines. */
+function ProjectStatus({ slug, summary }: { slug: string; summary: ProjectSummary | undefined }) {
+  const [expanded, setExpanded] = useState(false)
   if (!summary) return null
+  const base = `/projects/${encodeURIComponent(slug)}`
   const blocked = summary.status_state === 'blocked'
+  const latest = summary.digest || summary.status_title || summary.status_body
   return (
     <section className="project-status" aria-label="Project status">
-      {blocked && <p className="project-status-blocked"><HealthBadge state={summary.status_state} /> {summary.status_detail || summary.status_title}</p>}
-      {/* Until the AI titles a new status, its own text stands in. */}
-      {summary.digest ? <p className="digest">{summary.digest}</p> : summary.status_at ? <p className="clamp">Latest: {summary.status_title || summary.status_body}</p> : <p className="muted">No status yet. A weekly summary appears once agents have written here.</p>}
-      <ul className="project-status-facts">
-        {summary.needs_you > 0 && <li><Link to="/">{summary.needs_you} {summary.needs_you === 1 ? 'question waits' : 'questions wait'} for you in the Inbox</Link></li>}
-        <li>{summary.open_todos} open {summary.open_todos === 1 ? 'todo' : 'todos'}</li>
-        <li>{summary.week_entries > 0 ? <>{summary.week_entries} {summary.week_entries === 1 ? 'entry' : 'entries'} this week{summary.week_agents.length > 0 && <> from {summary.week_agents.map((agent, index) => <span key={agent}>{index > 0 && ', '}<code>{agent}</code></span>)}</>}</> : <>Quiet this week{summary.last_entry_at && <> · last entry <Timestamp iso={summary.last_entry_at} /></>}</>}</li>
+      <ul className="stat-tiles">
+        <li data-tone={summary.needs_you > 0 ? 'ask' : undefined}>
+          <Link to="/"><strong>{summary.needs_you}</strong><span>{summary.needs_you === 1 ? 'question waits for you' : 'questions wait for you'}</span></Link>
+        </li>
+        <li><Link to={`${base}/todos`}><strong>{summary.open_todos}</strong><span>open {summary.open_todos === 1 ? 'todo' : 'todos'}</span></Link></li>
+        <li><Link to={base}><strong>{summary.week_entries}</strong><span>{summary.week_entries === 1 ? 'entry' : 'entries'} this week</span></Link></li>
+        <li>
+          <div><strong>{summary.week_agents.length}</strong><span>{summary.week_agents.length === 0 ? (summary.last_entry_at ? <>quiet; last entry <Timestamp iso={summary.last_entry_at} /></> : 'agents active') : summary.week_agents.map(writerName).join(', ')}</span></div>
+        </li>
       </ul>
+      {blocked && <p className="project-status-blocked"><HealthBadge state={summary.status_state} /> {summary.status_detail || summary.status_title}</p>}
+      {latest ? (
+        <div className="project-week">
+          <p className="eyebrow">{summary.digest ? 'This week' : 'Latest status'}</p>
+          {/* Until the AI summarises the week, the latest status stands in. */}
+          <p className={expanded ? 'digest' : 'digest clamp'}>{latest}</p>
+          {latest.length > 280 && <button type="button" className="link-button" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>{expanded ? 'Show less' : 'Read the whole week'}</button>}
+        </div>
+      ) : <p className="muted">No status yet. A weekly summary appears once agents have written here.</p>}
     </section>
   )
 }
@@ -293,6 +307,7 @@ function ProjectDetail({ slug, view, summary, onRetrySummary, onSaved }: { slug:
             <span>{project.hours_wk} h/wk</span>
             {project.deadline && <span>Due {project.deadline}</span>}
           </div>
+          {project.goal && <p className="project-goal">{project.goal}</p>}
         </div>
         {!editing && (
           <div className="detail-actions">
@@ -320,7 +335,7 @@ function ProjectDetail({ slug, view, summary, onRetrySummary, onSaved }: { slug:
         <>
           {/* The summary comes from a separate request that can fail or go stale on its own. */}
           {onRetrySummary && <StaleNotice message={summary ? "This project's week, health, and open questions may be out of date." : "Couldn't load this project's week, health, and open questions."} onRetry={onRetrySummary} />}
-          <ProjectStatus summary={summary} />
+          <ProjectStatus slug={slug} summary={summary} />
           <nav className="detail-tabs" aria-label="Project sections">
             {PROJECT_TABS.map((tab) => (
               <Link key={tab.id} to={base + tab.path} aria-current={view === tab.id ? 'page' : undefined}>
@@ -418,7 +433,7 @@ export function ProjectsPage({ slug, view = 'activity' }: { slug?: string | unde
                       <TierBadge tier={project.tier} />
                       <HealthBadge state={summary?.status_state ?? ''} />
                       {summary && summary.needs_you > 0 && <span className="badge" data-focus="ask">{summary.needs_you} for you</span>}
-                      <code>{project.slug}</code>
+                      {summary && summary.open_todos > 0 && <span className="muted small">{summary.open_todos} open</span>}
                     </span>
                   </Link>
                 </li>

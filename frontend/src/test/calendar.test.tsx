@@ -96,3 +96,41 @@ describe('Nextcloud calendar', () => {
     expect(screen.queryByRole('button', { name: /add event/i })).not.toBeInTheDocument()
   })
 })
+
+describe('calendar views', () => {
+  const day = (offset: number) => {
+    const date = new Date()
+    date.setDate(date.getDate() + offset)
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+  }
+  const todo = { id: '50', slug: 'atlas', kind: 'todo', body: 'Send the invoice', source: 'codex', client_id: 'c', created_at: new Date().toISOString(), project_name: 'Atlas',
+    owner: { read: false, starred: false, handled: false }, meta: { title: 'Send the invoice', tags: [], refs: [], origin: 'model', due: day(0) } }
+
+  it('shows todos due and project deadlines without Nextcloud, and opens a todo beside the calendar', async () => {
+    const { calls } = mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/calendar/connection': { body: { connected: false, selected_calendars: 0 } },
+      'GET /admin/api/entries': (_init, url) => ({ body: { entries: url.searchParams.get('snoozed') ? [] : [todo], sources: [], tags: [] } }),
+      'GET /admin/api/projects': { body: { projects: [{ slug: 'atlas', name: 'Atlas', tier: 'focus', hours_wk: 4, type: '', description: '', goal: '', deadline: day(0), needs_me: '', automate: '', stack: '', updated_at: '' }] } },
+      'GET /admin/api/entries/50': { body: { ...todo, repeats: [], repeats_total: 0 } },
+      'GET /admin/api/entries/50/history': { body: { history: [] } },
+      'GET /admin/api/entries/50/related': { body: { related: [] } },
+    })
+    renderApp('/admin/calendar')
+    const month = await screen.findByRole('grid')
+    expect(await within(month).findByRole('button', { name: /send the invoice/i })).toBeInTheDocument()
+    expect(within(month).getByRole('button', { name: /^atlas$/i })).toBeInTheDocument()
+    const due = calls.find((call) => call.path === '/admin/api/entries' && call.url.searchParams.get('kind') === 'todo')!
+    expect(due.url.searchParams.get('due_from')).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(due.url.searchParams.get('due_before')).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+
+    const user = userEvent.setup()
+    await user.click(within(month).getByRole('button', { name: /send the invoice/i }))
+    expect(await within(await screen.findByRole('complementary', { name: 'Entry' })).findByRole('heading', { name: 'Send the invoice' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('radio', { name: 'Week' }))
+    expect(await screen.findByRole('region', { name: new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'short' }).format(new Date()) })).toHaveTextContent('Send the invoice')
+    await user.click(screen.getByRole('radio', { name: 'Agenda' }))
+    expect(screen.getByText('Todo due')).toBeInTheDocument()
+  })
+})

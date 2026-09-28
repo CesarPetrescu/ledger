@@ -521,13 +521,24 @@ func entryFilter(query url.Values) (store.EntryFilter, error) {
 	default:
 		return f, errors.New("awake must be 0 or 1")
 	}
-	// due_before=YYYY-MM-DD with the asker's today keeps what is overdue.
-	if day := query.Get("due_before"); day != "" {
-		due, err := time.Parse(time.DateOnly, day)
-		if err != nil {
-			return f, errors.New("due_before must be a date like 2026-01-31")
+	// due_before=YYYY-MM-DD with the asker's today keeps what is overdue;
+	// with due_from, a calendar's range.
+	for name, target := range map[string]**time.Time{"due_before": &f.DueBefore, "due_from": &f.DueFrom} {
+		if day := query.Get(name); day != "" {
+			due, err := time.Parse(time.DateOnly, day)
+			if err != nil {
+				return f, errors.New(name + " must be a date like 2026-01-31")
+			}
+			*target = &due
 		}
-		f.DueBefore = &due
+	}
+	// snoozed=1 keeps what is snoozed past today, for the calendar's wake-ups.
+	switch query.Get("snoozed") {
+	case "", "0":
+	case "1":
+		f.Snoozed = true
+	default:
+		return f, errors.New("snoozed must be 0 or 1")
 	}
 	return f, nil
 }

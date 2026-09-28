@@ -160,6 +160,11 @@ export interface EntryFilter {
   /** Linked (news-shaped) entries: "all", "unread", or "starred". */
   reading?: string
   state?: string
+  /** YYYY-MM-DD bounds on the due date: from (inclusive), before (exclusive). */
+  due_from?: string
+  due_before?: string
+  /** "1" keeps entries snoozed past today. */
+  snoozed?: string
 }
 
 export interface EntryTablePage {
