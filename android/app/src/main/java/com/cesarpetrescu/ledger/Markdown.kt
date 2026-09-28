@@ -46,6 +46,26 @@ private val parser: Parser = Parser.builder()
     .extensions(listOf(TablesExtension.create(), StrikethroughExtension.create(), TaskListItemsExtension.create()))
     .build()
 
+// A message may be 100,000 characters from an agent: past these, formatting it
+// could stall the phone, so it is shown as written instead.
+private const val MAX_NODES = 3000
+private const val MAX_DEPTH = 12
+
+/** The parsed document, or null when it is too big or too deeply nested to format safely. */
+fun parseBounded(text: String): Node? {
+    val document = parser.parse(text)
+    var count = 0
+    // Walk without recursion, so depth itself cannot overflow the stack.
+    val stack = ArrayDeque<Pair<Node, Int>>().apply { add(document to 0) }
+    while (stack.isNotEmpty()) {
+        val (node, depth) = stack.removeLast()
+        if (++count > MAX_NODES || depth > MAX_DEPTH) return null
+        var child = node.firstChild
+        while (child != null) { stack.add(child to depth + 1); child = child.next }
+    }
+    return document
+}
+
 /** Whether a link may open: web and email only. */
 fun safeLink(url: String?): Boolean = url != null && Regex("^(https?://|mailto:)", RegexOption.IGNORE_CASE).containsMatchIn(url.trim())
 
@@ -84,7 +104,14 @@ fun MarkdownText(text: String, formatted: Boolean = true, modifier: Modifier = M
         SelectionContainer(modifier) { Text(text, style = MaterialTheme.typography.bodyMedium) }
         return
     }
-    val document = remember(text) { parser.parse(text) }
+    val document = remember(text) { parseBounded(text) }
+    if (document == null) {
+        Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Too large to format; shown as written.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            SelectionContainer { Text(text, style = MaterialTheme.typography.bodyMedium) }
+        }
+        return
+    }
     SelectionContainer(modifier) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { Blocks(document) }
     }

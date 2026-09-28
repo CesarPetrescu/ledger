@@ -60,6 +60,12 @@ class TableTest {
         assertEquals(false, safeLink(null))
     }
 
+    @Test fun oversizedMarkdownIsNotFormatted() {
+        assertEquals(true, parseBounded("# Plan\n\n- [x] done\n\n| a | b |\n|---|---|\n| 1 | 2 |") != null)
+        assertEquals(null, parseBounded("x\n\n".repeat(20_000)))
+        assertEquals(null, parseBounded(">".repeat(40) + " deep"))
+    }
+
     @Test fun onlyAgentsAskYou() {
         val ask = { source: String -> JSONObject().put("source", source).put("meta", JSONObject().put("ask", "Pick one")) }
         assertEquals(true, asksYou(ask("codex")))
