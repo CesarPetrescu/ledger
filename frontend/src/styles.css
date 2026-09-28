@@ -450,7 +450,7 @@ input[type='radio']:hover { border-color: var(--accent); }
 input[type='checkbox']:not([role='switch']):focus,
 input[type='radio']:focus { outline: none; }
 input[type='checkbox']:not([role='switch']):focus-visible,
-input[type='radio']:focus-visible { box-shadow: 0 0 0 3px var(--focus-ring); }
+input[type='radio']:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 input[type='checkbox']:disabled,
 input[type='radio']:disabled { opacity: 0.55; cursor: not-allowed; }
 
