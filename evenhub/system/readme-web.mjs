@@ -51,7 +51,12 @@ try {
   await page.goto(`${server}/admin/projects/readme-atlas`)
   await page.getByLabel('Filter projects', { exact: true }).fill('readme-')
   await page.getByRole('heading', { name: 'Atlas', exact: true }).waitFor()
-  await page.getByText('Keep project context in sync across people, devices and agents.', { exact: true }).waitFor()
+  // The project page opens on its activity; consecutive entries from one agent
+  // fold into a run, so open it to show every fixture entry.
+  await page.getByText('Web, Android and glasses clients are connected to the same Ledger.', { exact: true }).waitFor()
+  const run = page.getByRole('button', { name: /more from ledger-admin/ })
+  if (await run.count()) await run.click()
+  await page.getByText('Review the latest changes, then pick the next useful action.', { exact: true }).waitFor()
   await page.evaluate(() => document.fonts.ready)
   await page.screenshot({ path: join(out, 'readme-website.png'), animations: 'disabled' })
   const { readFile } = await import('node:fs/promises')
@@ -59,7 +64,7 @@ try {
   await writeFile(join(out, 'readme-website.json'), JSON.stringify({
     source_commit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
     surface: 'Production React web client in Chromium; real HTTPS Ledger and PostgreSQL',
-    screen: 'Project browser and Atlas project overview', fixture_data: true,
+    screen: 'Project browser and Atlas project page', fixture_data: true,
     viewport: { width: 1440, height: 1000 },
     sha256: createHash('sha256').update(bytes).digest('hex'),
     image_modified: false,

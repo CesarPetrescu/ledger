@@ -1,18 +1,36 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
-import { atlas, atlasDetail, authenticatedSession, beacon, decisionEntry, mockApi, renderApp } from './helpers'
+import type { ProjectSummary, TableEntry } from '../api'
+import { atlas, atlasDetail, authenticatedSession, beacon, decisionEntry, mockApi, noSummaries, renderApp } from './helpers'
+
+const projectBase = {
+  'GET /admin/api/session': authenticatedSession,
+  'GET /admin/api/table/projects': { body: noSummaries },
+  'GET /admin/api/entries': { body: { entries: [], sources: [], tags: [] } },
+}
+const atlasSummary: ProjectSummary = {
+  slug: 'atlas', name: 'Atlas', tier: 'focus', deadline: 'Friday', needs_me: 'Review the migration', open_todos: 2, week_entries: 5, week_agents: ['codex'],
+  status_title: 'Deployed table page', status_body: '', status_source: 'codex', digest: 'Shipped the table page; two todos remain.', status_state: 'in_progress', status_detail: '', needs_you: 1,
+}
+const labelled: TableEntry = {
+  ...decisionEntry, project_name: 'Atlas', owner: { read: false, starred: false, handled: false },
+  meta: { title: 'Use PostgreSQL everywhere', tags: [], refs: [], origin: 'model' },
+}
 
 describe('project browser', () => {
-  it('lists projects densely, filters by text and tier, and opens the inspector', async () => {
-    mockApi({
-      'GET /admin/api/session': authenticatedSession,
+  it('lists projects densely, filters by text and tier, and opens a project page with AI titles instead of raw text', async () => {
+    const { calls } = mockApi({
+      ...projectBase,
       'GET /admin/api/projects': { body: { projects: [atlas, beacon] } },
       'GET /admin/api/projects/atlas': { body: atlasDetail },
+      'GET /admin/api/table/projects': { body: { ...noSummaries, projects: [atlasSummary] } },
+      'GET /admin/api/entries': { body: { entries: [labelled], sources: ['agent-one'], tags: [] } },
     })
     renderApp('/admin/projects')
     const list = await screen.findByRole('list', { name: /projects/i })
     expect(within(list).getAllByRole('listitem')).toHaveLength(2)
+    expect(within(list).getByText('1 for you')).toBeInTheDocument()
     const user = userEvent.setup()
     await user.type(screen.getByLabelText(/filter projects/i), 'bea')
     expect(within(list).getAllByRole('listitem')).toHaveLength(1)
@@ -28,91 +46,88 @@ describe('project browser', () => {
     await user.click(screen.getByRole('radio', { name: /^all$/i }))
     await user.click(within(screen.getByRole('list', { name: /projects/i })).getByRole('link', { name: /atlas/i }))
     expect(await screen.findByRole('heading', { name: 'Atlas', level: 1 })).toBeInTheDocument()
-    const meta = screen.getByRole('list', { name: /project metadata/i })
+    const status = screen.getByRole('region', { name: 'Project status' })
+    expect(status).toHaveTextContent('Shipped the table page; two todos remain.')
+    expect(within(status).getByRole('link', { name: /1 question waits for you/i })).toHaveAttribute('href', '/admin/')
+    expect(screen.getByRole('link', { name: 'Activity', current: 'page' })).toBeInTheDocument()
+    // Rows show the AI title and a link to the entry, not the raw body.
+    expect(await screen.findByRole('button', { name: 'Use PostgreSQL everywhere' })).toBeInTheDocument()
+    expect(screen.queryByText('Use PostgreSQL <b>everywhere</b>.')).not.toBeInTheDocument()
+    expect(Object.fromEntries(calls.find((call) => call.path === '/admin/api/entries')!.url.searchParams)).toMatchObject({ project: 'atlas' })
+    expect(screen.queryByRole('combobox', { name: /filter by project/i })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('link', { name: 'Details' }))
+    const meta = await screen.findByRole('list', { name: /project details/i })
     expect(within(meta).getByText('Goal').nextElementSibling).toHaveTextContent('Ship the operator console')
     expect(within(meta).getByText('Deadline').nextElementSibling).toHaveTextContent('Friday')
-    const timeline = screen.getByRole('region', { name: /timeline/i })
-    const items = within(timeline).getAllByRole('listitem')
-    expect(items).toHaveLength(2)
-    expect(items[0]).toHaveTextContent('Use PostgreSQL <b>everywhere</b>.')
-    expect(items[0]).toHaveTextContent('agent-one')
-    expect(items[0]?.querySelector('b')).toBeNull()
-    expect(within(timeline).queryByRole('button', { name: /delete|edit entry/i })).not.toBeInTheDocument()
   })
 
-  it('appends an entry with the selected kind and prepends it to the timeline', async () => {
+  it('adds an entry from the project page without asking for the project', async () => {
     const { calls } = mockApi({
-      'GET /admin/api/session': authenticatedSession,
+      ...projectBase,
       'GET /admin/api/projects': { body: { projects: [atlas] } },
       'GET /admin/api/projects/atlas': { body: atlasDetail },
       'POST /admin/api/projects/atlas/entries': { status: 201, body: { id: '42', slug: 'atlas', kind: 'todo', body: 'Write the runbook', source: 'ledger-admin', client_id: 'admin-session-0123456789ab', created_at: '2026-09-04T08:00:00Z' } },
     })
-    renderApp('/admin/projects/atlas')
+    renderApp('/admin/projects/atlas/todos')
     await screen.findByRole('heading', { name: 'Atlas', level: 1 })
     const user = userEvent.setup()
-    const composer = screen.getByRole('form', { name: /append entry/i })
-    expect(within(composer).getByRole('button', { name: /^append$/i })).toBeDisabled()
-    await user.selectOptions(within(composer).getByLabelText(/kind/i), 'todo')
-    await user.type(within(composer).getByLabelText(/body/i), 'Write the runbook')
-    await user.click(within(composer).getByRole('button', { name: /^append$/i }))
-    expect(await screen.findByRole('status')).toHaveTextContent(/entry appended/i)
-    const post = calls.find((call) => call.method === 'POST')
-    expect(post?.body).toEqual({ kind: 'todo', body: 'Write the runbook' })
-    const timeline = screen.getByRole('region', { name: /timeline/i })
-    await waitFor(() => expect(within(timeline).getAllByRole('listitem')).toHaveLength(3))
-    expect(within(timeline).getAllByRole('listitem')[0]).toHaveTextContent('Write the runbook')
-    expect(within(composer).getByLabelText(/body/i)).toHaveValue('')
-    expect(within(screen.getByRole('list', { name: /projects/i })).getByRole('link', { name: /atlas/i }).querySelector('time')).toHaveAttribute('datetime', '2026-09-04T08:00:00Z')
+    await user.click(await screen.findByText('Add a todo'))
+    const form = screen.getByRole('form', { name: /add entry/i })
+    expect(within(form).queryByRole('combobox', { name: /project/i })).not.toBeInTheDocument()
+    await user.type(within(form).getByRole('textbox', { name: /text/i }), 'Write the runbook')
+    await user.click(within(form).getByRole('button', { name: /add/i }))
+    expect(await screen.findByText('Entry added.')).toBeInTheDocument()
+    expect(calls.find((call) => call.method === 'POST')?.body).toEqual({ kind: 'todo', body: 'Write the runbook' })
+    expect(calls.find((call) => call.path === '/admin/api/projects/atlas')?.url.searchParams.get('entries')).toBe('1')
   })
 
-  it('does not duplicate an entry already loaded by a live refresh', async () => {
-    const appended = { ...decisionEntry, id: '42', body: 'Already refreshed.' }
+  it('shows a new status by its own text until the AI titles it', async () => {
     mockApi({
-      'GET /admin/api/session': authenticatedSession,
+      ...projectBase,
       'GET /admin/api/projects': { body: { projects: [atlas] } },
-      'GET /admin/api/projects/atlas': { body: { ...atlasDetail, entries: [appended, ...atlasDetail.entries] } },
-      'POST /admin/api/projects/atlas/entries': { status: 201, body: appended },
+      'GET /admin/api/projects/atlas': { body: atlasDetail },
+      'GET /admin/api/table/projects': { body: { ...noSummaries, projects: [{ ...atlasSummary, digest: '', status_title: '', status_body: 'Deployed the new build', status_at: '2026-09-03T12:00:00Z' }] } },
     })
     renderApp('/admin/projects/atlas')
-    const composer = await screen.findByRole('form', { name: /append entry/i })
-    const user = userEvent.setup()
-    await user.type(within(composer).getByLabelText(/body/i), appended.body)
-    await user.click(within(composer).getByRole('button', { name: /^append$/i }))
-
-    const timeline = screen.getByRole('region', { name: /timeline/i })
-    await waitFor(() => expect(within(timeline).getAllByText(appended.body)).toHaveLength(1))
+    expect(await screen.findByText('Latest: Deployed the new build')).toBeInTheDocument()
   })
 
-  it('loads older timeline entries without hiding append-only history', async () => {
-    const newest = atlasDetail.entries[0]!
-    const middle = atlasDetail.entries[1]!
-    const older = { ...middle, id: '39', body: 'Oldest retained decision.' }
-    const cursor = '9007199254740993'
-    const { calls } = mockApi({
-      'GET /admin/api/session': authenticatedSession,
+  it('says so when the weekly summary fails to load, with a retry', async () => {
+    mockApi({
+      ...projectBase,
       'GET /admin/api/projects': { body: { projects: [atlas] } },
-      'GET /admin/api/projects/atlas': [
-        { body: { project: atlas, entries: [newest], next_before: cursor } },
-        { body: { project: atlas, entries: [middle, older] } },
-      ],
+      'GET /admin/api/table/projects': { status: 500, body: { error: 'hidden' } },
+    })
+    renderApp('/admin/projects')
+    expect(await screen.findByText(/couldn't load this week's project summary/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument()
+  })
+
+  it('says so on a project page when its summary fails to load', async () => {
+    mockApi({
+      ...projectBase,
+      'GET /admin/api/projects': { body: { projects: [atlas] } },
+      'GET /admin/api/projects/atlas': { body: atlasDetail },
+      'GET /admin/api/table/projects': { status: 500, body: { error: 'hidden' } },
     })
     renderApp('/admin/projects/atlas')
-    const timeline = await screen.findByRole('region', { name: /timeline/i })
-    expect(within(timeline).getAllByRole('listitem')).toHaveLength(1)
+    expect(await screen.findByText(/couldn't load this project's week/i)).toBeInTheDocument()
+  })
 
-    await userEvent.setup().click(within(timeline).getByRole('button', { name: /load older entries/i }))
-
-    await waitFor(() => expect(within(timeline).getAllByRole('listitem')).toHaveLength(3))
-    expect(within(timeline).getByText('Oldest retained decision.')).toBeInTheDocument()
-    expect(within(timeline).queryByRole('button', { name: /load older entries/i })).not.toBeInTheDocument()
-    const pageCall = calls.filter((call) => call.path === '/admin/api/projects/atlas').at(-1)
-    expect(pageCall?.url.searchParams.get('entries')).toBe('200')
-    expect(pageCall?.url.searchParams.get('before')).toBe(cursor)
+  it('keeps the add form on a project page when the project list fails to load', async () => {
+    mockApi({
+      ...projectBase,
+      'GET /admin/api/projects': { status: 500, body: { error: 'hidden' } },
+      'GET /admin/api/projects/atlas': { body: atlasDetail },
+    })
+    renderApp('/admin/projects/atlas')
+    await screen.findByRole('heading', { name: 'Atlas', level: 1 })
+    expect(await screen.findByText('Add an entry')).toBeInTheDocument()
   })
 
   it('creates a project through the form and shows server validation errors', async () => {
     const { calls } = mockApi({
-      'GET /admin/api/session': authenticatedSession,
+      ...projectBase,
       'GET /admin/api/projects': { body: { projects: [] } },
       'PUT /admin/api/projects/orbit': [
         { status: 400, body: { error: 'hours_wk must be between 0 and 168' } },
@@ -136,18 +151,18 @@ describe('project browser', () => {
     const put = calls.filter((call) => call.method === 'PUT').at(-1)
     expect(put?.body).toMatchObject({ name: 'Orbit', tier: 'maintain', hours_wk: 4 })
     expect(put?.body).not.toHaveProperty('slug')
-    expect(screen.getByText(/no entries yet/i)).toBeInTheDocument()
+    expect(await screen.findByText('No entries match.')).toBeInTheDocument()
   })
 
   it('edits an existing project in place', async () => {
     const savedAtlas = Object.fromEntries(Object.entries({ ...atlas, goal: 'Ship v2' }).filter(([key]) => key !== 'last_entry_at'))
     const { calls } = mockApi({
-      'GET /admin/api/session': authenticatedSession,
+      ...projectBase,
       'GET /admin/api/projects': { body: { projects: [atlas] } },
       'GET /admin/api/projects/atlas': { body: atlasDetail },
       'PUT /admin/api/projects/atlas': { body: savedAtlas },
     })
-    renderApp('/admin/projects/atlas')
+    renderApp('/admin/projects/atlas/details')
     await screen.findByRole('heading', { name: 'Atlas', level: 1 })
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: /edit project/i }))
@@ -157,7 +172,7 @@ describe('project browser', () => {
     await user.type(within(form).getByLabelText(/^goal/i), 'Ship v2')
     await user.click(within(form).getByRole('button', { name: /save changes/i }))
     expect(await screen.findByRole('status')).toHaveTextContent(/project saved/i)
-    const meta = screen.getByRole('list', { name: /project metadata/i })
+    const meta = screen.getByRole('list', { name: /project details/i })
     expect(within(meta).getByText('Goal').nextElementSibling).toHaveTextContent('Ship v2')
     const body = calls.find((call) => call.method === 'PUT')?.body
     expect(body).toMatchObject({ goal: 'Ship v2', name: 'Atlas' })
@@ -170,7 +185,7 @@ describe('project browser', () => {
   it('opens a project whose slug is new instead of the create form', async () => {
     const newProject = { ...atlas, slug: 'new', name: 'New Project' }
     mockApi({
-      'GET /admin/api/session': authenticatedSession,
+      ...projectBase,
       'GET /admin/api/projects': { body: { projects: [newProject] } },
       'GET /admin/api/projects/new': { body: { project: newProject, entries: [] } },
     })
@@ -181,7 +196,7 @@ describe('project browser', () => {
 
   it('shows a not-found state for unknown projects', async () => {
     mockApi({
-      'GET /admin/api/session': authenticatedSession,
+      ...projectBase,
       'GET /admin/api/projects': { body: { projects: [atlas] } },
       'GET /admin/api/projects/ghost': { status: 404, body: { error: 'project not found' } },
     })

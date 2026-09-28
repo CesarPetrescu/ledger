@@ -109,7 +109,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/search':
             if not 1 <= body.get('limit', 10) <= 30:
                 return self.send_json(400, {'error': 'limit must be between 1 and 30'})
-            return self.send_json(200, {'hits': [dict(ref='project:atlas', kind='project', project_slug='atlas', project_name='Atlas search result', snippet=PROJECT['goal'])], 'degraded': []})
+            return self.send_json(200, {'hits': [dict(ref='project:atlas', kind='project', project_slug='atlas', project_name='Atlas search result', snippet=PROJECT['goal']),
+                                                 dict(ref='entry:80', kind='decision', project_slug='atlas', project_name='Atlas decision hit', snippet=DECISION['body'], entry_id='80')], 'degraded': []})
         if path == '/handoffs':
             return self.send_json(200, {'handoffs': [HANDOFF]})
         if path == '/handoffs/1':
@@ -159,6 +160,10 @@ class Handler(BaseHTTPRequestHandler):
                     target['owner'][key] = bool(body[key])
             action_id = record('owner', 'Marked read' if body.get('read') else 'Updated', undo=lambda: target['owner'].update(before))
             return self.send_json(200, dict(target['owner'], action_id=action_id))
+        match = re.fullmatch(r'/entries/(50|60|70|80)', path)
+        if match and method == 'GET':
+            entry = {'50': TODO, '60': NEWS, '70': ASK, '80': DECISION}[match.group(1)]
+            return self.send_json(200, dict(entry, repeats=[]))
         if re.fullmatch(r'/entries/(50|60|70|80)/related', path):
             return self.send_json(200, {'related': []})
         if path == '/entries/50/labels' and method == 'POST':

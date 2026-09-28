@@ -5,20 +5,23 @@ import { Link, useLocation } from './router'
 import { ConnectPage } from './pages/ConnectPage'
 import { ClientsPage } from './pages/ClientsPage'
 import { LoginPage } from './pages/LoginPage'
-import { OverviewPage } from './pages/OverviewPage'
-import { ProjectsPage } from './pages/ProjectsPage'
+import { InboxPage } from './pages/InboxPage'
+import { EntryPage } from './pages/EntryPage'
+import { ProjectsPage, type ProjectView } from './pages/ProjectsPage'
 import { SearchPage } from './pages/SearchPage'
 import { CalendarPage } from './pages/CalendarPage'
 import { HandoffsPage } from './pages/HandoffsPage'
 import { TablePage } from './pages/TablePage'
 
 function resolve(path: string, query: URLSearchParams): { title: string; page: React.ReactNode } {
-  if (path === '/') return { title: 'Overview', page: <OverviewPage /> }
+  if (path === '/') return { title: 'Inbox', page: <InboxPage /> }
   if (path === '/projects') return { title: 'Projects', page: <ProjectsPage /> }
   const project = /^\/projects\/([^/]+)$/.exec(path)
   if (project?.[1]) return { title: 'Projects', page: <ProjectsPage slug={decodeURIComponent(project[1])} /> }
-  const projectView = /^\/projects\/([^/]+)\/(handoffs|files)$/.exec(path)
-  if (projectView?.[1] && projectView[2]) return { title: 'Projects', page: <ProjectsPage slug={decodeURIComponent(projectView[1])} view={projectView[2] as 'handoffs' | 'files'} /> }
+  const projectView = /^\/projects\/([^/]+)\/(todos|decisions|details|handoffs|files)$/.exec(path)
+  if (projectView?.[1] && projectView[2]) return { title: 'Projects', page: <ProjectsPage slug={decodeURIComponent(projectView[1])} view={projectView[2] as ProjectView} /> }
+  const entry = /^\/entries\/([0-9]+)$/.exec(path)
+  if (entry?.[1]) return { title: 'Entry', page: <EntryPage key={entry[1]} id={entry[1]} /> }
   if (path === '/table') return { title: 'Table', page: <TablePage /> }
   if (path === '/search') return { title: 'Search', page: <SearchPage /> }
   if (path === '/calendar') return { title: 'Calendar', page: <CalendarPage /> }
@@ -34,7 +37,7 @@ function resolve(path: string, query: URLSearchParams): { title: string; page: R
       <div className="state state-empty">
         <p>There is nothing at this address.</p>
         <Link to="/" className="btn">
-          Back to overview
+          Back to the inbox
         </Link>
       </div>
     ),

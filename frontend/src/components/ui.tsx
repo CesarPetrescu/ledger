@@ -14,6 +14,7 @@ import {
   IconFolder,
   IconExternalLink,
   IconHome,
+  IconInbox,
   IconKey,
   IconLogout,
   IconMenu2,
@@ -31,7 +32,7 @@ import {
   type IconProps,
 } from '@tabler/icons-react'
 
-export type IconName = 'eye' | 'eye-off' | 'menu' | 'close' | 'search' | 'arrow' | 'filter' | 'logout' | 'plus' | 'alert' | 'back' | 'refresh' | 'book' | 'home' | 'projects' | 'calendar' | 'handoffs' | 'copy' | 'paperclip' | 'clients' | 'external' | 'trash' | 'live' | 'offline' | 'table' | 'system' | 'light' | 'dark'
+export type IconName = 'eye' | 'eye-off' | 'menu' | 'close' | 'search' | 'arrow' | 'filter' | 'logout' | 'plus' | 'alert' | 'back' | 'refresh' | 'book' | 'home' | 'inbox' | 'projects' | 'calendar' | 'handoffs' | 'copy' | 'paperclip' | 'clients' | 'external' | 'trash' | 'live' | 'offline' | 'table' | 'system' | 'light' | 'dark'
 
 const icons: Record<IconName, ComponentType<IconProps>> = {
   eye: IconEye,
@@ -48,6 +49,7 @@ const icons: Record<IconName, ComponentType<IconProps>> = {
   refresh: IconRefresh,
   book: IconBook2,
   home: IconHome,
+  inbox: IconInbox,
   projects: IconFolder,
   calendar: IconCalendarEvent,
   handoffs: IconClipboardText,

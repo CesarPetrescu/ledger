@@ -113,6 +113,11 @@ export const overview: Overview = {
 
 export const atlasDetail: ProjectDetail = { project: atlas, entries: [decisionEntry, noteEntry] }
 
+/** What the home page (the Inbox) loads, empty. */
+export const emptyInbox = { needs_you: [], todos: [], todos_total: 0, projects: [] }
+export const noSummaries = { projects: [], metadata: { total: 0, ready: 0, failed: 0, active: false } }
+export const homeRoutes = { 'GET /admin/api/inbox': { body: emptyInbox }, 'GET /admin/api/table/projects': { body: noSummaries } }
+
 export const clients: Client[] = [
   {
     client_id: 'dcr-client-abc',

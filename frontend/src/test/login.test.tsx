@@ -1,7 +1,7 @@
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
-import { anonymousSession, authenticatedSession, futureSessionExpiry, mockApi, overview, renderApp } from './helpers'
+import { anonymousSession, authenticatedSession, futureSessionExpiry, homeRoutes, mockApi, renderApp } from './helpers'
 
 describe('login', () => {
   it('shows a compact password-only sign-in when there is no session', async () => {
@@ -47,29 +47,28 @@ describe('login', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/too many attempts/i)
   })
 
-  it('submits with Enter, shows a busy state, and lands on the overview', async () => {
+  it('submits with Enter, shows a busy state, and lands on the inbox', async () => {
     const { calls } = mockApi({
       'GET /admin/api/session': anonymousSession,
       'POST /admin/api/login': { body: { csrf_token: 'csrf-new', expires_at: futureSessionExpiry() } },
-      'GET /admin/api/overview': { body: overview },
+      ...homeRoutes,
     })
     renderApp()
     const user = userEvent.setup()
     const field = await screen.findByLabelText(/^password$/i)
     await user.type(field, 'correct horse{Enter}')
-    expect(await screen.findByRole('heading', { name: /^overview$/i })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /^inbox$/i })).toBeInTheDocument()
     const login = calls.find((call) => call.path === '/admin/api/login')
     expect(login?.body).toEqual({ password: 'correct horse' })
     expect(login?.init.method).toBe('POST')
-    const overviewCall = calls.find((call) => call.path === '/admin/api/overview')
-    expect(overviewCall).toBeDefined()
+    expect(calls.some((call) => call.path === '/admin/api/inbox')).toBe(true)
     await waitFor(() => expect(screen.queryByRole('button', { name: /signing in/i })).not.toBeInTheDocument())
   })
 
   it('keeps the session bootstrap out of the login flow when already signed in', async () => {
-    mockApi({ 'GET /admin/api/session': authenticatedSession, 'GET /admin/api/overview': { body: overview } })
+    mockApi({ 'GET /admin/api/session': authenticatedSession, ...homeRoutes })
     renderApp()
-    expect(await screen.findByRole('heading', { name: /^overview$/i })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /^inbox$/i })).toBeInTheDocument()
     expect(screen.queryByLabelText(/^password$/i)).not.toBeInTheDocument()
   })
 })

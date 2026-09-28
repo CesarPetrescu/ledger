@@ -496,8 +496,8 @@ export const api = {
   logout: () => request<void>('POST', '/logout'),
   getOverview: () => request<Overview>('GET', '/overview'),
   listProjects: (tier?: Tier) => request<{ projects: Project[] }>('GET', tier ? `/projects?tier=${encodeURIComponent(tier)}` : '/projects').then((r) => r.projects),
-  getProject: (slug: string, before?: string) =>
-    request<ProjectDetail>('GET', `/projects/${encodeURIComponent(slug)}?entries=200${before === undefined ? '' : `&before=${encodeURIComponent(before)}`}`),
+  // The project page lists entries itself; this only needs the project record.
+  getProject: (slug: string) => request<ProjectDetail>('GET', `/projects/${encodeURIComponent(slug)}?entries=1`).then((detail) => detail.project),
   saveProject: (slug: string, input: ProjectInput) => request<Project>('PUT', `/projects/${encodeURIComponent(slug)}`, input),
   appendEntry: (slug: string, kind: string, body: string) => request<Entry>('POST', `/projects/${encodeURIComponent(slug)}/entries`, { kind, body }),
   listEntries: (filter: EntryFilter, before?: string) => request<EntryTablePage>('GET', `/entries${entryQuery(filter, { limit: '200', ...(before ? { before } : {}) })}`),
@@ -514,6 +514,7 @@ export const api = {
   listTrash: () => request<{ items: TrashItem[] }>('GET', '/trash').then((r) => r.items),
   restoreTrash: (id: string) => request<{ restored: boolean }>('POST', `/trash/${encodeURIComponent(id)}/restore`),
   purgeTrash: (id: string) => request<void>('DELETE', `/trash/${encodeURIComponent(id)}`),
+  getEntry: (id: string) => request<TableEntry & { repeats: TableEntry[]; repeats_total: number }>('GET', `/entries/${encodeURIComponent(id)}`),
   relatedEntries: (id: string) => request<{ related: RelatedEntry[] }>('GET', `/entries/${encodeURIComponent(id)}/related`).then((response) => response.related),
   reopenTodo: (id: string) => request<Entry & Undoable>('POST', `/entries/${encodeURIComponent(id)}/reopen`),
   entriesCsvUrl: (filter: EntryFilter) => `/admin/api/entries.csv${entryQuery(filter)}`,

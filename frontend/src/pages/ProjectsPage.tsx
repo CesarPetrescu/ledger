@@ -1,14 +1,14 @@
 import { useMemo, useState, type FormEvent } from 'react'
-import { api, describeError, ENTRY_KINDS, TIERS, type DeletionPreview, type Entry, type Project, type ProjectInput } from '../api'
+import { api, describeError, TIERS, type DeletionPreview, type Project, type ProjectInput, type ProjectSummary } from '../api'
 import { useToast } from '../components/Toast'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { useUndo } from '../hooks/useUndo'
-import { EmptyState, ErrorState, Icon, KindBadge, Loading, StaleNotice, TierBadge, Timestamp } from '../components/ui'
+import { EmptyState, ErrorState, Icon, Loading, StaleNotice, TierBadge, Timestamp } from '../components/ui'
+import { EntriesView, HealthBadge, LIVE, ProjectSummaryTable } from '../components/entries'
 import { useResource } from '../hooks/useResource'
 import { Link, navigate } from '../router'
 
 const SLUG_PATTERN = '[a-z0-9][a-z0-9-]{1,63}'
-const MAX_BODY = 4000
 
 interface ProjectFormProps {
   mode: 'create' | 'edit'
@@ -133,67 +133,6 @@ function ProjectForm({ mode, project, onSaved, onCancel }: ProjectFormProps) {
   )
 }
 
-function Composer({ slug, onAppended }: { slug: string; onAppended: (entry: Entry) => void }) {
-  const [kind, setKind] = useState<string>('note')
-  const [body, setBody] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-  const toast = useToast()
-  const ready = body.trim().length > 0 && body.length <= MAX_BODY
-
-  const submit = async (event: FormEvent) => {
-    event.preventDefault()
-    if (!ready || busy) return
-    setBusy(true)
-    setError('')
-    try {
-      const entry = await api.appendEntry(slug, kind, body)
-      onAppended(entry)
-      setBody('')
-      toast('Entry appended.')
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : 'Could not append the entry.')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <form className="composer" aria-label="Append entry" onSubmit={(event) => void submit(event)}>
-      <div className="composer-row">
-        <label>
-          Kind
-          <select value={kind} onChange={(event) => setKind(event.target.value)}>
-            {ENTRY_KINDS.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </label>
-        <span className="muted small counter">
-          {body.length}/{MAX_BODY}
-        </span>
-      </div>
-      <label>
-        Body
-        <textarea value={body} onChange={(event) => setBody(event.target.value)} rows={4} maxLength={MAX_BODY} placeholder="What happened, what was decided, what is next…" />
-      </label>
-      {error && (
-        <p className="field-error" role="alert">
-          {error}
-        </p>
-      )}
-      <div className="form-actions">
-        <span className="muted small">Entries can't be edited and are attributed to this console session.</span>
-        <button type="submit" className="btn btn-primary" disabled={!ready || busy}>
-          {busy ? 'Appending…' : 'Append'}
-        </button>
-      </div>
-    </form>
-  )
-}
-
 const META_FIELDS: { key: keyof Project; label: string }[] = [
   { key: 'goal', label: 'Goal' },
   { key: 'deadline', label: 'Deadline' },
@@ -204,7 +143,7 @@ const META_FIELDS: { key: keyof Project; label: string }[] = [
   { key: 'stack', label: 'Stack' },
 ]
 
-type ProjectView = 'overview' | 'handoffs' | 'files'
+export type ProjectView = 'activity' | 'todos' | 'decisions' | 'details' | 'handoffs' | 'files'
 
 function ProjectHandoffs({ slug }: { slug: string }) {
   const handoffs = useResource(() => api.listHandoffs({ project: slug, archive: 'all' }), `project-handoffs:${slug}`, 'handoff handoff_message')
@@ -299,39 +238,45 @@ function DeleteProject({ project }: { project: Project }) {
   )
 }
 
-function ProjectDetail({ slug, view, onSaved, onEntryAppended }: { slug: string; view: ProjectView; onSaved: (project: Project) => void; onEntryAppended: (entry: Entry) => void }) {
-  const detail = useResource(() => api.getProject(slug), `project:${slug}`, 'project entry')
-  const [editing, setEditing] = useState(false)
-  const [loadingOlder, setLoadingOlder] = useState(false)
-  const [olderError, setOlderError] = useState('')
-  const toast = useToast()
+const PROJECT_TABS: { id: ProjectView; label: string; path: string }[] = [
+  { id: 'activity', label: 'Activity', path: '' },
+  { id: 'todos', label: 'Todos', path: '/todos' },
+  { id: 'decisions', label: 'Decisions', path: '/decisions' },
+  { id: 'details', label: 'Details', path: '/details' },
+  { id: 'handoffs', label: 'Handoffs', path: '/handoffs' },
+  { id: 'files', label: 'Files', path: '/files' },
+]
 
-  const loadOlder = async () => {
-    const before = detail.data?.next_before
-    if (before === undefined || loadingOlder) return
-    setLoadingOlder(true)
-    setOlderError('')
-    try {
-      const page = await api.getProject(slug, before)
-      detail.update((current) => {
-        const updated: typeof current = { ...current, entries: [...current.entries, ...page.entries] }
-        if (page.next_before === undefined) delete updated.next_before
-        else updated.next_before = page.next_before
-        return updated
-      })
-    } catch (failure) {
-      setOlderError(failure instanceof Error ? failure.message : 'Could not load older entries.')
-    } finally {
-      setLoadingOlder(false)
-    }
-  }
+/** Where the project stands: health, what the agents did this week, what it needs from you. */
+function ProjectStatus({ summary }: { summary: ProjectSummary | undefined }) {
+  if (!summary) return null
+  const blocked = summary.status_state === 'blocked'
+  return (
+    <section className="project-status" aria-label="Project status">
+      {blocked && <p className="project-status-blocked"><HealthBadge state={summary.status_state} /> {summary.status_detail || summary.status_title}</p>}
+      {/* Until the AI titles a new status, its own text stands in. */}
+      {summary.digest ? <p className="digest">{summary.digest}</p> : summary.status_at ? <p className="clamp">Latest: {summary.status_title || summary.status_body}</p> : <p className="muted">No status yet. A weekly summary appears once agents have written here.</p>}
+      <ul className="project-status-facts">
+        {summary.needs_you > 0 && <li><Link to="/">{summary.needs_you} {summary.needs_you === 1 ? 'question waits' : 'questions wait'} for you in the Inbox</Link></li>}
+        <li>{summary.open_todos} open {summary.open_todos === 1 ? 'todo' : 'todos'}</li>
+        <li>{summary.week_entries > 0 ? <>{summary.week_entries} {summary.week_entries === 1 ? 'entry' : 'entries'} this week{summary.week_agents.length > 0 && <> from {summary.week_agents.map((agent, index) => <span key={agent}>{index > 0 && ', '}<code>{agent}</code></span>)}</>}</> : <>Quiet this week{summary.last_entry_at && <> · last entry <Timestamp iso={summary.last_entry_at} /></>}</>}</li>
+      </ul>
+    </section>
+  )
+}
+
+function ProjectDetail({ slug, view, summary, onRetrySummary, onSaved }: { slug: string; view: ProjectView; summary: ProjectSummary | undefined; onRetrySummary?: (() => void) | undefined; onSaved: (project: Project) => void }) {
+  const detail = useResource(() => api.getProject(slug), `project:${slug}`, 'project')
+  const [editing, setEditing] = useState(false)
+  const toast = useToast()
 
   if (detail.loading) return <Loading label="Loading project…" />
   if (!detail.data) {
     const missing = detail.error === 'project not found'
     return <ErrorState message={missing ? 'Project not found.' : "Couldn't load this project."} onRetry={missing ? undefined : detail.reload} />
   }
-  const { project, entries } = detail.data
+  const project = detail.data
+  const base = `/projects/${encodeURIComponent(slug)}`
 
   return (
     <article className="detail">
@@ -345,12 +290,10 @@ function ProjectDetail({ slug, view, onSaved, onEntryAppended }: { slug: string;
             <code>{project.slug}</code>
             <TierBadge tier={project.tier} />
             <span>{project.hours_wk} h/wk</span>
-            <span className="muted">
-              updated <Timestamp iso={project.updated_at} />
-            </span>
+            {project.deadline && <span>Due {project.deadline}</span>}
           </div>
         </div>
-        {!editing && view === 'overview' && (
+        {!editing && (
           <div className="detail-actions">
             <button type="button" className="btn" onClick={() => setEditing(true)}>
               Edit project
@@ -360,84 +303,55 @@ function ProjectDetail({ slug, view, onSaved, onEntryAppended }: { slug: string;
         )}
       </header>
       {detail.stale && <StaleNotice message="Showing the last loaded version; refresh failed." onRetry={detail.reload} />}
-      <nav className="detail-tabs" aria-label="Project sections">
-        <Link to={`/projects/${slug}`} aria-current={view === 'overview' ? 'page' : undefined}>Overview</Link>
-        <Link to={`/projects/${slug}/handoffs`} aria-current={view === 'handoffs' ? 'page' : undefined}>Handoffs</Link>
-        <Link to={`/projects/${slug}/files`} aria-current={view === 'files' ? 'page' : undefined}>Files</Link>
-      </nav>
-      {view === 'handoffs' ? <ProjectHandoffs slug={slug} /> : view === 'files' ? <ProjectFiles slug={slug} /> : <>
       {editing ? (
         <ProjectForm
           mode="edit"
           project={project}
           onCancel={() => setEditing(false)}
           onSaved={(saved) => {
-            detail.update((current) => ({ ...current, project: saved }))
+            detail.update(() => saved)
             setEditing(false)
             onSaved(saved)
             toast('Project saved.')
           }}
         />
       ) : (
-        <ul className="meta-grid" aria-label="Project metadata">
-          {META_FIELDS.map((field) => (
-            <li key={field.key}>
-              <span className="meta-label">{field.label}</span>
-              <span className="meta-value">{String(project[field.key] ?? '') || <span className="muted">—</span>}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-      <Composer
-        slug={project.slug}
-        onAppended={(entry) => {
-          detail.update((current) => ({ ...current, entries: [entry, ...current.entries.filter((existing) => existing.id !== entry.id)] }))
-          onEntryAppended(entry)
-        }}
-      />
-      <section aria-labelledby="timeline-title" className="timeline-section">
-        <h2 id="timeline-title" className="panel-title">
-          Timeline <span className="count">{entries.length} loaded</span>
-        </h2>
-        {entries.length === 0 ? (
-          <p className="muted">No entries yet.</p>
-        ) : (
-          <ol className="timeline">
-            {entries.map((entry) => (
-              <li key={entry.id}>
-                <div className="entry-head">
-                  <KindBadge kind={entry.kind} />
-                  <Timestamp iso={entry.created_at} />
-                  <code>{entry.source}</code>
-                  <code className="muted">{entry.client_id}</code>
-                  <code className="muted">#{entry.id}</code>
-                </div>
-                <p className="entry-body">{entry.body}</p>
-              </li>
+        <>
+          {/* The summary comes from a separate request that can fail or go stale on its own. */}
+          {onRetrySummary && <StaleNotice message={summary ? "This project's week, health, and open questions may be out of date." : "Couldn't load this project's week, health, and open questions."} onRetry={onRetrySummary} />}
+          <ProjectStatus summary={summary} />
+          <nav className="detail-tabs" aria-label="Project sections">
+            {PROJECT_TABS.map((tab) => (
+              <Link key={tab.id} to={base + tab.path} aria-current={view === tab.id ? 'page' : undefined}>
+                {tab.label}{tab.id === 'todos' && summary && summary.open_todos > 0 && <span className="count">{summary.open_todos}</span>}
+              </Link>
             ))}
-          </ol>
-        )}
-        {detail.data.next_before !== undefined && (
-          <button type="button" className="btn" disabled={loadingOlder} onClick={() => void loadOlder()}>
-            {loadingOlder ? 'Loading…' : 'Load older entries'}
-          </button>
-        )}
-        {olderError && (
-          <p className="field-error" role="alert">
-            {olderError}
-          </p>
-        )}
-      </section>
-      </>}
+          </nav>
+          {view === 'handoffs' ? <ProjectHandoffs slug={slug} />
+            : view === 'files' ? <ProjectFiles slug={slug} />
+            : view === 'details' ? (
+              <ul className="meta-grid" aria-label="Project details">
+                {META_FIELDS.map((field) => (
+                  <li key={field.key}>
+                    <span className="meta-label">{field.label}</span>
+                    <span className="meta-value">{String(project[field.key] ?? '') || <span className="muted">—</span>}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : <EntriesView key={view} view={view} fixedProject={slug} />}
+        </>
+      )}
     </article>
   )
 }
 
-export function ProjectsPage({ slug, view = 'overview' }: { slug?: string | undefined; view?: ProjectView }) {
+export function ProjectsPage({ slug, view = 'activity' }: { slug?: string | undefined; view?: ProjectView }) {
   const list = useResource(() => api.listProjects(), 'projects', 'project entry')
+  const summaries = useResource(api.getProjectSummaries, 'project-summaries', LIVE)
   const [filter, setFilter] = useState('')
   const [tier, setTier] = useState('all')
   const toast = useToast()
+  const summaryOf = (projectSlug: string) => summaries.data?.projects.find((summary) => summary.slug === projectSlug)
 
   const visible = useMemo(() => {
     const needle = filter.trim().toLowerCase()
@@ -445,14 +359,15 @@ export function ProjectsPage({ slug, view = 'overview' }: { slug?: string | unde
   }, [list.data, filter, tier])
   const tierCount = (option: string) => (list.data ?? []).filter((project) => option === 'all' || project.tier === option).length
 
-  const upsertInList = (saved: Project) =>
+  const upsertInList = (saved: Project) => {
     list.update((projects) => {
       const existing = projects.find((project) => project.slug === saved.slug)
       const merged = existing && saved.last_entry_at === undefined && existing.last_entry_at !== undefined ? { ...saved, last_entry_at: existing.last_entry_at } : saved
       return [merged, ...projects.filter((project) => project.slug !== saved.slug)].sort((a, b) => a.slug.localeCompare(b.slug))
     })
-  const updateLastEntry = (entry: Entry) =>
-    list.update((projects) => projects.map((project) => (project.slug === entry.slug ? { ...project, last_entry_at: entry.created_at } : project)))
+    // The summaries carry the name, tier, and deadline too.
+    summaries.reload()
+  }
   const mode = slug ? 'detail' : 'list'
 
   return (
@@ -490,18 +405,23 @@ export function ProjectsPage({ slug, view = 'overview' }: { slug?: string | unde
         {list.data && visible.length === 0 && <p className="muted">No projects match.</p>}
         {list.data && visible.length > 0 && (
           <ul className="project-list" aria-label="Projects">
-            {visible.map((project) => (
-              <li key={project.slug}>
-                <Link to={`/projects/${project.slug}`} aria-current={project.slug === slug ? 'page' : undefined}>
-                  <span className="project-name">{project.name}</span>
-                  <span className="muted small">{project.last_entry_at ? <Timestamp iso={project.last_entry_at} /> : 'no entries'}</span>
-                  <span className="project-tags">
-                    <TierBadge tier={project.tier} />
-                    <code>{project.slug}</code>
-                  </span>
-                </Link>
-              </li>
-            ))}
+            {visible.map((project) => {
+              const summary = summaryOf(project.slug)
+              return (
+                <li key={project.slug}>
+                  <Link to={`/projects/${project.slug}`} aria-current={project.slug === slug ? 'page' : undefined}>
+                    <span className="project-name">{project.name}</span>
+                    <span className="muted small">{project.last_entry_at ? <Timestamp iso={project.last_entry_at} /> : 'no entries'}</span>
+                    <span className="project-tags">
+                      <TierBadge tier={project.tier} />
+                      <HealthBadge state={summary?.status_state ?? ''} />
+                      {summary && summary.needs_you > 0 && <span className="badge" data-focus="ask">{summary.needs_you} for you</span>}
+                      <code>{project.slug}</code>
+                    </span>
+                  </Link>
+                </li>
+              )
+            })}
           </ul>
         )}
       </section>
@@ -521,10 +441,20 @@ export function ProjectsPage({ slug, view = 'overview' }: { slug?: string | unde
             />
           </>
         ) : slug ? (
-          <ProjectDetail key={`${slug}:${view}`} slug={slug} view={view} onSaved={upsertInList} onEntryAppended={updateLastEntry} />
+          <ProjectDetail key={slug} slug={slug} view={view} summary={summaryOf(slug)} onRetrySummary={summaries.stale || (!summaries.loading && !summaries.data) ? summaries.reload : undefined} onSaved={upsertInList} />
+        ) : summaries.loading ? (
+          <Loading label="Loading this week…" />
+        ) : !summaries.data ? (
+          <ErrorState message="Couldn't load this week's project summary." onRetry={summaries.reload} />
+        ) : summaries.data.projects.length > 0 ? (
+          <section aria-labelledby="all-projects-title">
+            <h2 id="all-projects-title" className="section-title">All projects this week</h2>
+            {summaries.stale && <StaleNotice message="This summary may be out of date." onRetry={summaries.reload} />}
+            <ProjectSummaryTable projects={summaries.data.projects} />
+          </section>
         ) : (
           <EmptyState>
-            <p>Select a project to inspect its record and timeline.</p>
+            <p>Select a project to see what its agents did, its todos, and its decisions.</p>
           </EmptyState>
         )}
       </section>

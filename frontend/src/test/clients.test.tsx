@@ -1,12 +1,15 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
-import { authenticatedSession, clients, mockApi, renderApp } from './helpers'
+import { authenticatedSession, clients, mockApi, overview, renderApp } from './helpers'
 
 describe('oauth clients', () => {
   it('lists safe metadata only', async () => {
-    mockApi({ 'GET /admin/api/session': authenticatedSession, 'GET /admin/api/oauth/clients': { body: { clients } } })
+    mockApi({ 'GET /admin/api/session': authenticatedSession, 'GET /admin/api/oauth/clients': { body: { clients } }, 'GET /admin/api/overview': { body: overview } })
     renderApp('/admin/clients')
+    // The counters the old overview page showed live here now.
+    const counts = await screen.findByRole('list', { name: 'Counts' })
+    expect(counts).toHaveTextContent('Active access tokens3')
     const table = await screen.findByRole('table', { name: /oauth clients/i })
     const rows = within(table).getAllByRole('row').slice(1)
     expect(rows).toHaveLength(2)
@@ -46,6 +49,12 @@ describe('oauth clients', () => {
     expect(post?.body).toEqual({ client_id: 'dcr-client-abc' })
     expect(new Headers(post?.init.headers).get('X-CSRF-Token')).toBe('csrf-123')
     await waitFor(() => expect(calls.filter((call) => call.path === '/admin/api/oauth/clients')).toHaveLength(2))
+  })
+
+  it('says so when the counts fail to load, with a retry', async () => {
+    mockApi({ 'GET /admin/api/session': authenticatedSession, 'GET /admin/api/oauth/clients': { body: { clients } }, 'GET /admin/api/overview': { status: 500, body: { error: 'hidden' } } })
+    renderApp('/admin/clients')
+    expect(await screen.findByText("Couldn't load the counts.")).toBeInTheDocument()
   })
 
   it('shows an empty state when nothing is registered', async () => {

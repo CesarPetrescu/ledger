@@ -1529,3 +1529,43 @@ func TestOwnerLabelsSurviveReextractionAndTeachTheExtractor(t *testing.T) {
 		t.Fatalf("legacy restore: %v", err)
 	}
 }
+
+func TestEntryPageReturnsEntryAndItsRepeats(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
+	_, s := login(t, server, "correct horse", "")
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	root, _ := db.AppendEntry(ctx, "atlas", "note", "Pricing claims are unverified", "codex", "c")
+	repeat, _ := db.AppendEntry(ctx, "atlas", "note", "Pricing claims still unverified", "claude-code", "c")
+	for id, title := range map[int64]string{root.ID: "Pricing unverified", repeat.ID: "Pricing still unverified"} {
+		if err := db.SaveEntryMeta(ctx, id, store.EntryMeta{Title: title}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Pool.Exec(ctx, `UPDATE entry_meta SET duplicate_of=$1,duplicate_checked=true WHERE entry_id=$2`, root.ID, repeat.ID); err != nil {
+		t.Fatal(err)
+	}
+	get := func(path string, want int) map[string]any {
+		t.Helper()
+		res := request(t, server, http.MethodGet, path, "", authed(s, false))
+		if res.Code != want {
+			t.Fatalf("GET %s = %d %s", path, res.Code, res.Body.String())
+		}
+		out := map[string]any{}
+		_ = json.Unmarshal(res.Body.Bytes(), &out)
+		return out
+	}
+	id := func(v int64) string { return strconv.FormatInt(v, 10) }
+	page := get("/admin/api/entries/"+id(root.ID), http.StatusOK)
+	repeats, _ := page["repeats"].([]any)
+	if page["project_name"] != "Atlas" || page["meta"].(map[string]any)["title"] != "Pricing unverified" || len(repeats) != 1 || repeats[0].(map[string]any)["id"] != id(repeat.ID) || page["repeats_total"] != float64(1) {
+		t.Fatalf("root page = %v", page)
+	}
+	if page := get("/admin/api/entries/"+id(repeat.ID), http.StatusOK); page["duplicate_of"] != id(root.ID) || len(page["repeats"].([]any)) != 0 {
+		t.Fatalf("repeat page = %v", page)
+	}
+	get("/admin/api/entries/999999", http.StatusNotFound)
+	get("/admin/api/entries/abc", http.StatusBadRequest)
+}

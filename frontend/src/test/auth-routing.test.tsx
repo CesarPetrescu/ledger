@@ -1,7 +1,7 @@
 import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
-import { anonymousSession, authenticatedSession, clients, futureSessionExpiry, mockApi, overview, renderApp } from './helpers'
+import { anonymousSession, authenticatedSession, clients, futureSessionExpiry, homeRoutes, mockApi, overview, renderApp } from './helpers'
 
 describe('authenticated shell and routing', () => {
   it('renders navigation, routes by path, and signs out with CSRF', async () => {
@@ -10,17 +10,18 @@ describe('authenticated shell and routing', () => {
       'GET /admin/api/overview': { body: overview },
       'GET /admin/api/oauth/clients': { body: { clients } },
       'POST /admin/api/logout': { status: 204 },
+      ...homeRoutes,
     })
     renderApp('/admin/clients')
     expect(await screen.findByRole('heading', { name: /^agents$/i })).toBeInTheDocument()
     const nav = screen.getByRole('navigation', { name: /primary/i })
-    for (const label of ['Overview', 'Projects', 'Search', 'Calendar', 'Agents']) {
+    for (const label of ['Inbox', 'Projects', 'Table', 'Search', 'Calendar', 'Agents']) {
       expect(within(nav).getByRole('link', { name: label })).toBeInTheDocument()
     }
     expect(within(nav).getByRole('link', { name: 'Agents' })).toHaveAttribute('aria-current', 'page')
     const user = userEvent.setup()
-    await user.click(within(nav).getByRole('link', { name: 'Overview' }))
-    expect(await screen.findByRole('heading', { name: /^overview$/i })).toBeInTheDocument()
+    await user.click(within(nav).getByRole('link', { name: 'Inbox' }))
+    expect(await screen.findByRole('heading', { name: /^inbox$/i })).toBeInTheDocument()
     expect(window.location.pathname).toBe('/admin/')
     await user.click(screen.getByRole('button', { name: /sign out/i }))
     expect(await screen.findByRole('heading', { name: /operator sign-in/i })).toBeInTheDocument()
@@ -33,6 +34,7 @@ describe('authenticated shell and routing', () => {
     mockApi({
       'GET /admin/api/session': authenticatedSession,
       'GET /admin/api/oauth/clients': { body: { clients } },
+      'GET /admin/api/overview': { body: overview },
       'POST /admin/api/logout': { status: 500, body: { error: 'internal detail must stay hidden' } },
     })
     renderApp('/admin/clients')
@@ -49,7 +51,8 @@ describe('authenticated shell and routing', () => {
   it('drops to the sign-in panel with an expiry notice when the API answers 401 mid-session', async () => {
     mockApi({
       'GET /admin/api/session': authenticatedSession,
-      'GET /admin/api/overview': { status: 401, body: { error: 'unauthenticated' } },
+      'GET /admin/api/inbox': { status: 401, body: { error: 'unauthenticated' } },
+      'GET /admin/api/table/projects': { status: 401, body: { error: 'unauthenticated' } },
     })
     renderApp()
     expect(await screen.findByRole('heading', { name: /operator sign-in/i })).toBeInTheDocument()
@@ -61,6 +64,7 @@ describe('authenticated shell and routing', () => {
       'GET /admin/api/session': anonymousSession,
       'POST /admin/api/login': { body: { csrf_token: 'csrf-new', expires_at: futureSessionExpiry() } },
       'GET /admin/api/oauth/clients': { body: { clients } },
+      'GET /admin/api/overview': { body: overview },
     })
     renderApp('/admin/clients')
     const user = userEvent.setup()
@@ -71,11 +75,11 @@ describe('authenticated shell and routing', () => {
   it('opens search from the keyboard shortcut', async () => {
     mockApi({
       'GET /admin/api/session': authenticatedSession,
-      'GET /admin/api/overview': { body: overview },
+      ...homeRoutes,
       'GET /admin/api/projects': { body: { projects: overview.projects } },
     })
     renderApp()
-    await screen.findByRole('heading', { name: /^overview$/i })
+    await screen.findByRole('heading', { name: /^inbox$/i })
     const user = userEvent.setup()
     await user.keyboard('{Control>}k{/Control}')
     expect(await screen.findByRole('heading', { name: /^search$/i })).toBeInTheDocument()

@@ -26,7 +26,8 @@ describe('search', () => {
     expect(items[0]).toHaveTextContent('decision')
     expect(items[0]).toHaveTextContent('Use PostgreSQL everywhere.')
     expect(items[0]?.querySelector('mark')).toHaveTextContent(/postgres/i)
-    expect(within(items[0]!).getByRole('link', { name: /postgresql/i })).toHaveAttribute('href', '/admin/projects/atlas')
+    // Entry hits open the entry itself; project hits open the project.
+    expect(within(items[0]!).getByRole('link', { name: /postgresql/i })).toHaveAttribute('href', '/admin/entries/41')
     expect(items[1]).toHaveTextContent('Atlas')
     const post = calls.find((call) => call.method === 'POST')
     expect(post?.body).toEqual({ q: 'postgres', limit: 20, project: 'atlas', kind: 'decision' })
