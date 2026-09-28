@@ -176,3 +176,19 @@ it('leaves nothing of the connection behind after disconnecting', async () => {
   expect(await screen.findByText(/connect a nextcloud calendar/i)).toBeInTheDocument()
   expect(screen.queryByRole('region', { name: /agent-visible calendars/i })).not.toBeInTheDocument()
 })
+
+it('says so when Nextcloud calendars cannot be listed, with a retry', async () => {
+  const { calls } = mockApi({
+    'GET /admin/api/session': authenticatedSession,
+    'GET /admin/api/calendar/connection': { body: { connected: true, server_url: 'https://cloud.example.com', username: 'alex', selected_calendars: 1 } },
+    'GET /admin/api/calendar/calendars': [{ status: 502, body: { error: 'nextcloud unavailable' } }, { body: { calendars } }],
+    'GET /admin/api/calendar/events': { body: { events: [planning] } },
+    'GET /admin/api/entries': { body: { entries: [], sources: [], tags: [] } },
+    'GET /admin/api/projects': { body: { projects: [] } },
+  })
+  renderApp('/admin/calendar')
+  expect(await screen.findByText(/couldn't reach your nextcloud calendars/i)).toBeInTheDocument()
+  await userEvent.setup().click(screen.getByRole('button', { name: /retry/i }))
+  await waitFor(() => expect(calls.filter((call) => call.path === '/admin/api/calendar/calendars')).toHaveLength(2))
+  expect(screen.queryByText(/couldn't reach your nextcloud calendars/i)).not.toBeInTheDocument()
+})

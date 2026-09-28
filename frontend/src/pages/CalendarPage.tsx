@@ -432,6 +432,7 @@ function CalendarWorkspace({ connection, onDisconnected }: { connection: Calenda
       </div>
       <p className="cal-legend muted small"><span data-kind="event">Events</span><span data-kind="todo">Todos due</span><span data-kind="deadline">Project deadlines</span><span data-kind="wake">Snoozed items waking</span></p>
 
+      {connection.connected && !managing && !calendars.loading && !calendars.data && <ErrorState message="Couldn't reach your Nextcloud calendars; only Ledger's own dates are shown." onRetry={calendars.reload} />}
       {events.stale && <StaleNotice message="Showing the last loaded calendar; refresh failed." onRetry={events.reload} />}
       {hasCalendars && !events.loading && !events.data && <ErrorState message="Couldn't load calendar events." onRetry={events.reload} />}
       {!ledger.loading && !ledger.data && <ErrorState message="Couldn't load todos, deadlines, and snoozed items." onRetry={ledger.reload} />}
