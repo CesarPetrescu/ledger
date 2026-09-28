@@ -657,7 +657,7 @@ func TestTodoResolutionAndProjectSummaries(t *testing.T) {
 		t.Fatalf("reopen open todo = %d", res.Code)
 	}
 	summary := request(t, server, http.MethodGet, "/admin/api/table/projects", "", authed(s, false))
-	if summary.Code != http.StatusOK || !strings.Contains(summary.Body.String(), `"open_todos":1`) || !strings.Contains(summary.Body.String(), `"week_agents":["claude-code","codex"]`) || !strings.Contains(summary.Body.String(), `"metadata":{"total":2,"ready":1,"failed":0,"active":false}`) {
+	if summary.Code != http.StatusOK || !strings.Contains(summary.Body.String(), `"open_todos":1`) || !strings.Contains(summary.Body.String(), `"week_agents":["claude-code","codex"]`) || !strings.Contains(summary.Body.String(), `"metadata":{"total":2,"ready":1,"failed":0,"active":false,"configured":false}`) {
 		t.Fatalf("summary = %d %s", summary.Code, summary.Body.String())
 	}
 
@@ -1569,3 +1569,109 @@ func TestEntryPageReturnsEntryAndItsRepeats(t *testing.T) {
 	get("/admin/api/entries/999999", http.StatusNotFound)
 	get("/admin/api/entries/abc", http.StatusBadRequest)
 }
+
+func TestAgentsSummarizeWhatEachAgentDid(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
+	_, s := login(t, server, "correct horse", "")
+	for _, p := range []store.Project{{Slug: "atlas", Name: "Atlas", Tier: "focus"}, {Slug: "beacon", Name: "Beacon", Tier: "park"}} {
+		if _, err := db.UpsertProject(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ask, _ := db.AppendEntry(ctx, "atlas", "note", "Please confirm the pricing", "codex", "c")
+	if err := db.SaveEntryMeta(ctx, ask.ID, store.EntryMeta{Title: "Pricing question", Ask: "Confirm the pricing"}); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = db.AppendEntry(ctx, "beacon", "status", "Shipped the phone build", "codex", "c")
+	old, _ := db.AppendEntry(ctx, "beacon", "note", "An old note", "claude-code", "c")
+	if _, err := db.Pool.Exec(ctx, `UPDATE entry SET created_at=now()-interval '30 days' WHERE id=$1`, old.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = db.AppendEntry(ctx, "atlas", "note", "Written by the owner", "ledger-admin", "c")
+	h, err := db.CreateHandoff(ctx, store.Handoff{ProjectSlug: "atlas", Title: "Plan", Description: "d", Scope: "s", Source: "codex", ClientID: "c"}, store.HandoffMessage{Body: "b", WorkState: "ready", Source: "codex", ClientID: "c"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, `UPDATE handoff_message SET work_state='in_progress',claimed_at=now(),claimed_source='claude-code',claimed_client_id='c' WHERE handoff_id=$1`, h.Handoff.ID); err != nil {
+		t.Fatal(err)
+	}
+	res := request(t, server, http.MethodGet, "/admin/api/agents", "", authed(s, false))
+	var out struct {
+		Agents []struct {
+			Name        string `json:"name"`
+			WeekEntries int    `json:"week_entries"`
+			Entries     int    `json:"entries"`
+			OpenAsks    int    `json:"open_asks"`
+			Handoffs    int    `json:"handoffs"`
+			Projects    []struct{ Slug string }
+			Latest      []map[string]any
+		}
+	}
+	if res.Code != http.StatusOK || json.Unmarshal(res.Body.Bytes(), &out) != nil || len(out.Agents) != 2 {
+		t.Fatalf("agents = %d %s", res.Code, res.Body.String())
+	}
+	// Holding a handoff just now makes claude-code the most recently active.
+	codex, claude := out.Agents[1], out.Agents[0]
+	if codex.Name != "codex" || codex.WeekEntries != 2 || codex.OpenAsks != 1 || len(codex.Projects) != 2 || len(codex.Latest) != 2 || codex.Handoffs != 0 {
+		t.Fatalf("codex = %+v", codex)
+	}
+	if claude.Name != "claude-code" || claude.WeekEntries != 0 || claude.Entries != 1 || len(claude.Projects) != 0 || claude.Handoffs != 1 {
+		t.Fatalf("claude = %+v", claude)
+	}
+	// Two active messages in one handoff are one handoff; holding it counts as activity.
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO handoff_message(handoff_id,body,work_state,source,client_id,claimed_at,claimed_source,claimed_client_id,status_updated_source,status_updated_client_id)
+VALUES($1,'more','in_progress','codex','c',now(),'claude-code','c','claude-code','c')`, h.Handoff.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, `UPDATE entry SET created_at=now()-interval '40 days' WHERE source='codex'`); err != nil {
+		t.Fatal(err)
+	}
+	agents, err := db.Agents(ctx, "ledger-admin")
+	if err != nil || agents[0].Name != "claude-code" || agents[0].Handoffs != 1 || agents[0].LastActive == nil || time.Since(*agents[0].LastActive) > time.Hour {
+		t.Fatalf("handoff activity: %+v %v", agents, err)
+	}
+	// Handling the ask clears it from the agent's count.
+	if _, _, err := db.SetOwnerState(ctx, ask.ID, store.OwnerPatch{Handled: ptr(true)}); err != nil {
+		t.Fatal(err)
+	}
+	agents, err = db.Agents(ctx, "ledger-admin")
+	if err != nil || agents[len(agents)-1].Name != "codex" || agents[len(agents)-1].OpenAsks != 0 {
+		t.Fatalf("after handling: %+v %v", agents, err)
+	}
+}
+
+func TestLabellingStatusSaysWhyItIsPaused(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	progress := func() store.MetaProgress {
+		t.Helper()
+		p, err := db.MetaProgress(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	if p := progress(); p.Configured || p.Active || p.Problem != "" {
+		t.Fatalf("no extractor yet: %+v", p)
+	}
+	if err := db.Heartbeat(ctx, store.ExtractorHeartbeat); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetWorkerProblem(ctx, store.ExtractorHeartbeat, "can't reach the AI model"); err != nil {
+		t.Fatal(err)
+	}
+	if p := progress(); !p.Configured || !p.Active || p.Problem != "can't reach the AI model" {
+		t.Fatalf("model down: %+v", p)
+	}
+	if err := db.SetWorkerProblem(ctx, store.ExtractorHeartbeat, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, `UPDATE worker_heartbeat SET seen_at=now()-interval '10 minutes'`); err != nil {
+		t.Fatal(err)
+	}
+	if p := progress(); !p.Configured || p.Active || p.Problem != "" {
+		t.Fatalf("stopped: %+v", p)
+	}
+}
+
+func ptr[T any](v T) *T { return &v }

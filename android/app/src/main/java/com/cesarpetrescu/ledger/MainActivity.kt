@@ -98,7 +98,9 @@ fun LedgerApp(model: LedgerModel = viewModel()) {
         "handoffs", "handoff", "handoff-new", "handoff-edit", "message-new" -> "Handoffs"
         "calendar", "event", "event-new", "calendar-settings" -> "Calendar"
         "search" -> "Search"
-        "clients" -> "Connected clients"
+        "clients" -> "Connected apps"
+        "agents" -> "Agents"
+        "help" -> "Help"
         "device" -> "Approve a device"
         "more" -> "More"
         "table" -> "Table"
@@ -159,7 +161,9 @@ fun LedgerApp(model: LedgerModel = viewModel()) {
                             "reading" -> ReadingScreen(model)
                             "todos" -> TodosScreen(model)
                             "more" -> MoreScreen(model)
-                            "table" -> TableScreen(model)
+                            "table" -> TableScreen(model, java.net.URLDecoder.decode(route.substringAfter('/', ""), Charsets.UTF_8.name()))
+                            "agents" -> AgentsScreen(model)
+                            "help" -> HelpScreen()
                             "entry-view" -> EntryScreen(model, route.substringAfter('/'))
                             "history" -> HistoryScreen(model)
                             "trash" -> TrashScreen(model)

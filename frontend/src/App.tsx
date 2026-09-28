@@ -3,7 +3,8 @@ import { Shell } from './components/Shell'
 import { ToastProvider } from './components/Toast'
 import { Link, useLocation } from './router'
 import { ConnectPage } from './pages/ConnectPage'
-import { ClientsPage } from './pages/ClientsPage'
+import { AgentsPage } from './pages/AgentsPage'
+import { HelpPage } from './pages/HelpPage'
 import { LoginPage } from './pages/LoginPage'
 import { InboxPage } from './pages/InboxPage'
 import { EntryPage } from './pages/EntryPage'
@@ -30,7 +31,8 @@ function resolve(path: string, query: URLSearchParams): { title: string; page: R
   const handoff = /^\/handoffs\/([^/]+)$/.exec(path)
   if (handoff?.[1]) return { title: 'Handoffs', page: <HandoffsPage id={decodeURIComponent(handoff[1])} /> }
   if (path === '/connect') return { title: 'Connect a machine', page: <ConnectPage /> }
-  if (path === '/clients') return { title: 'Agents', page: <ClientsPage /> }
+  if (path === '/agents' || path === '/clients') return { title: 'Agents', page: <AgentsPage /> }
+  if (path === '/help') return { title: 'Help', page: <HelpPage /> }
   return {
     title: 'Not found',
     page: (

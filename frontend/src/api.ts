@@ -215,8 +215,26 @@ export interface InboxResponse {
 
 export interface ProjectSummaries {
   projects: ProjectSummary[]
-  /** active is false when no extractor has checked in recently. */
-  metadata: { total: number; ready: number; failed: number; active: boolean }
+  /**
+   * active is false when no extractor has checked in recently; configured is
+   * false when none ever ran; problem says what stops a running one.
+   */
+  metadata: { total: number; ready: number; failed: number; active: boolean; configured?: boolean; problem?: string }
+}
+
+/** One agent's recent work, for the Agents page. */
+export interface AgentSummary {
+  name: string
+  last_active?: string
+  week_entries: number
+  entries: number
+  /** Projects it wrote to this week. */
+  projects: { slug: string; name: string }[]
+  /** Questions it asked you that are still open. */
+  open_asks: number
+  /** Handoff messages it claimed and has not finished. */
+  handoffs: number
+  latest: TableEntry[]
 }
 
 function entryQuery(filter: EntryFilter, extra: Record<string, string> = {}): string {
@@ -519,6 +537,7 @@ export const api = {
   reopenTodo: (id: string) => request<Entry & Undoable>('POST', `/entries/${encodeURIComponent(id)}/reopen`),
   entriesCsvUrl: (filter: EntryFilter) => `/admin/api/entries.csv${entryQuery(filter)}`,
   search: (input: SearchRequest) => request<SearchResponse>('POST', '/search', input),
+  listAgents: () => request<{ agents: AgentSummary[] }>('GET', '/agents').then((response) => response.agents),
   listClients: (offset = 0) => request<ClientPage>('GET', `/oauth/clients?limit=50&offset=${offset}`),
   revokeClient: (clientId: string) => request<{ revoked: number }>('POST', '/oauth/revoke', { client_id: clientId }),
   getCalendarConnection: () => request<CalendarConnection>('GET', '/calendar/connection'),

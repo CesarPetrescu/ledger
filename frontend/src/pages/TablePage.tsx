@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { api, describeError } from '../api'
 import { useResource } from '../hooks/useResource'
+import { LegendButton } from '../components/help'
 import { refreshAll } from '../live'
 import { ConfirmDialog } from '../components/ConfirmDialog'
-import { AiProgress, EntriesView, daysUntil, LIVE, type ListView } from '../components/entries'
+import { AiStatus, EntriesView, daysUntil, LIVE, type ListView } from '../components/entries'
 import { Link, navigate, useLocation } from '../router'
 import { useToast } from '../components/Toast'
 import { EmptyState, ErrorState, Loading, Timestamp } from '../components/ui'
@@ -132,7 +133,9 @@ export function TablePage() {
           <p className="eyebrow">What your agents are doing</p>
           <h1>Table</h1>
         </div>
-        <AiProgress />
+        <LegendButton />
+        <p className="muted">Every project's entries in one list. Narrow it by project, agent, tag, or text, open any row, or download it as a spreadsheet.</p>
+        <AiStatus />
         <nav className="page-links" aria-label="History">
           <Link to="/table?view=recent" aria-current={view === 'recent' ? 'page' : undefined}>Recent actions</Link>
           <Link to="/table?view=trash" aria-current={view === 'trash' ? 'page' : undefined}>Trash</Link>

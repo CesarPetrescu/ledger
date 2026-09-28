@@ -3,12 +3,14 @@
 package retrieval
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/cesarpetrescu/ledger/internal/store"
 	"github.com/cesarpetrescu/ledger/internal/testdb"
@@ -159,5 +161,38 @@ func TestUpgradeReextractionKeepsResolutionAndSurvivesFailures(t *testing.T) {
 	}
 	if next, err := db.NextUnlabeledEntry(ctx); err != nil || next != nil {
 		t.Fatalf("work left after upgrade: %#v %v", next, err)
+	}
+}
+
+func TestExtractorReportsAnUnreachableModel(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.AppendEntry(ctx, "atlas", "note", "Waiting for a label", "codex", "c"); err != nil {
+		t.Fatal(err)
+	}
+	chat := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "loading", http.StatusServiceUnavailable)
+	}))
+	defer chat.Close()
+	x := NewExtractor(db, chat.URL, "", "", nil, 0.9)
+	runCtx, cancel := context.WithCancel(ctx)
+	done := make(chan error, 1)
+	go func() { done <- x.Run(runCtx) }()
+	defer func() { cancel(); <-done }()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		p, err := db.MetaProgress(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.Problem == "can't reach the AI model" && p.Active {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("problem not reported: %+v", p)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }

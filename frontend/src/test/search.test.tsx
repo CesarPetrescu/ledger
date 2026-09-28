@@ -67,7 +67,7 @@ describe('search', () => {
     await screen.findByLabelText(/search memory/i)
     await user.click(screen.getByRole('button', { name: /^search$/i }))
     expect(calls.filter((call) => call.method === 'POST')).toHaveLength(0)
-    expect(screen.getByText(/type a query/i)).toBeInTheDocument()
+    expect(screen.getByText(/type a question or a few words/i)).toBeInTheDocument()
   })
 
   it('synchronizes the search draft when history navigation changes the query', async () => {

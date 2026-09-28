@@ -136,7 +136,11 @@ class Handler(BaseHTTPRequestHandler):
             inbox_summary = dict(slug='atlas', name='Atlas', tier='focus', deadline='', needs_me='', open_todos=0, week_entries=1, week_agents=['codex'],
                                           status_title='', status_body='', status_source='', digest='Atlas shipped the fixture milestone.', status_state='in_progress', needs_you=0)
             todos = [] if 'resolved_by' in TODO else [TODO]
-            return self.send_json(200, {'needs_you': [] if ASK['owner']['handled'] else [ASK], 'todos': todos, 'todos_total': len(todos), 'projects': [inbox_summary]})
+            return self.send_json(200, {'needs_you': [] if ASK['owner']['handled'] else [ASK], 'todos': todos, 'todos_total': len(todos), 'projects': [inbox_summary],
+                                        'metadata': dict(total=4, ready=3, failed=0, active=True, configured=True, problem="can't reach the AI model")})
+        if path == '/agents':
+            return self.send_json(200, {'agents': [dict(name='codex', last_active='2026-09-06T09:00:00Z', week_entries=2, entries=9, projects=[dict(slug='atlas', name='Atlas')],
+                                                        open_asks=0 if ASK['owner']['handled'] else 1, handoffs=1, latest=[DECISION])]})
         if path == '/entries':
             query = parse_qs(urlsplit(self.path).query)
             one = lambda key: query.get(key, [''])[0]

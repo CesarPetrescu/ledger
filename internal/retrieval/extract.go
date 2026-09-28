@@ -444,6 +444,19 @@ func (x *Extractor) Run(ctx context.Context) error {
 			}
 		}
 		worked, err := x.Step(ctx)
+		// Tell the console why labelling stalls, and when it recovers.
+		problem, known := "", false
+		switch {
+		case errors.Is(err, errChatRetry):
+			problem, known = "can't reach the AI model", true
+		case err == nil && worked:
+			known = true
+		}
+		if known && ctx.Err() == nil {
+			if err := x.db.SetWorkerProblem(ctx, store.ExtractorHeartbeat, problem); err != nil {
+				log.Printf("entry insights status: %v", err)
+			}
+		}
 		wait := time.Duration(0)
 		switch {
 		case ctx.Err() != nil:

@@ -378,6 +378,7 @@ export function ProjectsPage({ slug, view = 'activity' }: { slug?: string | unde
           <Link to="/projects/_new" className="btn btn-primary">
             <Icon name="plus" /> New project
           </Link>
+          <p className="muted small">Open a project for its week, activity, todos, and decisions.</p>
         </header>
         <div className="filters">
           <label className="visually-hidden" htmlFor="project-filter">

@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { api, describeError, ENTRY_KINDS, type EntryFilter, type OwnerPatch, type ProjectSummary, type TableEntry } from '../api'
 import { useResource } from '../hooks/useResource'
 import { useUndo } from '../hooks/useUndo'
@@ -7,7 +7,7 @@ import { ConfirmDialog } from './ConfirmDialog'
 import { LabelEditor } from './LabelEditor'
 import { Link } from '../router'
 import { useToast } from './Toast'
-import { EmptyState, ErrorState, Icon, KindBadge, Loading, StaleNotice, TierBadge, Timestamp } from './ui'
+import { EmptyState, ErrorState, formatRelative, Icon, KindBadge, Loading, StaleNotice, TierBadge, Timestamp } from './ui'
 
 // Entry lists shared by the Inbox, the Table, project pages, and entry pages.
 
@@ -197,6 +197,23 @@ export function TodoState({ entry, onChanged }: { entry: TableEntry; onChanged: 
   )
 }
 
+/**
+ * Why an entry needs the owner, in plain words, built from the labels it
+ * already has; empty when nothing is waiting on them.
+ */
+export function whyHere(entry: TableEntry, now = Date.now()): string {
+  const meta = entry.meta
+  if (meta?.ask && !entry.owner.handled) return `${entry.source} asked ${formatRelative(entry.created_at, now)} and is waiting on your answer.`
+  if (entry.kind !== 'todo' || entry.resolved_by) return ''
+  if (meta?.due) {
+    const due = shortDate.format(new Date(`${meta.due}T12:00:00`))
+    return meta.due < localDay(new Date(now)) ? `It was due ${due} and is still open.` : `It's due ${due}.`
+  }
+  if (meta?.priority === 'high') return 'The AI rated it high priority.'
+  if (isStale(entry, now)) return `It has been open for ${Math.floor((now - Date.parse(entry.created_at)) / 86400000)} days.`
+  return `An open todo from ${entry.source}, added ${formatRelative(entry.created_at, now)}.`
+}
+
 /** Short facts shown beside the title so the row never needs the full text. */
 export function FocusBadges({ entry }: { entry: TableEntry }) {
   const meta = entry.meta
@@ -322,6 +339,7 @@ export function EntryRow({ entry, repeats = [], view, headline, hideProject = fa
           <FocusBadges entry={entry} />
         </div>
         {headline ? <p className="entry-row-gist">{titleOf(entry)}</p> : summary && <p className="entry-row-gist">{summary}</p>}
+        {view === 'inbox' && whyHere(entry) && <p className="why-here">{whyHere(entry)}</p>}
         <div className="entry-row-meta">
           {view === 'activity' && <KindBadge kind={entry.kind} />}
           {entry.meta?.category && <span className="category">{entry.meta.category}</span>}
@@ -629,10 +647,29 @@ export function ProjectSummaryTable({ projects }: { projects: ProjectSummary[] }
   )
 }
 
-/** AI labelling progress, shown only while a labeller is alive to make it. */
-export function AiProgress() {
-  const summaries = useResource(api.getProjectSummaries, 'ai-progress', 'entry entry_meta')
+/**
+ * AI labelling status: progress while a labeller works, or why it is paused
+ * while entries wait. Says nothing when there is no labeller at all.
+ */
+export function AiStatus() {
+  const summaries = useResource(api.getProjectSummaries, 'ai-status', 'entry entry_meta')
+  // A labeller that stops or loses its model sends no live event; check each minute.
+  const { reload } = summaries
+  useEffect(() => {
+    const timer = window.setInterval(reload, 60_000)
+    return () => window.clearInterval(timer)
+  }, [reload])
   const progress = summaries.data?.metadata
-  if (!progress?.active || progress.total === 0 || progress.ready + progress.failed >= progress.total) return null
+  if (!progress) return null
+  const waiting = progress.total - progress.ready - progress.failed
+  if (waiting <= 0) return null
+  if (progress.configured && (!progress.active || progress.problem)) {
+    return (
+      <p className="notice ai-paused" role="status">
+        AI labelling is paused: {progress.problem || 'the labelling service is not running'}. {waiting} {waiting === 1 ? 'entry is' : 'entries are'} waiting and will get titles and labels when it is back; until then {waiting === 1 ? 'it shows its' : 'they show their'} first line.
+      </p>
+    )
+  }
+  if (!progress.active) return null
   return <p className="muted small" role="status">AI summaries: {progress.ready} of {progress.total} entries processed. New ones appear as they finish.</p>
 }

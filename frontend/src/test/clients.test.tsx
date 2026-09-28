@@ -58,9 +58,14 @@ describe('oauth clients', () => {
   })
 
   it('shows an empty state when nothing is registered', async () => {
-    mockApi({ 'GET /admin/api/session': authenticatedSession, 'GET /admin/api/oauth/clients': { body: { clients: [] } } })
+    mockApi({ 'GET /admin/api/session': authenticatedSession, 'GET /admin/api/oauth/clients': { body: { clients: [] } }, 'GET /admin/api/agents': { body: { agents: [] } } })
     renderApp('/admin/clients')
-    expect(await screen.findByText(/no oauth clients registered/i)).toBeInTheDocument()
+    expect(await screen.findByText(/no apps have connected yet/i)).toBeInTheDocument()
+    // With no agent yet, the page explains how to connect one, with this server's address.
+    expect(screen.getByText(/no agent has written to ledger yet/i)).toBeInTheDocument()
+    const guide = screen.getByRole('region', { name: 'Connect an agent' })
+    expect(guide).toHaveTextContent(`${window.location.origin}/mcp`)
+    expect(guide).toHaveTextContent(`ledger connect codex --server ${window.location.origin}`)
   })
 
   it('navigates bounded client pages', async () => {

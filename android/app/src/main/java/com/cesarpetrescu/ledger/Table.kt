@@ -137,6 +137,20 @@ fun focusLabels(entry: JSONObject, today: LocalDate = LocalDate.now(), now: Offs
     }
 }
 
+/** Why an entry needs the owner, in plain words from its labels; empty when nothing waits on them. */
+fun whyHere(entry: JSONObject, today: LocalDate = LocalDate.now(), now: OffsetDateTime = OffsetDateTime.now()): String {
+    val meta = entry.optJSONObject("meta")
+    val source = entry.text("source")
+    if (meta?.text("ask")?.isNotBlank() == true && !owner(entry).optBoolean("handled")) return "$source asked ${ago(entry.text("created_at"), now)} ago and is waiting on your answer."
+    if (entry.text("kind") != "todo" || entry.optJSONObject("resolved_by") != null) return ""
+    val due = runCatching { LocalDate.parse(meta?.text("due")) }.getOrNull()
+    if (due != null) return if (due < today) "It was due ${due.format(DateTimeFormatter.ofPattern("d MMM"))} and is still open." else "It's due ${due.format(DateTimeFormatter.ofPattern("d MMM"))}."
+    if (meta?.text("priority") == "high") return "The AI rated it high priority."
+    val days = runCatching { Duration.between(OffsetDateTime.parse(entry.text("created_at")), now).toDays() }.getOrDefault(0)
+    if (days > STALE_DAYS) return "It has been open for $days days."
+    return "An open todo from $source, added ${ago(entry.text("created_at"), now)} ago."
+}
+
 /** Route that opens a project on a tab, optionally with a search. */
 fun projectRoute(slug: String, tab: String = "activity", q: String = "") = "project/${segment(slug)}/${segment(tab)}/${segment(q)}"
 
@@ -313,6 +327,7 @@ private fun EntryRowContent(entry: JSONObject, view: String, repeats: List<JSONO
         }
         val summary = if (headline != null) entryTitle(entry) else entrySummary(entry, reading)
         if (summary.isNotBlank()) Text(summary, style = MaterialTheme.typography.bodyMedium, color = muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        if (view == "inbox") whyHere(entry).takeIf { it.isNotBlank() }?.let { Text("Why: $it", style = MaterialTheme.typography.bodySmall, color = muted, maxLines = 2, overflow = TextOverflow.Ellipsis) }
         val labels = focusLabels(entry)
         if (labels.isNotEmpty() || repeats.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             labels.forEach { (text, tone) -> Tag(text, tone) }
@@ -374,6 +389,7 @@ private fun EntrySheet(model: LedgerModel, entry: JSONObject, repeats: List<JSON
                 act { model.undoable("Entry moved to Trash", after = afterDelete) { it.request("DELETE", "/entries/${segment(id)}") } }
             }
         }
+        whyHere(entry).takeIf { it.isNotBlank() }?.let { Text("Why it needs you: $it", style = MaterialTheme.typography.bodyMedium) }
         meta?.let { LabelNotes(it) }
         entry.text("duplicate_of").takeIf { it.isNotBlank() }?.let { root ->
             TextButton(onClick = { open(root) }, contentPadding = PaddingValues(0.dp)) { Text("This repeats an earlier entry · open it", style = MaterialTheme.typography.bodySmall) }
@@ -481,6 +497,13 @@ fun InboxScreen(model: LedgerModel) {
         val digests = projects.filter { it.text("digest").isNotBlank() }
         PullToRefreshBox(isRefreshing = false, onRefresh = model::refresh, modifier = Modifier.fillMaxSize()) {
             LazyColumn(Modifier.fillMaxSize().testTag("page"), contentPadding = PaddingValues(bottom = 24.dp)) {
+                item {
+                    Column(Modifier.padding(start = 20.dp, end = 8.dp, top = 8.dp)) {
+                        Text("Questions your agents are waiting on you to answer, the most urgent todos, and each project's week.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        LegendButton()
+                    }
+                    AiStatus(data.optJSONObject("metadata"))
+                }
                 item { SectionHeader("Needs you · ${asks.size}") }
                 if (asks.isEmpty()) item { Box(Modifier.padding(horizontal = 20.dp)) { Empty("Nothing is waiting on you.") } }
                 items(asks, key = { "a" + it.text("id") }) { e -> EntryItem(model, e, "inbox", headline = e.optJSONObject("meta")?.text("ask")) { entry, r -> sheet.entry = entry; sheet.repeats = r } }
@@ -529,8 +552,8 @@ fun ProjectsHome(model: LedgerModel) = Load(model, "table-projects", { it.reques
     val progress = data.optJSONObject("metadata")
     PullToRefreshBox(isRefreshing = false, onRefresh = model::refresh, modifier = Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize().testTag("page"), contentPadding = PaddingValues(bottom = 88.dp)) {
-            if (progress != null && progress.optBoolean("active") && progress.optInt("ready") + progress.optInt("failed") < progress.optInt("total")) item {
-                Text("AI summaries: ${progress.optInt("ready")} of ${progress.optInt("total")} entries processed.", Modifier.padding(20.dp, 12.dp), style = MaterialTheme.typography.bodySmall)
+            if (aiStatusText(progress) != null) item {
+                AiStatus(progress)
             }
             item { Row(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) { Button(onClick = { model.go("project-edit/") }, enabled = !model.busy) { Text("New project") } } }
             if (data.rows("projects").isEmpty()) item { Box(Modifier.padding(20.dp)) { Empty("No projects yet.") } }
@@ -657,11 +680,11 @@ private val tableViews = listOf("activity" to "Activity", "decisions" to "Decisi
 
 /** Every project's entries in one filterable list, like the web console's Table. */
 @Composable
-fun TableScreen(model: LedgerModel) = Load(model, "table-projects", { it.request("GET", "/projects") }) { data ->
+fun TableScreen(model: LedgerModel, initialSource: String = "") = Load(model, "table-projects", { it.request("GET", "/projects") }) { data ->
     val projects = data.rows("projects")
     var view by rememberSaveable { mutableStateOf("activity") }
     var project by rememberSaveable { mutableStateOf("") }
-    var source by rememberSaveable { mutableStateOf("") }
+    var source by rememberSaveable { mutableStateOf(initialSource) }
     var tag by rememberSaveable { mutableStateOf("") }
     var kind by rememberSaveable { mutableStateOf("") }
     var todoState by rememberSaveable { mutableStateOf("open") }
@@ -723,7 +746,8 @@ fun MoreScreen(model: LedgerModel) {
             Triple("Search", "Find projects, decisions, and notes", "search"),
             Triple("Recent actions", "Undo what you marked, snoozed, or deleted", "history"),
             Triple("Trash", "Restore deleted projects and entries", "trash"),
-            Triple("Connected clients", "Review and revoke agent access", "clients"),
+            Triple("Agents", "What each agent did lately, and how to connect one", "agents"),
+            Triple("Help", "How Ledger works and what the labels mean", "help"),
             Triple("Approve a device", "Enter the code shown by the Ledger CLI", "device"),
             Triple("Settings", "Version, updates, sign out", "settings"),
         ).forEach { (title, subtitle, route) ->

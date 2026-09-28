@@ -1,7 +1,8 @@
 import { api, type TableEntry } from '../api'
 import { useResource } from '../hooks/useResource'
 import { refreshAll } from '../live'
-import { DeleteEntry, Facts, FocusBadges, LIVE, RelatedList, TodoState, titleOf, useOwnerAction } from '../components/entries'
+import { DeleteEntry, Facts, FocusBadges, LIVE, RelatedList, TodoState, titleOf, useOwnerAction, whyHere } from '../components/entries'
+import { LegendButton } from '../components/help'
 import { LabelEditor } from '../components/LabelEditor'
 import { Link, navigate } from '../router'
 import { ErrorState, Icon, KindBadge, Loading, StaleNotice, Timestamp } from '../components/ui'
@@ -29,10 +30,11 @@ export function EntryPage({ id }: { id: string }) {
           <KindBadge kind={e.kind} /> <Link to={`/projects/${encodeURIComponent(e.slug)}`}>{e.project_name}</Link> · <code>{e.source}</code> · <Timestamp iso={e.created_at} />
         </p>
         <h1>{titleOf(e)}</h1>
-        <FocusBadges entry={e} />
+        <p className="entry-page-badges"><FocusBadges entry={e} /> <LegendButton /></p>
         {meta?.gist && <p className="lede">{meta.gist}</p>}
         {meta && meta.tags.length > 0 && <p className="entry-page-tags">{meta.tags.map((tag) => <Link key={tag} className="chip" to={`/table?view=activity&tag=${encodeURIComponent(tag)}`}>{tag}</Link>)}</p>}
       </header>
+      {whyHere(e) && <p className="entry-page-note why-here"><strong>Why it needs you:</strong> {whyHere(e)}</p>}
       <EntryActions entry={e} onChanged={refreshAll} />
       {e.duplicate_of && <p className="entry-page-note">This repeats <Link to={`/entries/${e.duplicate_of}`}>an earlier entry</Link> about the same thing.</p>}
       {e.resolved_by && (

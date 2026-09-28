@@ -94,6 +94,13 @@ func (db *DB) Heartbeat(ctx context.Context, name string) error {
 	return err
 }
 
+// SetWorkerProblem records what stops a worker, or clears it with "". It
+// writes only when the problem changes.
+func (db *DB) SetWorkerProblem(ctx context.Context, name, problem string) error {
+	_, err := db.Pool.Exec(ctx, `UPDATE worker_heartbeat SET problem=$2,problem_since=CASE WHEN $2='' THEN NULL ELSE now() END WHERE name=$1 AND problem<>$2`, name, problem)
+	return err
+}
+
 // RelatedEntry is a similar entry with its cosine similarity.
 type RelatedEntry struct {
 	EntryWithProject
