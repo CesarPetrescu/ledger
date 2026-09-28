@@ -21,6 +21,7 @@ ASK = dict(id='70', slug='atlas', project_name='Atlas', kind='note', body='Prici
 NEWS = dict(id='60', slug='atlas', project_name='Atlas', kind='note', body='Title: Fixture model ships\nWhy it matters: Faster tests.\nURL: https://example.com/news', source='claude-code', created_at='2026-09-06T07:00:00Z',
             owner=dict(OWNER), meta=dict(title='Fixture model ships', tags=[], refs=[], origin='model', why='Faster tests.', source='Example', link='https://example.com/news'))
 ACTIONS = []
+REPLIES = []
 DECISION = dict(id='80', slug='atlas', project_name='Atlas', kind='decision', body='Use SQLite for the fixture cache.', source='codex', created_at='2026-09-06T06:00:00Z',
                 owner=dict(OWNER), meta=dict(title='Use SQLite for the fixture cache', tags=['storage'], refs=[], origin='model', details=dict(chosen='SQLite')))
 EVENT = dict(id='event-1', calendar_id='calendar-1', calendar_name='Planning', title='Plan the week', start='2026-09-06T10:00:00Z', end='2026-09-06T11:00:00Z', all_day=False, recurring=False, etag='"v1"')
@@ -170,6 +171,18 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(200, dict(entry, repeats=[]))
         if re.fullmatch(r'/entries/(50|60|70|80)/related', path):
             return self.send_json(200, {'related': []})
+        match = re.fullmatch(r'/entries/(50|60|70|80)/history', path)
+        if match and method == 'GET':
+            entry = {'50': TODO, '60': NEWS, '70': ASK, '80': DECISION}[match.group(1)]
+            created = dict(at=entry['created_at'], kind='created', actor=entry['source'], text='Fixture Agent', undone=False)
+            replies = [dict(at='2026-09-06T13:00:00Z', kind='reply', actor='ledger-admin', text=r['body'], entry_id=r['id'], undone=False) for r in REPLIES if r['reply_to'] == match.group(1)]
+            return self.send_json(200, {'history': [created, *replies]})
+        if path == '/entries/70/replies' and method == 'POST':
+            before = dict(ASK['owner'])
+            ASK['owner']['handled'] = True
+            REPLIES.append(dict(id=str(100 + len(REPLIES)), reply_to='70', body=body['body']))
+            action_id = record('owner', 'Replied, marked handled', undo=lambda: ASK['owner'].update(before))
+            return self.send_json(201, dict(id=REPLIES[-1]['id'], slug='atlas', kind='note', body=body['body'], source='ledger-admin', reply_to='70', created_at='2026-09-06T13:00:00Z', action_id=action_id))
         if path == '/entries/50/labels' and method == 'POST':
             TODO['meta'].update(body['set'])
             TODO['meta']['edited'] = sorted(body['set'])
