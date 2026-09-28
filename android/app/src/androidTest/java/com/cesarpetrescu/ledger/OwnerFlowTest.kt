@@ -182,6 +182,7 @@ class OwnerFlowTest {
             ui.onNodeWithTag("search-submit").performClick()
             awaitText("Atlas search result")
             // An entry hit opens the entry itself.
+            scrollTo("Atlas decision hit")
             tap("Atlas decision hit")
             awaitText("Use SQLite for the fixture cache")
             awaitText("Chose")

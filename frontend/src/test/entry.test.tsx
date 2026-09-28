@@ -47,6 +47,24 @@ describe('entry page', () => {
     expect(screen.getByRole('button', { name: 'Reopen' })).toBeInTheDocument()
   })
 
+  it('leaves the page for its project after the entry is deleted', async () => {
+    mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/entries/50': { body: { ...todo, repeats: [] } },
+      'GET /admin/api/entries/50/related': { body: { related: [] } },
+      'DELETE /admin/api/entries/50': { body: { trash_id: '7', action_id: '903' } },
+      'GET /admin/api/projects': { body: { projects: [] } },
+      'GET /admin/api/table/projects': { body: { projects: [], metadata: { total: 0, ready: 0, failed: 0, active: false } } },
+      'GET /admin/api/projects/atlas': { status: 404, body: { error: 'project not found' } },
+    })
+    renderApp('/admin/entries/50')
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: /delete entry/i }))
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete entry' }))
+    expect(await screen.findByText('Entry moved to Trash.')).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/admin/projects/atlas')
+  })
+
   it('explains a missing entry and points to Trash', async () => {
     mockApi({ 'GET /admin/api/session': authenticatedSession, 'GET /admin/api/entries/99': { status: 404, body: { error: 'entry not found' } } })
     renderApp('/admin/entries/99')

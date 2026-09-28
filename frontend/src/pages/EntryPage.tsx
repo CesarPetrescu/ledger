@@ -2,7 +2,7 @@ import { api, type TableEntry } from '../api'
 import { useResource } from '../hooks/useResource'
 import { DeleteEntry, Facts, FocusBadges, LIVE, RelatedList, TodoState, titleOf, useOwnerAction } from '../components/entries'
 import { LabelEditor } from '../components/LabelEditor'
-import { Link } from '../router'
+import { Link, navigate } from '../router'
 import { ErrorState, Icon, KindBadge, Loading, StaleNotice, Timestamp } from '../components/ui'
 
 /** One entry on its own page: search results, related entries, and repeats link here. */
@@ -59,7 +59,8 @@ export function EntryPage({ id }: { id: string }) {
         </section>
       )}
       <RelatedList id={e.id} />
-      <p className="detail-links"><DeleteEntry entry={e} onChanged={entry.reload} /></p>
+      {/* A deleted entry has no page; its project is where the undo toast makes sense. */}
+      <p className="detail-links"><DeleteEntry entry={e} onChanged={() => navigate(`/projects/${encodeURIComponent(e.slug)}`)} /></p>
     </article>
   )
 }
