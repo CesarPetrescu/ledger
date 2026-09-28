@@ -295,6 +295,11 @@ type MetaProgress struct {
 	// Active reports whether the extractor has checked in recently; without
 	// it, pending entries will not be processed.
 	Active bool `json:"active"`
+	// Configured reports whether an extractor has ever run here; without one
+	// nothing is labelled and nothing is "paused".
+	Configured bool `json:"configured"`
+	// Problem says what stops a running extractor, such as an unreachable model.
+	Problem string `json:"problem,omitempty"`
 }
 
 // ExtractorHeartbeat names the metadata extractor in worker_heartbeat.
@@ -303,8 +308,10 @@ const ExtractorHeartbeat = "extractor"
 func (db *DB) MetaProgress(ctx context.Context) (MetaProgress, error) {
 	var p MetaProgress
 	err := db.Pool.QueryRow(ctx, `SELECT count(*),count(*) FILTER (WHERE m.title<>''),count(*) FILTER (WHERE m.title='' AND m.attempts>=$1),
- EXISTS (SELECT 1 FROM worker_heartbeat WHERE name=$2 AND seen_at>now()-interval '2 minutes')
-FROM entry e LEFT JOIN entry_meta m ON m.entry_id=e.id`, MetaMaxAttempts, ExtractorHeartbeat).Scan(&p.Total, &p.Ready, &p.Failed, &p.Active)
+ EXISTS (SELECT 1 FROM worker_heartbeat WHERE name=$2 AND seen_at>now()-interval '2 minutes'),
+ EXISTS (SELECT 1 FROM worker_heartbeat WHERE name=$2),
+ COALESCE((SELECT problem FROM worker_heartbeat WHERE name=$2),'')
+FROM entry e LEFT JOIN entry_meta m ON m.entry_id=e.id`, MetaMaxAttempts, ExtractorHeartbeat).Scan(&p.Total, &p.Ready, &p.Failed, &p.Active, &p.Configured, &p.Problem)
 	return p, err
 }
 

@@ -109,6 +109,7 @@ func NewServer(config Config, db *store.DB) *Server {
 	s.mux.HandleFunc("GET /admin/api/actions", s.listActions)
 	s.mux.HandleFunc("POST /admin/api/actions/{id}/undo", s.undoAction)
 	s.mux.HandleFunc("GET /admin/api/table/projects", s.projectSummaries)
+	s.mux.HandleFunc("GET /admin/api/agents", s.agents)
 	s.mux.HandleFunc("GET /admin/api/handoffs", s.listHandoffs)
 	s.mux.HandleFunc("POST /admin/api/handoffs", s.createHandoff)
 	s.mux.HandleFunc("GET /admin/api/handoffs/{id}", s.getHandoff)
@@ -789,7 +790,13 @@ func (s *Server) inbox(w http.ResponseWriter, r *http.Request) {
 		}
 		return out
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"needs_you": rows(asks), "todos": rows(todos), "todos_total": total, "projects": projects})
+	// The labelling status lets the inbox say why new entries are still unlabelled.
+	progress, err := s.db.MetaProgress(ctx)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"needs_you": rows(asks), "todos": rows(todos), "todos_total": total, "projects": projects, "metadata": progress})
 }
 
 // sortByUrgency orders open todos: due within a week (earliest first), then
@@ -900,6 +907,33 @@ func (s *Server) projectSummaries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"projects": projects, "metadata": progress})
+}
+
+// agentLatest is how many recent entries the Agents page shows per agent.
+const agentLatest = 3
+
+// agents summarizes what each agent has been doing, with its latest entries.
+func (s *Server) agents(w http.ResponseWriter, r *http.Request) {
+	agents, err := s.db.Agents(r.Context(), writeSource)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	rows := make([]map[string]any, 0, len(agents))
+	for _, agent := range agents {
+		latest, err := s.db.ListEntries(r.Context(), store.EntryFilter{Source: agent.Name, Limit: agentLatest})
+		if err != nil {
+			s.internalError(w, r, err)
+			return
+		}
+		entries := make([]map[string]any, 0, len(latest))
+		for _, entry := range latest {
+			entries = append(entries, tableEntryResponse(entry))
+		}
+		rows = append(rows, map[string]any{"name": agent.Name, "last_active": agent.LastActive, "week_entries": agent.WeekEntries, "entries": agent.Entries,
+			"projects": agent.Projects, "open_asks": agent.OpenAsks, "handoffs": agent.Handoffs, "latest": entries})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"agents": rows})
 }
 
 // spreadsheetText stops agent-written text from being evaluated as a formula

@@ -63,6 +63,9 @@ describe('table', () => {
     expect(screen.getByRole('link', { name: 'Inbox', current: 'page' })).toBeInTheDocument()
     expect(within(asks).getByRole('button', { name: 'Confirm the pricing claims' })).toBeInTheDocument()
     expect(within(asks).getByText('Pricing question')).toBeInTheDocument()
+    // Each item says why it is there.
+    expect(within(asks).getByText(/ledger-admin asked .* and is waiting on your answer\./)).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'Todos' })).getByText('The AI rated it high priority.')).toBeInTheDocument()
     expect(within(screen.getByRole('region', { name: 'Todos' })).getByText('1 of 5')).toBeInTheDocument()
     expect(within(screen.getByRole('region', { name: 'Blocked' })).getByText(/Waiting on legal/)).toBeInTheDocument()
     expect(within(screen.getByRole('region', { name: 'This week' })).getByText('Shipped the table page; two todos remain.')).toBeInTheDocument()
@@ -90,6 +93,26 @@ describe('table', () => {
     expect(rows[0]).not.toHaveTextContent('phones…')
     expect(rows[1]).toHaveTextContent(/Due \S/)
     expect(rows[1]).not.toHaveTextContent('Stale')
+  })
+
+  it('says why AI labelling is paused and explains the labels', async () => {
+    mockApi({ ...base, 'GET /admin/api/table/projects': { body: { ...summaries, metadata: { total: 10, ready: 4, failed: 0, active: true, configured: true, problem: "can't reach the AI model" } } }, 'GET /admin/api/entries': { body: { entries: [], sources: [], tags: [] } } })
+    renderApp('/admin/table')
+    expect(await screen.findByText(/AI labelling is paused: can't reach the AI model\. 6 entries are waiting/)).toBeInTheDocument()
+    expect(screen.queryByText(/AI summaries/)).not.toBeInTheDocument()
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'What do the labels mean?' }))
+    const dialog = screen.getByRole('dialog', { name: 'What the labels mean' })
+    expect(within(dialog).getByText(/open for more than 14 days/)).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('stays quiet about labelling when no labeller was ever set up', async () => {
+    mockApi({ ...base, 'GET /admin/api/table/projects': { body: { ...summaries, metadata: { total: 10, ready: 0, failed: 0, active: false, configured: false } } }, 'GET /admin/api/entries': { body: { entries: [], sources: [], tags: [] } } })
+    renderApp('/admin/table')
+    await screen.findByText('No entries match.')
+    expect(screen.queryByText(/AI labelling is paused/)).not.toBeInTheDocument()
   })
 
   it('hides extraction progress when no extractor is running', async () => {

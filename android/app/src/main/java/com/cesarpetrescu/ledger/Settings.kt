@@ -33,7 +33,7 @@ fun Settings(model: LedgerModel) {
     Page {
         item { SummaryCard("Ledger ${BuildConfig.VERSION_NAME}", "Owner console", model.api?.origin ?: "") }
         item { ThemeChoice(model) }
-        item { SummaryCard("Connected clients", body = "Review ChatGPT, Claude, CLI, and other clients. Revoke access when needed.") { model.go("clients") } }
+        item { SummaryCard("Connected apps", body = "Review ChatGPT, Claude, CLI, and other apps. Revoke access when needed.") { model.go("clients") } }
         item { SummaryCard("Approve a device", body = "Enter the code shown by the Ledger CLI.") { model.go("device") } }
         item { SummaryCard("Calendars", body = "Connect Nextcloud and choose visible calendars.") { model.go("calendar-settings") } }
         item { OutlinedButton(onClick = { openBrowser(context, "https://github.com/CesarPetrescu/ledger/releases/latest", model) }) { Text("Check for updates") } }
@@ -47,7 +47,7 @@ fun Clients(model: LedgerModel) {
     var offset by rememberSaveable { mutableStateOf(0) }
     Load(model, "clients:$offset", { it.request("GET", "/oauth/clients?limit=50&offset=$offset") }) { data ->
         Page {
-            if (data.rows("clients").isEmpty()) item { Empty("No registered clients.") }
+            if (data.rows("clients").isEmpty()) item { Empty("No apps have connected yet. More › Agents shows how to connect one.") }
             items(data.rows("clients")) { client ->
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     SummaryCard(client.text("client_name").ifBlank { "Unnamed client" }, label(client.text("kind")),

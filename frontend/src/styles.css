@@ -663,7 +663,8 @@ label > textarea {
 }
 .page-head > div:first-child,
 .page-head > h1 { margin-right: auto; }
-.page-head > p { flex-basis: 100%; max-width: 70ch; }
+/* Always a line of its own, but no wider than is comfortable to read. */
+.page-head > p { flex: 0 0 100%; padding-right: max(0px, calc(100% - 70ch)); }
 
 .counts {
   flex-basis: 100%;
@@ -891,6 +892,45 @@ label > textarea {
 .related { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
 .related-title { margin: 0 0 4px; color: var(--text-faint); font-size: 0.67rem; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; }
 .related ul { margin: 0; padding: 0; list-style: none; font-size: 0.82rem; }
+
+/* Help, reasons, and agents */
+.why-here { margin: 4px 0 0; color: var(--text-soft); font-size: 0.8rem; }
+.why-here::before { content: 'Why: '; color: var(--text-faint); font-weight: 650; }
+.entry-page-note.why-here::before { content: none; }
+.legend-button { font-size: 0.8rem; }
+.entry-page-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0; }
+.dialog-wide { width: min(620px, calc(100vw - 32px)); }
+.label-legend { display: grid; gap: 10px; margin: 0; }
+.label-legend div { display: grid; grid-template-columns: 13rem minmax(0, 1fr); gap: 12px; align-items: baseline; }
+.label-legend dt .badge { white-space: normal; }
+.label-legend dd { margin: 0; color: var(--text-body); font-size: 0.86rem; }
+.ai-paused { margin: 0; flex-basis: 100%; }
+.help-page { display: grid; gap: 28px; max-width: 820px; }
+.help-page section { display: grid; gap: 10px; }
+.help-page .section-title { margin: 0; }
+.help-list { display: grid; gap: 8px; margin: 0; }
+.help-list div { display: grid; grid-template-columns: 8rem minmax(0, 1fr); gap: 12px; }
+.help-list dd { margin: 0; color: var(--text-body); }
+.help-points { display: grid; gap: 8px; margin: 0; padding-left: 20px; color: var(--text-body); }
+.agent-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; margin: 0 0 32px; padding: 0; list-style: none; }
+.agent-card { display: grid; align-content: start; gap: 8px; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.agent-card-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
+.agent-card-head h2 { margin: 0; font-size: 1rem; }
+.agent-card-head h2 code { color: var(--text); font-size: 1rem; font-weight: 650; }
+.agent-card-facts,
+.agent-card-needs { margin: 0; color: var(--text-soft); font-size: 0.84rem; }
+.agent-card-needs a { font-weight: 650; }
+.agent-card-latest { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: 0.84rem; }
+.connect-guide { display: grid; gap: 10px; margin: 0 0 32px; }
+.connect-guide dl { display: grid; gap: 10px; margin: 0; }
+.connect-guide dt { font-size: 0.9rem; font-weight: 650; }
+.connect-guide dd { margin: 2px 0 0; color: var(--text-body); font-size: 0.9rem; }
+.connected-apps { display: grid; gap: 12px; }
+@media (max-width: 620px) {
+  .label-legend div,
+  .help-list div { grid-template-columns: 1fr; gap: 2px; }
+  .agent-cards { grid-template-columns: 1fr; }
+}
 
 /* Project status and entry pages */
 .detail-links { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; margin: 10px 0 0; font-size: 0.84rem; }

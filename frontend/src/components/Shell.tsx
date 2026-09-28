@@ -16,7 +16,7 @@ const NAV: { to: string; label: string; icon: IconName; match: (path: string) =>
   { to: '/calendar', label: 'Calendar', icon: 'calendar', match: (path) => path === '/calendar' },
   { to: '/handoffs', label: 'Handoffs', icon: 'handoffs', match: (path) => path.startsWith('/handoffs') },
   { to: '/search', label: 'Search', icon: 'search', match: (path) => path === '/search', mobileHidden: true },
-  { to: '/clients', label: 'Agents', icon: 'clients', match: (path) => path === '/clients' },
+  { to: '/agents', label: 'Agents', icon: 'agents', match: (path) => path === '/agents' || path === '/clients' },
 ]
 
 function isTypingTarget(target: EventTarget | null): boolean {
@@ -74,6 +74,9 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
           <Icon name={live === 'live' ? 'live' : 'offline'} />
           <span>{live === 'live' ? 'Live' : live === 'connecting' ? 'Connecting' : 'Offline'}</span>
         </p>
+        <Link to="/help" className="icon-button help-link" aria-label="Help: how Ledger works" title="Help" aria-current={path === '/help' ? 'page' : undefined}>
+          <Icon name="help" />
+        </Link>
         <button type="button" className="icon-button theme-toggle" onClick={cycleTheme}
           aria-label={`Theme: ${THEME_LABEL[theme]}. Switch to ${THEME_LABEL[nextTheme]}`} title={`Theme: ${THEME_LABEL[theme]}`}>
           <Icon name={theme} />

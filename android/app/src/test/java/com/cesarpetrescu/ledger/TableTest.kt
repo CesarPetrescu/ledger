@@ -104,4 +104,28 @@ class TableTest {
         val meta = JSONObject().put("title", "t").put("category", "billing").put("unsure", org.json.JSONArray(listOf("importance")))
         assertEquals(listOf("Check", "billing"), focusLabels(JSONObject().put("kind", "note").put("meta", meta)).map { it.first })
     }
+
+    @Test fun whyHereExplainsAsksAndUrgentTodosInPlainWords() {
+        val now = java.time.OffsetDateTime.parse("2026-09-20T12:00:00Z")
+        val today = LocalDate.parse("2026-09-20")
+        fun entry(kind: String, meta: JSONObject, created: String = "2026-09-20T10:00:00Z", handled: Boolean = false) = JSONObject()
+            .put("kind", kind).put("source", "codex").put("created_at", created).put("meta", meta).put("owner", JSONObject().put("handled", handled))
+        assertEquals("codex asked 2h ago and is waiting on your answer.", whyHere(entry("note", JSONObject().put("ask", "Confirm it")), today, now))
+        assertEquals("", whyHere(entry("note", JSONObject().put("ask", "Confirm it"), handled = true), today, now))
+        assertEquals("It was due 19 Sept and is still open.".replace("Sept", java.time.LocalDate.parse("2026-09-19").format(java.time.format.DateTimeFormatter.ofPattern("MMM"))), whyHere(entry("todo", JSONObject().put("due", "2026-09-19")), today, now))
+        assertEquals("The AI rated it high priority.", whyHere(entry("todo", JSONObject().put("priority", "high")), today, now))
+        assertEquals("It has been open for 20 days.", whyHere(entry("todo", JSONObject(), created = "2026-08-31T12:00:00Z"), today, now))
+        assertEquals("", whyHere(entry("decision", JSONObject()), today, now))
+    }
+
+    @Test fun aiStatusSaysWhyLabellingIsPausedAndStaysQuietWithoutALabeller() {
+        fun progress(active: Boolean, configured: Boolean, problem: String = "", ready: Int = 3) =
+            JSONObject().put("total", 4).put("ready", ready).put("failed", 0).put("active", active).put("configured", configured).put("problem", problem)
+        assertEquals("AI labelling is paused: can't reach the AI model. 1 entry is waiting and will get titles and labels when it is back." to true,
+            aiStatusText(progress(true, true, "can't reach the AI model")))
+        assertEquals(true, aiStatusText(progress(false, true))?.second)
+        assertEquals("AI summaries: 3 of 4 entries processed." to false, aiStatusText(progress(true, true)))
+        assertEquals(null, aiStatusText(progress(false, false)))
+        assertEquals(null, aiStatusText(progress(true, true, ready = 4)))
+    }
 }

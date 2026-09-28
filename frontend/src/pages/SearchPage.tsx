@@ -172,7 +172,7 @@ function SearchContent({ q, project, kind, projects }: { q: string; project: str
         )}
       </form>
       <div className="search-body">
-        {(hint || !request) && <p className="search-intro">Type a query to search decisions, notes, tasks, and projects. Use filters only when you need to narrow the result set.</p>}
+        {(hint || !request) && <p className="search-intro">Type a question or a few words. Search looks through every project's decisions, notes, todos, and statuses by meaning as well as exact words; use filters only to narrow the results.</p>}
         {request && <Results key={`${JSON.stringify(request)}#${nonce}`} request={request} />}
       </div>
     </div>

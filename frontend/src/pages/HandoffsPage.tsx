@@ -378,7 +378,9 @@ export function HandoffsPage({ id, creating = false, initialProject = '' }: { id
   return (
     <div className="split handoffs" data-mode={mode}>
       <section className="pane pane-list" aria-label="Handoff inbox">
-        <header className="page-head"><h1>Handoffs</h1><Link to="/handoffs/new" className="btn btn-primary"><Icon name="plus" /> New</Link></header>
+        <header className="page-head"><h1>Handoffs</h1><Link to="/handoffs/new" className="btn btn-primary"><Icon name="plus" /> New</Link>
+          <p className="muted small">Work passed from one agent, or from you, to another. Each handoff is a thread: an agent claims a message, reports progress, and marks it done.</p>
+        </header>
         <div className="filters">
           <label className="visually-hidden" htmlFor="handoff-search">Search handoffs</label>
           <input id="handoff-search" type="search" placeholder="Search title, scope, messages" value={query} onChange={(event) => setQuery(event.target.value)} />
