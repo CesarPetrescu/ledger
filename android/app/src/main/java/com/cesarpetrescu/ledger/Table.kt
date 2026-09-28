@@ -122,7 +122,7 @@ fun focusLabels(entry: JSONObject, today: LocalDate = LocalDate.now(), now: Offs
     val open = entry.optJSONObject("resolved_by") == null
     return buildList {
         if (meta == null) return@buildList
-        if (meta.text("ask").isNotBlank() && entry.optJSONObject("owner")?.optBoolean("handled") != true) add("Asks you" to Tone.Warn)
+        if (asksYou(entry)) add("Asks you" to Tone.Warn)
         if (meta.text("importance") == "important") add("Important" to Tone.Accent)
         stateLabels[meta.text("state")]?.let { add(it to when (meta.text("state")) { "blocked" -> Tone.Danger; "done" -> Tone.Good; else -> Tone.Accent }) }
         if (todo && meta.text("priority") == "high") add("High" to Tone.Danger)
@@ -141,7 +141,7 @@ fun focusLabels(entry: JSONObject, today: LocalDate = LocalDate.now(), now: Offs
 fun whyHere(entry: JSONObject, today: LocalDate = LocalDate.now(), now: OffsetDateTime = OffsetDateTime.now()): String {
     val meta = entry.optJSONObject("meta")
     val source = entry.text("source")
-    if (meta?.text("ask")?.isNotBlank() == true && !owner(entry).optBoolean("handled")) return "$source asked ${ago(entry.text("created_at"), now)} ago and is waiting on your answer."
+    if (asksYou(entry)) return "$source asked ${ago(entry.text("created_at"), now)} ago and is waiting on your answer."
     if (entry.text("kind") != "todo" || entry.optJSONObject("resolved_by") != null) return ""
     val due = runCatching { LocalDate.parse(meta?.text("due")) }.getOrNull()
     if (due != null) return if (due < today) "It was due ${due.format(DateTimeFormatter.ofPattern("d MMM"))} and is still open." else "It's due ${due.format(DateTimeFormatter.ofPattern("d MMM"))}."
@@ -278,7 +278,7 @@ private fun ownerAction(model: LedgerModel, entry: JSONObject, message: String, 
 
 /** The two swipe actions a row offers, if any: start-to-end, then end-to-start. */
 private fun swipeActions(model: LedgerModel, entry: JSONObject, view: String): Pair<Pair<String, () -> Unit>?, Pair<String, () -> Unit>?> {
-    val asking = entry.optJSONObject("meta")?.text("ask")?.isNotBlank() == true && !owner(entry).optBoolean("handled")
+    val asking = asksYou(entry)
     val openTodo = entry.text("kind") == "todo" && entry.optJSONObject("resolved_by") == null
     return when {
         view == "reading" -> {
@@ -333,7 +333,8 @@ private fun EntryRowContent(entry: JSONObject, view: String, repeats: List<JSONO
         verticalArrangement = Arrangement.spacedBy(3.dp)) {
         val context = buildList {
             if (showProject) add(entry.text("project_name"))
-            if (reading) entry.optJSONObject("meta")?.text("source")?.takeIf { it.isNotBlank() }?.let { add(it) } else add(entry.text("source"))
+            if (reading) entry.optJSONObject("meta")?.text("source")?.takeIf { it.isNotBlank() }?.let { add(it) } else add(writerName(entry.text("source")))
+            if (entry.optInt("replies") > 0) add("${entry.optInt("replies")} ${if (entry.optInt("replies") == 1) "reply" else "replies"}")
             add(ago(entry.text("created_at")))
             if (view == "activity") add(label(entry.text("kind")))
         }.filter { it.isNotBlank() }
@@ -383,7 +384,7 @@ private fun EntrySheet(model: LedgerModel, entry: JSONObject, repeats: List<JSON
     val openTodo = entry.text("kind") == "todo" && entry.optJSONObject("resolved_by") == null
     val act: (() -> Unit) -> Unit = { action -> action(); close() }
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).navigationBarsPadding().padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("${entry.text("project_name")} · ${label(entry.text("kind"))} · ${entry.text("source")} · ${displayTime(entry.text("created_at"))}",
+        Text("${entry.text("project_name")} · ${label(entry.text("kind"))} · ${writerName(entry.text("source"))} · ${displayTime(entry.text("created_at"))}",
             style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(entryTitle(entry), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
         val labels = focusLabels(entry)
@@ -391,8 +392,8 @@ private fun EntrySheet(model: LedgerModel, entry: JSONObject, repeats: List<JSON
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (openTodo) Button(onClick = { act { resolve(model, entry) } }, enabled = !model.busy) { Text("Mark done") }
             entry.optJSONObject("resolved_by")?.let { OutlinedButton(onClick = { act { model.undoable("Todo reopened") { it.request("POST", "/entries/${segment(id)}/reopen") } } }, enabled = !model.busy) { Text("Reopen") } }
-            if (meta?.text("ask")?.isNotBlank() == true && !owner(entry).optBoolean("handled")) Button(onClick = { act { ownerAction(model, entry, "Marked handled", "handled" to true) } }, enabled = !model.busy) { Text("Handled") }
-            if (openTodo || (meta?.text("ask")?.isNotBlank() == true && !owner(entry).optBoolean("handled"))) OutlinedButton(onClick = { act { ownerAction(model, entry, "Snoozed until tomorrow", "snooze_days" to 1) } }, enabled = !model.busy) { Text("Snooze") }
+            if (asksYou(entry)) Button(onClick = { act { ownerAction(model, entry, "Marked handled", "handled" to true) } }, enabled = !model.busy) { Text("Handled") }
+            if (openTodo || asksYou(entry)) OutlinedButton(onClick = { act { ownerAction(model, entry, "Snoozed until tomorrow", "snooze_days" to 1) } }, enabled = !model.busy) { Text("Snooze") }
             if (meta?.text("link")?.isNotBlank() == true) {
                 val read = owner(entry).optBoolean("read")
                 val starred = owner(entry).optBoolean("starred")
@@ -409,6 +410,10 @@ private fun EntrySheet(model: LedgerModel, entry: JSONObject, repeats: List<JSON
             }
         }
         whyHere(entry).takeIf { it.isNotBlank() }?.let { Text("Why it needs you: $it", style = MaterialTheme.typography.bodyMedium) }
+        entry.text("reply_to").takeIf { it.isNotBlank() }?.let { root ->
+            TextButton(onClick = { open(root) }, contentPadding = PaddingValues(0.dp)) { Text("A reply to an earlier entry · open it", style = MaterialTheme.typography.bodySmall) }
+        }
+        ReplyBox(model, entry, asking = asksYou(entry), sent = close)
         meta?.let { LabelNotes(it) }
         entry.text("duplicate_of").takeIf { it.isNotBlank() }?.let { root ->
             TextButton(onClick = { open(root) }, contentPadding = PaddingValues(0.dp)) { Text("This repeats an earlier entry · open it", style = MaterialTheme.typography.bodySmall) }
@@ -444,6 +449,7 @@ private fun EntrySheet(model: LedgerModel, entry: JSONObject, repeats: List<JSON
                 }
             }
         }
+        History(model, entry, open)
         RelatedEntries(model, id, close)
         Text(when { meta == null -> "Summary pending."; meta.text("origin") == "model" -> "Title, summary, and labels generated by AI from the text above."; else -> "Written from the console." },
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -458,6 +464,86 @@ private fun addToCalendar(model: LedgerModel, entry: JSONObject) = model.act("Ad
     api.request("POST", "/calendar/events", json("calendar_id" to calendar.text("id"), "title" to entryTitle(entry).take(200),
         "start" to due.toString(), "end" to due.plusDays(1).toString(), "all_day" to true, "location" to "",
         "description" to "Ledger todo in ${entry.text("project_name")}".take(4000)))
+}
+
+/** Who the owner is shown as: "You" for anything written from the console or this phone. */
+fun writerName(source: String) = if (source == OWNER_SOURCE) "You" else source
+
+const val OWNER_SOURCE = "ledger-admin"
+
+/** An agent waits on your answer; your own entries never ask you anything. */
+fun asksYou(entry: JSONObject) = entry.optJSONObject("meta")?.text("ask")?.isNotBlank() == true &&
+    !owner(entry).optBoolean("handled") && entry.text("source") != OWNER_SOURCE
+
+/** Your answer, saved under the entry where the agent reads it. */
+@Composable
+private fun ReplyBox(model: LedgerModel, entry: JSONObject, asking: Boolean, sent: () -> Unit) {
+    var text by rememberSaveable(entry.text("id")) { mutableStateOf("") }
+    val agent = entry.text("source").takeIf { it != OWNER_SOURCE }.orEmpty()
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        OutlinedTextField(text, { text = it.take(4000) }, Modifier.fillMaxWidth(), minLines = if (asking) 3 else 2,
+            label = { Text(if (asking) "Answer $agent" else "Reply") },
+            placeholder = { Text(if (asking) "Type your answer" else if (agent.isNotBlank()) "A note or instruction for $agent" else "A note") })
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(buildString {
+                append(if (agent.isNotBlank()) "$agent sees it the next time it checks Ledger." else "Saved under this entry.")
+                if (asking) append(" Sending marks the question handled.")
+            }, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Button(onClick = {
+                val body = text.trim()
+                model.undoable(if (asking) "Answer sent; marked handled" else "Reply saved", after = { text = ""; sent() }) {
+                    it.request("POST", "/entries/${segment(entry.text("id"))}/replies", json("body" to body))
+                }
+            }, enabled = !model.busy && text.isNotBlank()) { Text(if (asking) "Send answer" else "Reply") }
+        }
+    }
+}
+
+/** One line of an entry's history, in plain words. */
+fun historyLine(event: JSONObject): String {
+    val who = writerName(event.text("actor"))
+    return when (event.text("kind")) {
+        "created" -> "$who wrote it" + event.text("text").takeIf { it.isNotBlank() && who != "You" }?.let { " through $it" }.orEmpty()
+        "repeat" -> "$who wrote it again"
+        "resolved" -> "$who reported it finished"
+        "action" -> "You: ${event.text("text").lowercase()}" + if (event.optBoolean("undone")) " (undone)" else ""
+        "labels" -> "You corrected ${event.text("text").replace('_', ' ')}"
+        "reply" -> "$who replied"
+        else -> event.text("text")
+    }
+}
+
+/** Where the entry came from and everything that happened to it since, oldest first. */
+@Composable
+private fun History(model: LedgerModel, entry: JSONObject, open: (String) -> Unit) {
+    val client = model.api ?: return
+    val id = entry.text("id")
+    var events by remember(id) { mutableStateOf<List<JSONObject>?>(null) }
+    LaunchedEffect(id, client, model.revision) {
+        events = try {
+            withContext(Dispatchers.IO) { client.request("GET", "/entries/${segment(id)}/history").rows("history") }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            if (e is ApiError && e.status == 401) model.failed(e, client)
+            events ?: emptyList()
+        }
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("History", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        entry.text("context").takeIf { it.isNotBlank() }?.let { Text("Written from $it", style = MaterialTheme.typography.bodySmall) }
+        // A reply already says so; its "marked handled" twin would repeat it.
+        events.orEmpty().filterNot { it.text("kind") == "action" && it.text("text").startsWith("Replied") }.forEach { event ->
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                val target = event.text("entry_id")
+                val line = "${historyLine(event)} · ${ago(event.text("at"))} ago"
+                if (target.isNotBlank() && event.text("kind") != "reply") TextButton(onClick = { open(target) }, contentPadding = PaddingValues(0.dp)) { Text(line, style = MaterialTheme.typography.bodySmall) }
+                else Text(line, style = MaterialTheme.typography.bodySmall)
+                if (event.text("kind") == "reply") Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth()) {
+                    SelectionContainer { Text(event.text("text"), Modifier.padding(10.dp), style = MaterialTheme.typography.bodyMedium) }
+                }
+            }
+        }
+    }
 }
 
 @Composable

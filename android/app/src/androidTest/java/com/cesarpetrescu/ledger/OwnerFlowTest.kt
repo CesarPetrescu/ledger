@@ -253,9 +253,11 @@ class OwnerFlowTest {
             tap("What do the labels mean?")
             awaitText("What the labels mean")
             tap("Close")
-            // Inbox: handle an ask, then complete a todo from its details sheet.
+            // Inbox: answer an ask from its sheet (its history shows where it came from), then complete a todo.
             tap("Confirm the fixture pricing")
-            tap("Handled")
+            ui.waitUntilAtLeastOneExists(hasText("claude-code wrote it through Fixture Agent", substring = true), 15_000)
+            fillField("Answer claude-code", "The fixture pricing is right.")
+            tap("Send answer")
             awaitText("Nothing is waiting on you.")
             // Correct a label; the row then shows it and no longer asks for a check.
             tap("Write the fixture todo")

@@ -12,6 +12,23 @@ class TableTest {
         if (title != null) put("meta", JSONObject().put("title", title))
     }
 
+    @Test fun historyReadsInPlainWordsWithTheOwnerAsYou() {
+        val event = { kind: String, actor: String, text: String -> JSONObject().put("kind", kind).put("actor", actor).put("text", text) }
+        assertEquals("codex wrote it through Codex CLI", historyLine(event("created", "codex", "Codex CLI")))
+        assertEquals("You wrote it", historyLine(event("created", OWNER_SOURCE, "Browser")))
+        assertEquals("You: snoozed 1 day (undone)", historyLine(event("action", OWNER_SOURCE, "Snoozed 1 day").put("undone", true)))
+        assertEquals("You corrected next step", historyLine(event("labels", OWNER_SOURCE, "next_step")))
+        assertEquals("You replied", historyLine(event("reply", OWNER_SOURCE, "Use 90 days")))
+        assertEquals("claude-code replied", historyLine(event("reply", "claude-code", "Done")))
+    }
+
+    @Test fun onlyAgentsAskYou() {
+        val ask = { source: String -> JSONObject().put("source", source).put("meta", JSONObject().put("ask", "Pick one")) }
+        assertEquals(true, asksYou(ask("codex")))
+        assertEquals(false, asksYou(ask(OWNER_SOURCE)))
+        assertEquals(false, asksYou(ask("codex").put("owner", JSONObject().put("handled", true))))
+    }
+
     @Test fun viewsFixKindAndTodoStateAndEncodeFilters() {
         assertEquals("q=a%20b%26c&kind=todo&status=open", tableQuery("todos", q = " a b&c ", status = "open", kind = "note"))
         assertEquals("project=atlas&kind=decision", tableQuery("decisions", project = "atlas", status = "open"))
