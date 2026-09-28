@@ -121,7 +121,26 @@ export interface TableEntry extends RecentEntry {
   /** Set when this entry repeats an earlier one in the same project. */
   duplicate_of?: string
   owner: OwnerState
+  /** The entry this one answers, and how many answer this one. */
+  reply_to?: string
+  replies?: number
+  /** Where the agent said it wrote from (repo, branch, session, link). */
+  context?: string
 }
+
+export type HistoryKind = 'created' | 'repeat' | 'resolved' | 'action' | 'labels' | 'reply'
+
+export interface HistoryEvent {
+  at: string
+  kind: HistoryKind
+  actor: string
+  text: string
+  entry_id?: string
+  undone?: boolean
+}
+
+/** Who wrote something from the console or the phone. */
+export const OWNER_SOURCE = 'ledger-admin'
 
 export interface RelatedEntry extends TableEntry {
   similarity: number
@@ -535,6 +554,8 @@ export const api = {
   restoreTrash: (id: string) => request<{ restored: boolean }>('POST', `/trash/${encodeURIComponent(id)}/restore`),
   purgeTrash: (id: string) => request<void>('DELETE', `/trash/${encodeURIComponent(id)}`),
   getEntry: (id: string) => request<TableEntry & { repeats: TableEntry[]; repeats_total: number }>('GET', `/entries/${encodeURIComponent(id)}`),
+  entryHistory: (id: string) => request<{ history: HistoryEvent[] }>('GET', `/entries/${encodeURIComponent(id)}/history`).then((response) => response.history),
+  replyToEntry: (id: string, body: string) => request<Entry & Partial<Undoable>>('POST', `/entries/${encodeURIComponent(id)}/replies`, { body }),
   relatedEntries: (id: string) => request<{ related: RelatedEntry[] }>('GET', `/entries/${encodeURIComponent(id)}/related`).then((response) => response.related),
   reopenTodo: (id: string) => request<Entry & Undoable>('POST', `/entries/${encodeURIComponent(id)}/reopen`),
   entriesCsvUrl: (filter: EntryFilter) => `/admin/api/entries.csv${entryQuery(filter)}`,

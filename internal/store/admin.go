@@ -91,6 +91,7 @@ type EntryWithProject struct {
 	DuplicateOf *int64      `json:"-"`
 	ResolvedBy  *Resolution `json:"resolved_by,omitempty"`
 	Owner       OwnerState  `json:"owner"`
+	Replies     int         `json:"replies"`
 }
 
 func (db *DB) RecentEntries(ctx context.Context, limit int) ([]EntryWithProject, error) {
@@ -138,6 +139,7 @@ func (db *DB) ListEntries(ctx context.Context, f EntryFilter) ([]EntryWithProjec
 		limit = &f.Limit
 	}
 	rows, err := db.Pool.Query(ctx, `SELECT e.id,e.slug,e.kind,e.body,e.source,e.client_id,e.created_at,p.name,
+ e.reply_to,e.context,(SELECT count(*) FROM entry r WHERE r.reply_to=e.id),
  m.entry_id IS NOT NULL AND m.title<>'',COALESCE(m.title,''),COALESCE(m.tags,'{}'),COALESCE(m.priority,''),COALESCE(m.refs,'{}'),COALESCE(m.origin,''),m.duplicate_of,
  COALESCE(m.gist,''),COALESCE(m.importance,''),COALESCE(m.ask,''),COALESCE(m.state,''),COALESCE(m.next_step,''),COALESCE(m.blocker,''),
  COALESCE(m.why,''),COALESCE(m.size,''),COALESCE(to_char(m.due,'YYYY-MM-DD'),''),COALESCE(m.source_name,''),COALESCE(m.link,''),
@@ -155,7 +157,7 @@ AND ($5='' OR (e.kind='todo' AND ($5='open')=(rb.entry_id IS NULL)))
 AND ($6='' OR strpos(lower(e.body),lower($6))>0 OR strpos(lower(COALESCE(m.title,'')),lower($6))>0)
 AND ($7::bigint IS NULL OR (e.created_at,e.id) < (SELECT created_at,id FROM entry WHERE id=$7))
 AND (NOT $9 OR COALESCE(m.importance,'')<>'routine')
-AND (NOT $10 OR (COALESCE(m.ask,'')<>'' AND o.handled_at IS NULL))
+AND (NOT $10 OR (COALESCE(m.ask,'')<>'' AND o.handled_at IS NULL AND e.source<>'`+OwnerSource+`'))
 AND ($11='' OR (COALESCE(m.link,'')<>'' AND ($11='all' OR ($11='unread' AND o.read_at IS NULL) OR ($11='starred' AND COALESCE(o.starred,false)))))
 AND (NOT ($12 OR $10) OR o.snoozed_until IS NULL OR o.snoozed_until<=current_date)
 AND ($13='' OR (e.kind='status' AND m.state=$13))
@@ -176,6 +178,7 @@ ORDER BY e.created_at DESC,e.id DESC LIMIT $8`, f.ProjectSlug, f.Kind, f.Source,
 		var resolution Resolution
 		var resolvedAt *time.Time
 		if err := rows.Scan(&e.ID, &e.Slug, &e.Kind, &e.Body, &e.Source, &e.ClientID, &e.CreatedAt, &e.ProjectName,
+			&e.ReplyTo, &e.Context, &e.Replies,
 			&hasMeta, &meta.Title, &meta.Tags, &meta.Priority, &meta.Refs, &meta.Origin, &e.DuplicateOf,
 			&meta.Gist, &meta.Importance, &meta.Ask, &meta.State, &meta.NextStep, &meta.Blocker,
 			&meta.Why, &meta.Size, &meta.Due, &meta.SourceName, &meta.Link,

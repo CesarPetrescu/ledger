@@ -19,17 +19,15 @@ var readerPattern = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
 
 // AppendEntryOnce is atomic even when concurrent attempts race or a successful
 // response is lost. Reusing a key with different content is an error, not a write.
-func (db *DB) AppendEntryOnce(ctx context.Context, slug, kind, body, source, clientID, requestID string) (Entry, error) {
-	if err := ValidateProjectSlug(slug); err != nil {
+func (db *DB) AppendEntryOnce(ctx context.Context, e NewEntry, requestID string) (Entry, error) {
+	if err := e.validate(); err != nil {
 		return Entry{}, err
 	}
-	if err := ValidateEntry(kind, body); err != nil {
-		return Entry{}, err
-	}
+	slug, kind, body, source, clientID := e.Slug, e.Kind, e.Body, e.Source, e.ClientID
 	if !requestIDPattern.MatchString(requestID) {
 		return Entry{}, errors.New("idempotency_key must be 8 to 80 letters, digits, underscores or hyphens")
 	}
-	payload, _ := json.Marshal([]string{slug, kind, body, source})
+	payload, _ := json.Marshal([]any{slug, kind, body, source, e.ReplyTo, e.Context})
 	hash := sha256.Sum256(payload)
 	tx, err := db.Pool.Begin(ctx)
 	if err != nil {
@@ -63,7 +61,7 @@ func (db *DB) AppendEntryOnce(ctx context.Context, slug, kind, body, source, cli
 	if trashed {
 		return Entry{}, ErrEntryTrashed
 	}
-	err = tx.QueryRow(ctx, `INSERT INTO entry(slug,kind,body,source,client_id) VALUES($1,$2,$3,$4,$5) RETURNING id,slug,kind,body,source,client_id,created_at`, slug, kind, body, source, clientID).Scan(&entry.ID, &entry.Slug, &entry.Kind, &entry.Body, &entry.Source, &entry.ClientID, &entry.CreatedAt)
+	entry, _, err = insertEntry(ctx, tx, e)
 	if err != nil {
 		return Entry{}, err
 	}
@@ -80,6 +78,18 @@ type EntryView struct {
 	Kind      string    `json:"kind"`
 	Body      string    `json:"body"`
 	Source    string    `json:"source"`
+	CreatedAt time.Time `json:"created_at"`
+	ReplyTo   string    `json:"reply_to,omitempty"`
+	Context   string    `json:"context,omitempty"`
+	// Replies answer this entry, oldest first; only get_entry fills them.
+	Replies []EntryReply `json:"replies,omitempty"`
+}
+
+// EntryReply is one answer in an entry's thread.
+type EntryReply struct {
+	ID        string    `json:"id"`
+	Source    string    `json:"source"`
+	Body      string    `json:"body"`
 	CreatedAt time.Time `json:"created_at"`
 }
 type Change struct {
@@ -113,8 +123,23 @@ func (db *DB) GetEntry(ctx context.Context, id string) (EntryView, error) {
 		return EntryView{}, errors.New("entry ID must be a positive decimal integer")
 	}
 	var e EntryView
-	err = db.Pool.QueryRow(ctx, `SELECT id::text,slug,kind,body,source,created_at FROM entry WHERE id=$1`, n).Scan(&e.ID, &e.Slug, &e.Kind, &e.Body, &e.Source, &e.CreatedAt)
-	return e, err
+	err = db.Pool.QueryRow(ctx, `SELECT id::text,slug,kind,body,source,created_at,COALESCE(reply_to::text,''),context FROM entry WHERE id=$1`, n).Scan(&e.ID, &e.Slug, &e.Kind, &e.Body, &e.Source, &e.CreatedAt, &e.ReplyTo, &e.Context)
+	if err != nil {
+		return e, err
+	}
+	rows, err := db.Pool.Query(ctx, `SELECT id::text,source,body,created_at FROM entry WHERE reply_to=$1 ORDER BY created_at,id LIMIT 100`, n)
+	if err != nil {
+		return e, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var r EntryReply
+		if err := rows.Scan(&r.ID, &r.Source, &r.Body, &r.CreatedAt); err != nil {
+			return e, err
+		}
+		e.Replies = append(e.Replies, r)
+	}
+	return e, rows.Err()
 }
 
 // Changes freezes a high-water mark for pagination. Delivered is advanced only
@@ -164,13 +189,13 @@ func (db *DB) Changes(ctx context.Context, clientID, reader, after, through stri
 	if bound < a || bound > high {
 		return result, errors.New("invalid snapshot boundary")
 	}
-	rows, err := tx.Query(ctx, `SELECT c.change_id::text,e.id::text,e.slug,e.kind,e.body,e.source,e.created_at FROM entry_change c JOIN entry e ON e.id=c.entry_id WHERE c.change_id>$1 AND c.change_id<=$2 ORDER BY c.change_id LIMIT $3`, a, bound, limit+1)
+	rows, err := tx.Query(ctx, `SELECT c.change_id::text,e.id::text,e.slug,e.kind,e.body,e.source,e.created_at,COALESCE(e.reply_to::text,''),e.context FROM entry_change c JOIN entry e ON e.id=c.entry_id WHERE c.change_id>$1 AND c.change_id<=$2 ORDER BY c.change_id LIMIT $3`, a, bound, limit+1)
 	if err != nil {
 		return result, err
 	}
 	for rows.Next() {
 		var c Change
-		if err = rows.Scan(&c.Cursor, &c.ID, &c.Slug, &c.Kind, &c.Body, &c.Source, &c.CreatedAt); err != nil {
+		if err = rows.Scan(&c.Cursor, &c.ID, &c.Slug, &c.Kind, &c.Body, &c.Source, &c.CreatedAt, &c.ReplyTo, &c.Context); err != nil {
 			rows.Close()
 			return result, err
 		}

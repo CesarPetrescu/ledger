@@ -1,3 +1,4 @@
+import { EntrySplit } from '../components/EntryPanel'
 import { useEffect, useState } from 'react'
 import { api, describeError } from '../api'
 import { useResource } from '../hooks/useResource'
@@ -150,7 +151,7 @@ export function TablePage() {
       </nav>
       {view === 'recent' ? <RecentView />
         : view === 'trash' ? <TrashView />
-        : <EntriesView key={`${view}:${project}:${search}:${tag}:${source}`} view={view} initialProject={project} initialQuery={search} initialTag={tag} initialSource={source} />}
+        : <EntrySplit><EntriesView key={`${view}:${project}:${search}:${tag}:${source}`} view={view} initialProject={project} initialQuery={search} initialTag={tag} initialSource={source} /></EntrySplit>}
     </>
   )
 }

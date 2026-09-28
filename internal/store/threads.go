@@ -1,0 +1,164 @@
+package store
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/jackc/pgx/v5"
+)
+
+// OwnerSource is the source of everything the owner writes from the console or phone.
+const OwnerSource = "ledger-admin"
+
+// MaxContextRunes bounds where an agent says an entry came from.
+const MaxContextRunes = 300
+
+var (
+	ErrReplyNotFound  = errors.New("reply_to entry not found")
+	ErrReplyElsewhere = errors.New("reply_to entry belongs to another project")
+	ErrInvalidContext = errors.New("context must be at most 300 characters on one line")
+)
+
+// NewEntry is an entry to append. ReplyTo answers another entry (its thread
+// root is used); Context says where an agent wrote from.
+type NewEntry struct {
+	Slug, Kind, Body, Source, ClientID string
+	ReplyTo                            int64
+	Context                            string
+}
+
+func (e NewEntry) validate() error {
+	if err := ValidateProjectSlug(e.Slug); err != nil {
+		return err
+	}
+	if err := ValidateEntry(e.Kind, e.Body); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(e.Context) > MaxContextRunes || strings.ContainsAny(e.Context, "\r\n") {
+		return ErrInvalidContext
+	}
+	if e.ReplyTo < 0 {
+		return ErrReplyNotFound
+	}
+	return nil
+}
+
+// Append writes an entry. A reply from the owner to an open ask marks the ask
+// handled (the returned action undoes that); a reply from an agent puts the
+// thread back in front of the owner.
+func (db *DB) Append(ctx context.Context, e NewEntry) (Entry, int64, error) {
+	if err := e.validate(); err != nil {
+		return Entry{}, 0, err
+	}
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return Entry{}, 0, err
+	}
+	defer tx.Rollback(ctx)
+	entry, actionID, err := insertEntry(ctx, tx, e)
+	if err != nil {
+		return Entry{}, 0, err
+	}
+	return entry, actionID, tx.Commit(ctx)
+}
+
+func insertEntry(ctx context.Context, tx pgx.Tx, e NewEntry) (Entry, int64, error) {
+	var root *int64
+	var rootTitle string
+	var openAsk bool
+	if e.ReplyTo > 0 {
+		var id int64
+		var slug string
+		err := tx.QueryRow(ctx, `SELECT COALESCE(r.id,e.id),COALESCE(r.slug,e.slug) FROM entry e LEFT JOIN entry r ON r.id=e.reply_to WHERE e.id=$1`, e.ReplyTo).Scan(&id, &slug)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Entry{}, 0, ErrReplyNotFound
+		}
+		if err != nil {
+			return Entry{}, 0, err
+		}
+		if slug != e.Slug {
+			return Entry{}, 0, ErrReplyElsewhere
+		}
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(NULLIF(m.title,''),left(e.body,120)),COALESCE(m.ask,'')<>'' AND o.handled_at IS NULL
+FROM entry e LEFT JOIN entry_meta m ON m.entry_id=e.id LEFT JOIN entry_owner_state o ON o.entry_id=e.id WHERE e.id=$1 FOR UPDATE OF e`, id).Scan(&rootTitle, &openAsk); err != nil {
+			return Entry{}, 0, err
+		}
+		root = &id
+	}
+	var entry Entry
+	if err := tx.QueryRow(ctx, `INSERT INTO entry(slug,kind,body,source,client_id,reply_to,context) VALUES($1,$2,$3,$4,$5,$6,$7)
+RETURNING id,slug,kind,body,source,client_id,created_at,reply_to,context`, e.Slug, e.Kind, e.Body, e.Source, e.ClientID, root, e.Context).
+		Scan(&entry.ID, &entry.Slug, &entry.Kind, &entry.Body, &entry.Source, &entry.ClientID, &entry.CreatedAt, &entry.ReplyTo, &entry.Context); err != nil {
+		return Entry{}, 0, err
+	}
+	if root == nil {
+		return entry, 0, nil
+	}
+	if e.Source != OwnerSource {
+		// An agent answered: the thread needs the owner again.
+		_, err := tx.Exec(ctx, `UPDATE entry_owner_state SET handled_at=NULL,updated_at=now() WHERE entry_id=$1 AND handled_at IS NOT NULL`, *root)
+		return entry, 0, err
+	}
+	if !openAsk {
+		return entry, 0, nil
+	}
+	handled := true
+	_, before, after, err := applyOwnerPatch(ctx, tx, *root, OwnerPatch{Handled: &handled})
+	if err != nil {
+		return Entry{}, 0, err
+	}
+	actionID, err := recordAction(ctx, tx, "owner", root, e.Slug, "Replied, marked handled: "+rootTitle,
+		map[string]any{"entry_id": *root, "before": before, "after": after})
+	return entry, actionID, err
+}
+
+// HistoryEvent is one thing that happened to an entry.
+type HistoryEvent struct {
+	At      time.Time `json:"at"`
+	Kind    string    `json:"kind"` // created, repeat, resolved, action, labels, reply
+	Actor   string    `json:"actor"`
+	Text    string    `json:"text"`
+	EntryID *int64    `json:"entry_id,omitempty"`
+	Undone  bool      `json:"undone,omitempty"`
+}
+
+// maxHistory bounds an entry's history; the oldest events are kept.
+const maxHistory = 200
+
+// EntryHistory lists what happened to an entry, oldest first.
+func (db *DB) EntryHistory(ctx context.Context, id int64) ([]HistoryEvent, error) {
+	rows, err := db.Pool.Query(ctx, `SELECT * FROM (
+ SELECT e.created_at at,'created' kind,e.source actor,COALESCE(c.name,'') text,NULL::bigint entry_id,false undone
+   FROM entry e LEFT JOIN oauth_client c ON c.client_id=e.client_id WHERE e.id=$1
+ UNION ALL SELECT r.created_at,'repeat',r.source,COALESCE(NULLIF(m.title,''),left(r.body,120)),r.id,false
+   FROM entry_meta m JOIN entry r ON r.id=m.entry_id WHERE m.duplicate_of=$1
+ -- The owner's own "done" shows as their action below.
+ UNION ALL SELECT r.created_at,'resolved',r.source,COALESCE(NULLIF(m.title,''),left(r.body,120)),r.id,false
+   FROM entry_meta m JOIN entry r ON r.id=m.entry_id WHERE m.resolves=$1 AND r.source<>$2
+ UNION ALL SELECT a.created_at,'action',$2,a.label,NULL,a.undone_at IS NOT NULL
+   FROM owner_action a WHERE a.entry_id=$1 AND a.kind<>'read_all'
+ UNION ALL SELECT l.created_at,'labels',$2,array_to_string(l.fields,', '),NULL,false
+   FROM entry_label_edit l WHERE l.entry_id=$1
+ UNION ALL SELECT r.created_at,'reply',r.source,r.body,r.id,false FROM entry r WHERE r.reply_to=$1
+) h ORDER BY at,kind LIMIT $3`, id, OwnerSource, maxHistory)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []HistoryEvent{}
+	for rows.Next() {
+		var h HistoryEvent
+		if err := rows.Scan(&h.At, &h.Kind, &h.Actor, &h.Text, &h.EntryID, &h.Undone); err != nil {
+			return nil, err
+		}
+		// Action labels end with the entry's own title; the history is already about it.
+		if h.Kind == "action" {
+			h.Text, _, _ = strings.Cut(h.Text, ": ")
+		}
+		out = append(out, h)
+	}
+	return out, rows.Err()
+}

@@ -147,8 +147,10 @@ func NewServerWithSpeech(db *store.DB, indexURL string, calendar *calendarapi.Se
 		Kind           string `json:"kind" jsonschema:"decision, note, todo, or status"`
 		Body           string `json:"body" jsonschema:"entry body, 1 to 4000 characters"`
 		IdempotencyKey string `json:"idempotency_key,omitempty" jsonschema:"optional unique request key; reuse only for identical retries"`
+		ReplyTo        string `json:"reply_to,omitempty" jsonschema:"optional entry ID this answers, e.g. the owner's reply to your question; same project"`
+		Context        string `json:"context,omitempty" jsonschema:"optional one line on where you are writing from: repo, branch, session, or link (max 300 characters)"`
 	}
-	mcp.AddTool(server, &mcp.Tool{Name: "append_entry", OutputSchema: outputSchema[entryReceipt](), Description: "Append an immutable entry to a project. " + DescriptionSuffix, Annotations: write},
+	mcp.AddTool(server, &mcp.Tool{Name: "append_entry", OutputSchema: outputSchema[entryReceipt](), Description: "Append an immutable entry to a project. To answer an entry (the owner may reply to your questions; their replies arrive as entries with reply_to), pass reply_to. " + DescriptionSuffix, Annotations: write},
 		func(ctx context.Context, request *mcp.CallToolRequest, input appendInput) (*mcp.CallToolResult, any, error) {
 			id := identityFrom(ctx)
 			if !oauth.HasScope(id.Scopes, oauth.ScopeWrite) {
@@ -164,12 +166,20 @@ func NewServerWithSpeech(db *store.DB, indexURL string, calendar *calendarapi.Se
 			if err := store.ValidateContextHeader("MCP clientInfo.name", info.Name, true); err != nil {
 				return nil, nil, err
 			}
+			replyTo, err := store.ParseCursor(input.ReplyTo)
+			if err != nil {
+				return nil, nil, fmt.Errorf("reply_to must be an entry ID")
+			}
+			// Only the owner writes as the owner.
+			if info.Name == store.OwnerSource {
+				return nil, nil, fmt.Errorf("MCP clientInfo.name %q is reserved", info.Name)
+			}
+			next := store.NewEntry{Slug: input.Slug, Kind: input.Kind, Body: input.Body, Source: info.Name, ClientID: id.ClientID, ReplyTo: replyTo, Context: strings.TrimSpace(input.Context)}
 			var entry store.Entry
-			var err error
 			if input.IdempotencyKey != "" {
-				entry, err = db.AppendEntryOnce(ctx, input.Slug, input.Kind, input.Body, info.Name, id.ClientID, input.IdempotencyKey)
+				entry, err = db.AppendEntryOnce(ctx, next, input.IdempotencyKey)
 			} else {
-				entry, err = db.AppendEntry(ctx, input.Slug, input.Kind, input.Body, info.Name, id.ClientID)
+				entry, _, err = db.Append(ctx, next)
 			}
 			return nil, map[string]any{"id": entry.ID, "created_at": entry.CreatedAt}, err
 		})

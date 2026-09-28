@@ -17,6 +17,8 @@ describe('labels', () => {
       'GET /admin/api/table/projects': { body: { projects: [], metadata: { total: 0, ready: 0, failed: 0, active: false } } },
       'GET /admin/api/entries': { body: { entries: [decision], sources: [], tags: [] } },
       'GET /admin/api/entries/60/related': { body: { related: [] } },
+      'GET /admin/api/entries/60': { body: { ...decision, repeats: [], repeats_total: 0 } },
+      'GET /admin/api/entries/60/history': { body: { history: [] } },
       'POST /admin/api/entries/60/labels': { body: { saved: true } },
     })
     renderApp('/admin/table?view=decisions')
