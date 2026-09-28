@@ -12,6 +12,7 @@ const PAGE_SIZE = 50
 export function ClientsPage() {
   const [offset, setOffset] = useState(0)
   const page = useResource(() => api.listClients(offset), `clients:${offset}`, 'oauth_client oauth_token')
+  const overview = useResource(api.getOverview, 'overview', 'project entry oauth_client oauth_token admin_session')
   const [target, setTarget] = useState<Client | null>(null)
   const [busy, setBusy] = useState(false)
   const toast = useToast()
@@ -37,6 +38,15 @@ export function ClientsPage() {
         <h1>Agents</h1>
         <Link to="/connect" className="btn">Connect a machine</Link>
         <p className="muted">MCP clients that have connected through OAuth. Client IDs identify apps; they do not grant access. Access tokens allow requests; refresh tokens let an app renew access without another approval.</p>
+        {overview.data && (
+          <ul className="counts" aria-label="Counts">
+            <li><span>Projects</span><strong>{overview.data.counts.projects}</strong></li>
+            <li><span>Entries</span><strong>{overview.data.counts.entries}</strong></li>
+            <li><span>OAuth clients</span><strong>{overview.data.counts.oauth_clients}</strong></li>
+            <li><span>Active access tokens</span><strong>{overview.data.counts.active_access_tokens}</strong></li>
+            <li><span>Admin sessions</span><strong>{overview.data.counts.active_admin_sessions}</strong></li>
+          </ul>
+        )}
       </header>
       {page.loading && <Loading label="Loading clients…" />}
       {!page.loading && !page.data && <ErrorState message="Couldn't load OAuth clients." onRetry={page.reload} />}

@@ -181,6 +181,12 @@ class OwnerFlowTest {
             fillField("Search your work", "Atlas")
             ui.onNodeWithTag("search-submit").performClick()
             awaitText("Atlas search result")
+            // An entry hit opens the entry itself.
+            tap("Atlas decision hit")
+            awaitText("Use SQLite for the fixture cache")
+            awaitText("Chose")
+            ui.onNodeWithContentDescription("Back").performClick()
+            awaitText("Atlas search result")
             ui.onNodeWithContentDescription("Back").performClick()
             tap("Inbox")
             // Inbox: handle an ask, then complete a todo from its details sheet.

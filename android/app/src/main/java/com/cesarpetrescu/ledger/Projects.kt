@@ -99,8 +99,14 @@ fun SearchScreen(model: LedgerModel) {
                 if (data.strings("degraded").isNotEmpty()) item { Text("Some search sources are unavailable: ${data.strings("degraded").joinToString()}", color = MaterialTheme.colorScheme.error) }
                 if (data.rows("hits").isEmpty()) item { Empty("No results. Try different words or fewer filters.") }
                 items(data.rows("hits")) { hit ->
+                    // An entry hit opens the entry itself; a project hit opens the project.
+                    val entryId = hit.text("entry_id")
                     SummaryCard(hit.text("project_name").ifBlank { hit.text("ref") }, label(hit.text("kind")), hit.text("snippet"),
-                        if (hit.text("project_slug").isNotBlank()) ({ model.go("project/${hit.text("project_slug")}") }) else null)
+                        when {
+                            entryId.isNotBlank() -> ({ model.go("entry-view/${segment(entryId)}") })
+                            hit.text("project_slug").isNotBlank() -> ({ model.go(projectRoute(hit.text("project_slug"))) })
+                            else -> null
+                        })
                 }
             }
         }

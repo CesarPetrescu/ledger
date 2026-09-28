@@ -102,6 +102,7 @@ fun LedgerApp(model: LedgerModel = viewModel()) {
         "device" -> "Approve a device"
         "more" -> "More"
         "table" -> "Table"
+        "entry-view" -> "Entry"
         "history" -> "Recent actions"
         "trash" -> "Trash"
         else -> "Settings"
@@ -159,6 +160,7 @@ fun LedgerApp(model: LedgerModel = viewModel()) {
                             "todos" -> TodosScreen(model)
                             "more" -> MoreScreen(model)
                             "table" -> TableScreen(model)
+                            "entry-view" -> EntryScreen(model, route.substringAfter('/'))
                             "history" -> HistoryScreen(model)
                             "trash" -> TrashScreen(model)
                             "table-add" -> route.split('/').let { TableAdd(model, it.getOrElse(1) { "note" }, it.getOrElse(2) { "" }) }

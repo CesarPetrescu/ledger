@@ -35,7 +35,7 @@ function ResultItem({ hit, query }: { hit: SearchHit; query: string }) {
   return (
     <li className="search-result" data-kind={hit.kind}>
       <p className="result-kind">{hit.kind}</p>
-      <Link className="result-title" to={`/projects/${hit.project_slug}`}>
+      <Link className="result-title" to={hit.entry_id ? `/entries/${hit.entry_id}` : `/projects/${hit.project_slug}`}>
         {highlighted(title, query)}
       </Link>
       {excerpt !== '' && excerpt !== title && <p className="result-excerpt">{highlighted(excerpt, query)}</p>}

@@ -10,7 +10,7 @@ import { applyTheme, readTheme, THEME_ORDER, type ThemeChoice } from '../theme'
 const THEME_LABEL: Record<ThemeChoice, string> = { system: 'System', light: 'Light', dark: 'Dark' }
 
 const NAV: { to: string; label: string; icon: IconName; match: (path: string) => boolean; mobileHidden?: boolean }[] = [
-  { to: '/', label: 'Overview', icon: 'home', match: (path) => path === '/' },
+  { to: '/', label: 'Inbox', icon: 'inbox', match: (path) => path === '/' },
   { to: '/projects', label: 'Projects', icon: 'projects', match: (path) => path.startsWith('/projects') },
   { to: '/table', label: 'Table', icon: 'table', match: (path) => path === '/table' },
   { to: '/calendar', label: 'Calendar', icon: 'calendar', match: (path) => path === '/calendar' },

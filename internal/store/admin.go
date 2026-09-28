@@ -121,6 +121,10 @@ type EntryFilter struct {
 	Awake bool
 	// State keeps status entries in one state: done, in_progress, or blocked.
 	State string
+	// ID keeps the one entry with this ID; zero means any.
+	ID int64
+	// RepeatsOf keeps the repeats folded under this entry; zero means any.
+	RepeatsOf int64
 }
 
 // ListEntries returns matching entries from every project, newest first,
@@ -153,8 +157,9 @@ AND (NOT $10 OR (COALESCE(m.ask,'')<>'' AND o.handled_at IS NULL))
 AND ($11='' OR (COALESCE(m.link,'')<>'' AND ($11='all' OR ($11='unread' AND o.read_at IS NULL) OR ($11='starred' AND COALESCE(o.starred,false)))))
 AND (NOT ($12 OR $10) OR o.snoozed_until IS NULL OR o.snoozed_until<=current_date)
 AND ($13='' OR (e.kind='status' AND m.state=$13))
+AND ($14::bigint=0 OR e.id=$14) AND ($15::bigint=0 OR m.duplicate_of=$15)
 ORDER BY e.created_at DESC,e.id DESC LIMIT $8`, f.ProjectSlug, f.Kind, f.Source, f.Tag, f.Status, f.Query, f.Before, limit,
-		f.HideRoutine, f.NeedsYou, f.Reading, f.Awake, f.State)
+		f.HideRoutine, f.NeedsYou, f.Reading, f.Awake, f.State, f.ID, f.RepeatsOf)
 	if err != nil {
 		return nil, err
 	}

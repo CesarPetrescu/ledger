@@ -95,6 +95,7 @@ func NewServer(config Config, db *store.DB) *Server {
 	s.mux.HandleFunc("GET /admin/api/entries.csv", s.exportEntries)
 	s.mux.HandleFunc("POST /admin/api/entries/{id}/resolve", s.resolveTodo)
 	s.mux.HandleFunc("POST /admin/api/entries/{id}/reopen", s.reopenTodo)
+	s.mux.HandleFunc("GET /admin/api/entries/{id}", s.getEntry)
 	s.mux.HandleFunc("GET /admin/api/entries/{id}/related", s.relatedEntries)
 	s.mux.HandleFunc("POST /admin/api/entries/{id}/owner", s.setOwnerState)
 	s.mux.HandleFunc("POST /admin/api/entries/{id}/labels", s.setLabels)
@@ -828,6 +829,39 @@ func sortByUrgency(todos []store.EntryWithProject, now time.Time) {
 
 // relatedMinSimilarity hides weak matches; calibrated on Qwen3-Embedding-8B.
 const relatedMinSimilarity = 0.62
+
+// getEntry returns one entry as the table shows it, with the repeats folded
+// under it, for the entry page.
+func (s *Server) getEntry(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathEntryID(w, r)
+	if !ok {
+		return
+	}
+	found, err := s.db.ListEntries(r.Context(), store.EntryFilter{ID: id})
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	if len(found) == 0 {
+		writeError(w, http.StatusNotFound, "entry not found")
+		return
+	}
+	repeats, err := s.db.ListEntries(r.Context(), store.EntryFilter{RepeatsOf: id, Limit: maxRepeats})
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	item := tableEntryResponse(found[0])
+	rows := make([]map[string]any, 0, len(repeats))
+	for _, repeat := range repeats {
+		rows = append(rows, tableEntryResponse(repeat))
+	}
+	item["repeats"] = rows
+	writeJSON(w, http.StatusOK, item)
+}
+
+// maxRepeats is how many repeats the entry page lists, newest first.
+const maxRepeats = 50
 
 func (s *Server) relatedEntries(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathEntryID(w, r)
