@@ -481,6 +481,8 @@ fun asksYou(entry: JSONObject) = entry.optJSONObject("meta")?.text("ask")?.isNot
 private fun ReplyBox(model: LedgerModel, entry: JSONObject, asking: Boolean, sent: () -> Unit) {
     var text by rememberSaveable(entry.text("id")) { mutableStateOf("") }
     val agent = entry.text("source").takeIf { it != OWNER_SOURCE }.orEmpty()
+    // Measured as sent: trimmed, and in characters like the server (an emoji is one).
+    val length = text.trim().let { it.codePointCount(0, it.length) }
     val send = {
         val body = text.trim()
         model.undoable(if (asking) "Answer sent; marked handled" else "Reply saved", after = { text = ""; sent() }) {
@@ -492,13 +494,12 @@ private fun ReplyBox(model: LedgerModel, entry: JSONObject, asking: Boolean, sen
         OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), minLines = if (asking) 3 else 2,
             label = { Text(if (asking) "Answer $agent" else "Reply") },
             placeholder = { Text(if (asking) "Type your answer" else if (agent.isNotBlank()) "A note or instruction for $agent" else "A note") },
-            isError = text.codePointCount(0, text.length) > 4000,
-            trailingIcon = { TextButton(onClick = send, enabled = !model.busy && text.isNotBlank() && text.codePointCount(0, text.length) <= 4000) { Text("Send") } })
+            isError = length > 4000,
+            trailingIcon = { TextButton(onClick = send, enabled = !model.busy && length in 1..4000) { Text("Send") } })
         Text(buildString {
             append(if (agent.isNotBlank()) "$agent sees it the next time it checks Ledger." else "Saved under this entry.")
             if (asking) append(" Sending marks the question handled.")
-            // The server counts characters, not UTF-16 units: an emoji is one.
-            if (text.codePointCount(0, text.length) > 4000) append(" Too long: keep it to 4,000 characters.")
+            if (length > 4000) append(" Too long: keep it to 4,000 characters.")
         }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
