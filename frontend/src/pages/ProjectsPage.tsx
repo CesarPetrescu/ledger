@@ -254,7 +254,8 @@ function ProjectStatus({ summary }: { summary: ProjectSummary | undefined }) {
   return (
     <section className="project-status" aria-label="Project status">
       {blocked && <p className="project-status-blocked"><HealthBadge state={summary.status_state} /> {summary.status_detail || summary.status_title}</p>}
-      {summary.digest ? <p className="digest">{summary.digest}</p> : summary.status_title ? <p>Latest: {summary.status_title}</p> : <p className="muted">No status yet. A weekly summary appears once agents have written here.</p>}
+      {/* Until the AI titles a new status, its own text stands in. */}
+      {summary.digest ? <p className="digest">{summary.digest}</p> : summary.status_at ? <p className="clamp">Latest: {summary.status_title || summary.status_body}</p> : <p className="muted">No status yet. A weekly summary appears once agents have written here.</p>}
       <ul className="project-status-facts">
         {summary.needs_you > 0 && <li><Link to="/">{summary.needs_you} {summary.needs_you === 1 ? 'question waits' : 'questions wait'} for you in the Inbox</Link></li>}
         <li>{summary.open_todos} open {summary.open_todos === 1 ? 'todo' : 'todos'}</li>

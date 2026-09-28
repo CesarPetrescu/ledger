@@ -81,6 +81,17 @@ describe('project browser', () => {
     expect(calls.find((call) => call.path === '/admin/api/projects/atlas')?.url.searchParams.get('entries')).toBe('1')
   })
 
+  it('shows a new status by its own text until the AI titles it', async () => {
+    mockApi({
+      ...projectBase,
+      'GET /admin/api/projects': { body: { projects: [atlas] } },
+      'GET /admin/api/projects/atlas': { body: atlasDetail },
+      'GET /admin/api/table/projects': { body: { ...noSummaries, projects: [{ ...atlasSummary, digest: '', status_title: '', status_body: 'Deployed the new build', status_at: '2026-09-03T12:00:00Z' }] } },
+    })
+    renderApp('/admin/projects/atlas')
+    expect(await screen.findByText('Latest: Deployed the new build')).toBeInTheDocument()
+  })
+
   it('says so when the weekly summary fails to load, with a retry', async () => {
     mockApi({
       ...projectBase,
