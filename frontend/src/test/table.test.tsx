@@ -219,6 +219,14 @@ describe('table', () => {
     expect(Object.fromEntries(calls.find((call) => call.path === '/admin/api/entries')!.url.searchParams)).toMatchObject({ project: 'beacon', q: 'Export design decision' })
   })
 
+  it('opens with the tag and agent filters from the address', async () => {
+    const { calls } = mockApi({ ...base, 'GET /admin/api/entries': { body: { entries: [], sources: ['codex'], tags: ['export'] } } })
+    renderApp('/admin/table?view=activity&tag=export&source=codex')
+    expect(await screen.findByRole('combobox', { name: /filter by tag/i })).toHaveValue('export')
+    expect(screen.getByRole('combobox', { name: /filter by agent/i })).toHaveValue('codex')
+    expect(Object.fromEntries(calls.find((call) => call.path === '/admin/api/entries')!.url.searchParams)).toMatchObject({ tag: 'export', source: 'codex' })
+  })
+
   it('hides routine entries in activity unless asked', async () => {
     const { calls } = mockApi({ ...base, 'GET /admin/api/entries': { body: { entries: [], sources: [], tags: [] } } })
     renderApp('/admin/table?view=activity')

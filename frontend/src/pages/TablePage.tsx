@@ -122,6 +122,8 @@ export function TablePage() {
   const view: View = VIEWS.some((item) => item.id === requested) || requested === 'recent' || requested === 'trash' ? (requested as View) : 'activity'
   const project = query.get('project') ?? ''
   const search = query.get('q') ?? ''
+  const tag = query.get('tag') ?? ''
+  const source = query.get('source') ?? ''
 
   return (
     <>
@@ -145,7 +147,7 @@ export function TablePage() {
       </nav>
       {view === 'recent' ? <RecentView />
         : view === 'trash' ? <TrashView />
-        : <EntriesView key={`${view}:${project}:${search}`} view={view} initialProject={project} initialQuery={search} />}
+        : <EntriesView key={`${view}:${project}:${search}:${tag}:${source}`} view={view} initialProject={project} initialQuery={search} initialTag={tag} initialSource={source} />}
     </>
   )
 }

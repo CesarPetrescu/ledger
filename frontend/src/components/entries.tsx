@@ -404,9 +404,9 @@ function ActivityRun({ items, hideProject, onTag, onChanged }: { items: Folded[]
  * One filterable, paged entry list. With fixedProject it lists that project
  * only (a project page), without a project filter or project links.
  */
-export function EntriesView({ view, initialProject = '', initialQuery = '', fixedProject }: { view: ListView; initialProject?: string; initialQuery?: string; fixedProject?: string }) {
+export function EntriesView({ view, initialProject = '', initialQuery = '', initialTag = '', initialSource = '', fixedProject }: { view: ListView; initialProject?: string; initialQuery?: string; initialTag?: string; initialSource?: string; fixedProject?: string }) {
   const [filter, setFilter] = useState<EntryFilter>({
-    project: fixedProject ?? initialProject, q: initialQuery, status: view === 'todos' ? 'open' : '', reading: view === 'reading' ? 'unread' : '',
+    project: fixedProject ?? initialProject, q: initialQuery, tag: initialTag, source: initialSource, status: view === 'todos' ? 'open' : '', reading: view === 'reading' ? 'unread' : '',
     // Routine bookkeeping stays out of the way unless asked for (or searched).
     hide_routine: initialQuery ? '' : '1',
   })
@@ -467,7 +467,7 @@ export function EntriesView({ view, initialProject = '', initialQuery = '', fixe
         {view === 'todos' && <label><span className="visually-hidden">Filter by state</span><select value={filter.status ?? ''} onChange={(event) => set('status', event.target.value)}><option value="open">Open</option><option value="done">Done</option><option value="">Open and done</option></select></label>}
         {view === 'reading' && <label><span className="visually-hidden">Filter reading</span><select value={effective.reading} onChange={(event) => set('reading', event.target.value)}><option value="unread">Unread</option><option value="starred">Starred</option><option value="all">All</option></select></label>}
         {view === 'activity' && <label><span className="visually-hidden">Filter by kind</span><select value={filter.kind ?? ''} onChange={(event) => set('kind', event.target.value)}><option value="">Any kind</option>{ENTRY_KINDS.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>}
-        <label><span className="visually-hidden">Filter by agent</span><select value={filter.source ?? ''} onChange={(event) => set('source', event.target.value)}><option value="">Any agent</option>{(table.data?.sources ?? []).map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+        <label><span className="visually-hidden">Filter by agent</span><select value={filter.source ?? ''} onChange={(event) => set('source', event.target.value)}><option value="">Any agent</option>{[...new Set([...(filter.source ? [filter.source] : []), ...(table.data?.sources ?? [])])].map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
         <label><span className="visually-hidden">Filter by tag</span><select value={filter.tag ?? ''} onChange={(event) => set('tag', event.target.value)}><option value="">Any tag</option>{[...new Set([...(filter.tag ? [filter.tag] : []), ...(table.data?.tags ?? [])])].map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
       </div>
       {(view === 'activity' || view === 'decisions') && (
