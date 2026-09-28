@@ -92,6 +92,17 @@ describe('project browser', () => {
     expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument()
   })
 
+  it('says so on a project page when its summary fails to load', async () => {
+    mockApi({
+      ...projectBase,
+      'GET /admin/api/projects': { body: { projects: [atlas] } },
+      'GET /admin/api/projects/atlas': { body: atlasDetail },
+      'GET /admin/api/table/projects': { status: 500, body: { error: 'hidden' } },
+    })
+    renderApp('/admin/projects/atlas')
+    expect(await screen.findByText(/couldn't load this project's week/i)).toBeInTheDocument()
+  })
+
   it('keeps the add form on a project page when the project list fails to load', async () => {
     mockApi({
       ...projectBase,

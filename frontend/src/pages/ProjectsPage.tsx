@@ -264,7 +264,7 @@ function ProjectStatus({ summary }: { summary: ProjectSummary | undefined }) {
   )
 }
 
-function ProjectDetail({ slug, view, summary, onSaved }: { slug: string; view: ProjectView; summary: ProjectSummary | undefined; onSaved: (project: Project) => void }) {
+function ProjectDetail({ slug, view, summary, onRetrySummary, onSaved }: { slug: string; view: ProjectView; summary: ProjectSummary | undefined; onRetrySummary?: (() => void) | undefined; onSaved: (project: Project) => void }) {
   const detail = useResource(() => api.getProject(slug), `project:${slug}`, 'project')
   const [editing, setEditing] = useState(false)
   const toast = useToast()
@@ -316,7 +316,7 @@ function ProjectDetail({ slug, view, summary, onSaved }: { slug: string; view: P
         />
       ) : (
         <>
-          <ProjectStatus summary={summary} />
+          {onRetrySummary ? <StaleNotice message="Couldn't load this project's week, health, and open questions." onRetry={onRetrySummary} /> : <ProjectStatus summary={summary} />}
           <nav className="detail-tabs" aria-label="Project sections">
             {PROJECT_TABS.map((tab) => (
               <Link key={tab.id} to={base + tab.path} aria-current={view === tab.id ? 'page' : undefined}>
@@ -435,7 +435,7 @@ export function ProjectsPage({ slug, view = 'activity' }: { slug?: string | unde
             />
           </>
         ) : slug ? (
-          <ProjectDetail key={slug} slug={slug} view={view} summary={summaryOf(slug)} onSaved={upsertInList} />
+          <ProjectDetail key={slug} slug={slug} view={view} summary={summaryOf(slug)} onRetrySummary={!summaries.loading && !summaries.data ? summaries.reload : undefined} onSaved={upsertInList} />
         ) : summaries.loading ? (
           <Loading label="Loading this week…" />
         ) : !summaries.data ? (
