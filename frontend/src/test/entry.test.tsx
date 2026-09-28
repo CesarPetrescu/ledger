@@ -16,7 +16,7 @@ describe('entry page', () => {
   it('shows one entry whole: labels, full text, repeats, related entries, and its actions', async () => {
     const { calls } = mockApi({
       'GET /admin/api/session': authenticatedSession,
-      'GET /admin/api/entries/50': { body: { ...todo, repeats: [repeat] } },
+      'GET /admin/api/entries/50': { body: { ...todo, repeats: [repeat], repeats_total: 3 } },
       'GET /admin/api/entries/50/related': { body: { related: [{ ...todo, id: '7', project_name: 'Beacon', slug: 'beacon', similarity: 0.8, meta: { ...todo.meta!, title: 'Export design decision' } }] } },
       'POST /admin/api/entries/50/resolve': { status: 201, body: { ...noteEntry, kind: 'status', action_id: '901' } },
     })
@@ -28,6 +28,7 @@ describe('entry page', () => {
     expect(screen.getByRole('link', { name: 'export' })).toHaveAttribute('href', '/admin/table?view=activity&tag=export')
     expect(within(screen.getByRole('region', { name: 'Full text' })).getByText(/phones…/)).toBeInTheDocument()
     expect(within(screen.getByRole('region', { name: /repeats/i })).getByRole('link', { name: 'Add CSV export again' })).toHaveAttribute('href', '/admin/entries/52')
+    expect(screen.getByText(/The newest 1 of 3/)).toBeInTheDocument()
     expect(await screen.findByRole('link', { name: 'Export design decision' })).toHaveAttribute('href', '/admin/entries/7')
     expect(within(screen.getByRole('region', { name: 'Labels' })).getByRole('button', { name: 'Edit labels' })).toBeInTheDocument()
     await userEvent.setup().click(screen.getByRole('button', { name: 'Mark done' }))
@@ -38,7 +39,7 @@ describe('entry page', () => {
   it('links a repeat to its original and a done todo to what closed it', async () => {
     mockApi({
       'GET /admin/api/session': authenticatedSession,
-      'GET /admin/api/entries/52': { body: { ...repeat, resolved_by: { entry_id: '60', origin: 'model', created_at: now }, repeats: [] } },
+      'GET /admin/api/entries/52': { body: { ...repeat, resolved_by: { entry_id: '60', origin: 'model', created_at: now }, repeats: [], repeats_total: 0 } },
       'GET /admin/api/entries/52/related': { body: { related: [] } },
     })
     renderApp('/admin/entries/52')
@@ -50,7 +51,7 @@ describe('entry page', () => {
   it('leaves the page for its project after the entry is deleted', async () => {
     mockApi({
       'GET /admin/api/session': authenticatedSession,
-      'GET /admin/api/entries/50': { body: { ...todo, repeats: [] } },
+      'GET /admin/api/entries/50': { body: { ...todo, repeats: [], repeats_total: 0 } },
       'GET /admin/api/entries/50/related': { body: { related: [] } },
       'DELETE /admin/api/entries/50': { body: { trash_id: '7', action_id: '903' } },
       'GET /admin/api/projects': { body: { projects: [] } },

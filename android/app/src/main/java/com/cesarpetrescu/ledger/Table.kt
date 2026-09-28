@@ -400,7 +400,9 @@ private fun EntrySheet(model: LedgerModel, entry: JSONObject, repeats: List<JSON
         SelectionContainer { Text(entry.text("body"), style = MaterialTheme.typography.bodyMedium) }
         meta?.strings("refs")?.takeIf { it.isNotEmpty() }?.let { refs -> SelectionContainer { Text(refs.joinToString("\n"), style = MaterialTheme.typography.bodySmall) } }
         if (repeats.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text("Repeats", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // The entry screen lists only the newest repeats; say when there are more.
+            val total = entry.optInt("repeats_total", repeats.size)
+            Text(if (total > repeats.size) "Repeats · the newest ${repeats.size} of $total" else "Repeats", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             repeats.forEach { repeat ->
                 TextButton(onClick = { open(repeat.text("id")) }, contentPadding = PaddingValues(0.dp)) {
                     Text("${entryTitle(repeat)} · ${displayTime(repeat.text("created_at"))}", style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)

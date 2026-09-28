@@ -2,6 +2,7 @@ import { useMemo, useState, type FormEvent } from 'react'
 import { api, describeError, ENTRY_KINDS, type EntryFilter, type OwnerPatch, type ProjectSummary, type TableEntry } from '../api'
 import { useResource } from '../hooks/useResource'
 import { useUndo } from '../hooks/useUndo'
+import { refreshAll } from '../live'
 import { ConfirmDialog } from './ConfirmDialog'
 import { LabelEditor } from './LabelEditor'
 import { Link } from '../router'
@@ -476,7 +477,7 @@ export function EntriesView({ view, initialProject = '', initialQuery = '', init
       {/* A project page adds to its own project, whether or not the project list loaded. */}
       {view !== 'reading' && (fixedProject || (projects.data?.length ?? 0) > 0) && (
         <AddRow key={view} projects={fixedProject ? [{ slug: fixedProject, name: fixedProject }] : projects.data ?? []} initialProject={fixedProject ?? initialProject}
-          defaultKind={view === 'todos' ? 'todo' : view === 'decisions' ? 'decision' : 'note'} fixed={Boolean(fixedProject)} onAdded={table.reload} />
+          defaultKind={view === 'todos' ? 'todo' : view === 'decisions' ? 'decision' : 'note'} fixed={Boolean(fixedProject)} onAdded={refreshAll} />
       )}
       {table.loading && <Loading label="Loading entries…" />}
       {!table.loading && !table.data && <ErrorState message="Couldn't load entries." onRetry={table.reload} />}
@@ -491,8 +492,8 @@ export function EntriesView({ view, initialProject = '', initialQuery = '', init
           )}
           <ul className="entry-list">
             {view === 'activity'
-              ? groupBy(group.items, (item) => `${item.entry.slug}\u0000${item.entry.source}`).map((run) => <ActivityRun key={run.items[0]?.entry.id} items={run.items} hideProject={Boolean(fixedProject)} onTag={(tag) => set('tag', tag)} onChanged={table.reload} />)
-              : group.items.map((item) => <EntryRow key={item.entry.id} entry={item.entry} repeats={item.repeats} view={view} hideProject={Boolean(fixedProject)} onTag={(tag) => set('tag', tag)} onChanged={table.reload} />)}
+              ? groupBy(group.items, (item) => `${item.entry.slug}\u0000${item.entry.source}`).map((run) => <ActivityRun key={run.items[0]?.entry.id} items={run.items} hideProject={Boolean(fixedProject)} onTag={(tag) => set('tag', tag)} onChanged={refreshAll} />)
+              : group.items.map((item) => <EntryRow key={item.entry.id} entry={item.entry} repeats={item.repeats} view={view} hideProject={Boolean(fixedProject)} onTag={(tag) => set('tag', tag)} onChanged={refreshAll} />)}
           </ul>
         </section>
       ))}
@@ -532,7 +533,7 @@ export function InboxView() {
         <h2 className="entry-group-title">Needs you <span className="count">{asks.length}</span></h2>
         {asks.length === 0 ? <p className="muted">Nothing is waiting on you.</p> : (
           <ul className="entry-list">
-            {asks.map((entry) => <EntryRow key={entry.id} entry={entry} view="inbox" headline={entry.meta?.ask ?? titleOf(entry)} onTag={noop} onChanged={inbox.reload} />)}
+            {asks.map((entry) => <EntryRow key={entry.id} entry={entry} view="inbox" headline={entry.meta?.ask ?? titleOf(entry)} onTag={noop} onChanged={refreshAll} />)}
           </ul>
         )}
       </section>
@@ -543,7 +544,7 @@ export function InboxView() {
         </h2>
         {todos.length === 0 ? <p className="muted">No open todos.</p> : (
           <ul className="entry-list">
-            {todos.map((entry) => <EntryRow key={entry.id} entry={entry} view="inbox" onTag={noop} onChanged={inbox.reload} />)}
+            {todos.map((entry) => <EntryRow key={entry.id} entry={entry} view="inbox" onTag={noop} onChanged={refreshAll} />)}
           </ul>
         )}
       </section>

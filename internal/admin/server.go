@@ -851,12 +851,18 @@ func (s *Server) getEntry(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
+	total, err := s.db.RepeatCount(r.Context(), id)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
 	item := tableEntryResponse(found[0])
 	rows := make([]map[string]any, 0, len(repeats))
 	for _, repeat := range repeats {
 		rows = append(rows, tableEntryResponse(repeat))
 	}
-	item["repeats"] = rows
+	// Only the newest are listed; the total says when there are more.
+	item["repeats"], item["repeats_total"] = rows, total
 	writeJSON(w, http.StatusOK, item)
 }
 

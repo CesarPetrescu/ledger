@@ -25,6 +25,7 @@ export function ClientsPage() {
       toast(`Revoked ${result.revoked} tokens.`)
       setTarget(null)
       page.reload()
+      overview.reload()
     } catch (failure) {
       toast(describeError(failure), 'error')
     } finally {

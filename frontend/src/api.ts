@@ -514,7 +514,7 @@ export const api = {
   listTrash: () => request<{ items: TrashItem[] }>('GET', '/trash').then((r) => r.items),
   restoreTrash: (id: string) => request<{ restored: boolean }>('POST', `/trash/${encodeURIComponent(id)}/restore`),
   purgeTrash: (id: string) => request<void>('DELETE', `/trash/${encodeURIComponent(id)}`),
-  getEntry: (id: string) => request<TableEntry & { repeats: TableEntry[] }>('GET', `/entries/${encodeURIComponent(id)}`),
+  getEntry: (id: string) => request<TableEntry & { repeats: TableEntry[]; repeats_total: number }>('GET', `/entries/${encodeURIComponent(id)}`),
   relatedEntries: (id: string) => request<{ related: RelatedEntry[] }>('GET', `/entries/${encodeURIComponent(id)}/related`).then((response) => response.related),
   reopenTodo: (id: string) => request<Entry & Undoable>('POST', `/entries/${encodeURIComponent(id)}/reopen`),
   entriesCsvUrl: (filter: EntryFilter) => `/admin/api/entries.csv${entryQuery(filter)}`,

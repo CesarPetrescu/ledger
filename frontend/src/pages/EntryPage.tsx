@@ -1,5 +1,6 @@
 import { api, type TableEntry } from '../api'
 import { useResource } from '../hooks/useResource'
+import { refreshAll } from '../live'
 import { DeleteEntry, Facts, FocusBadges, LIVE, RelatedList, TodoState, titleOf, useOwnerAction } from '../components/entries'
 import { LabelEditor } from '../components/LabelEditor'
 import { Link, navigate } from '../router'
@@ -32,7 +33,7 @@ export function EntryPage({ id }: { id: string }) {
         {meta?.gist && <p className="lede">{meta.gist}</p>}
         {meta && meta.tags.length > 0 && <p className="entry-page-tags">{meta.tags.map((tag) => <Link key={tag} className="chip" to={`/table?view=activity&tag=${encodeURIComponent(tag)}`}>{tag}</Link>)}</p>}
       </header>
-      <EntryActions entry={e} onChanged={entry.reload} />
+      <EntryActions entry={e} onChanged={refreshAll} />
       {e.duplicate_of && <p className="entry-page-note">This repeats <Link to={`/entries/${e.duplicate_of}`}>an earlier entry</Link> about the same thing.</p>}
       {e.resolved_by && (
         <p className="entry-page-note">
@@ -48,11 +49,12 @@ export function EntryPage({ id }: { id: string }) {
       <section className="entry-page-section" aria-labelledby="entry-labels">
         <h2 id="entry-labels" className="section-title">Labels</h2>
         <p className="muted small">{!meta ? 'The AI has not labelled this entry yet.' : meta.origin === 'model' ? 'Title, summary, and tags were written by AI from the text above. Correct anything it got wrong; similar entries will be labelled the same way.' : 'Written from the console.'}</p>
-        <LabelEditor entry={e} onChanged={entry.reload} />
+        <LabelEditor entry={e} onChanged={refreshAll} />
       </section>
       {e.repeats.length > 0 && (
         <section className="entry-page-section" aria-labelledby="entry-repeats">
-          <h2 id="entry-repeats" className="section-title">Repeats <span className="count">{e.repeats.length}</span></h2>
+          <h2 id="entry-repeats" className="section-title">Repeats <span className="count">{e.repeats_total}</span></h2>
+          {e.repeats_total > e.repeats.length && <p className="muted small">The newest {e.repeats.length} of {e.repeats_total}. The rest are in the project's activity.</p>}
           <ul className="repeats">
             {e.repeats.map((repeat) => <li key={repeat.id}><Link to={`/entries/${repeat.id}`}>{titleOf(repeat)}</Link> <span className="muted">· {repeat.source} · <Timestamp iso={repeat.created_at} /></span></li>)}
           </ul>

@@ -1560,7 +1560,7 @@ func TestEntryPageReturnsEntryAndItsRepeats(t *testing.T) {
 	id := func(v int64) string { return strconv.FormatInt(v, 10) }
 	page := get("/admin/api/entries/"+id(root.ID), http.StatusOK)
 	repeats, _ := page["repeats"].([]any)
-	if page["project_name"] != "Atlas" || page["meta"].(map[string]any)["title"] != "Pricing unverified" || len(repeats) != 1 || repeats[0].(map[string]any)["id"] != id(repeat.ID) {
+	if page["project_name"] != "Atlas" || page["meta"].(map[string]any)["title"] != "Pricing unverified" || len(repeats) != 1 || repeats[0].(map[string]any)["id"] != id(repeat.ID) || page["repeats_total"] != float64(1) {
 		t.Fatalf("root page = %v", page)
 	}
 	if page := get("/admin/api/entries/"+id(repeat.ID), http.StatusOK); page["duplicate_of"] != id(root.ID) || len(page["repeats"].([]any)) != 0 {

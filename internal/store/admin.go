@@ -193,6 +193,13 @@ ORDER BY e.created_at DESC,e.id DESC LIMIT $8`, f.ProjectSlug, f.Kind, f.Source,
 	return out, rows.Err()
 }
 
+// RepeatCount counts the repeats folded under an entry.
+func (db *DB) RepeatCount(ctx context.Context, entryID int64) (int, error) {
+	var n int
+	err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM entry_meta WHERE duplicate_of=$1`, entryID).Scan(&n)
+	return n, err
+}
+
 // EntryTags lists the tags in use, most frequent first, for the tag filter.
 func (db *DB) EntryTags(ctx context.Context, limit int) ([]string, error) {
 	rows, err := db.Pool.Query(ctx, `SELECT tag FROM entry_meta, unnest(tags) tag GROUP BY tag ORDER BY count(*) DESC,tag LIMIT $1`, limit)

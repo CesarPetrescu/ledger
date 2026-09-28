@@ -445,6 +445,7 @@ export function ProjectsPage({ slug, view = 'activity' }: { slug?: string | unde
         ) : summaries.data.projects.length > 0 ? (
           <section aria-labelledby="all-projects-title">
             <h2 id="all-projects-title" className="section-title">All projects this week</h2>
+            {summaries.stale && <StaleNotice message="This summary may be out of date." onRetry={summaries.reload} />}
             <ProjectSummaryTable projects={summaries.data.projects} />
           </section>
         ) : (
