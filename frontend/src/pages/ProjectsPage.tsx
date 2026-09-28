@@ -436,7 +436,11 @@ export function ProjectsPage({ slug, view = 'activity' }: { slug?: string | unde
           </>
         ) : slug ? (
           <ProjectDetail key={slug} slug={slug} view={view} summary={summaryOf(slug)} onSaved={upsertInList} />
-        ) : summaries.data && summaries.data.projects.length > 0 ? (
+        ) : summaries.loading ? (
+          <Loading label="Loading this week…" />
+        ) : !summaries.data ? (
+          <ErrorState message="Couldn't load this week's project summary." onRetry={summaries.reload} />
+        ) : summaries.data.projects.length > 0 ? (
           <section aria-labelledby="all-projects-title">
             <h2 id="all-projects-title" className="section-title">All projects this week</h2>
             <ProjectSummaryTable projects={summaries.data.projects} />

@@ -81,6 +81,17 @@ describe('project browser', () => {
     expect(calls.find((call) => call.path === '/admin/api/projects/atlas')?.url.searchParams.get('entries')).toBe('1')
   })
 
+  it('says so when the weekly summary fails to load, with a retry', async () => {
+    mockApi({
+      ...projectBase,
+      'GET /admin/api/projects': { body: { projects: [atlas] } },
+      'GET /admin/api/table/projects': { status: 500, body: { error: 'hidden' } },
+    })
+    renderApp('/admin/projects')
+    expect(await screen.findByText(/couldn't load this week's project summary/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument()
+  })
+
   it('keeps the add form on a project page when the project list fails to load', async () => {
     mockApi({
       ...projectBase,
