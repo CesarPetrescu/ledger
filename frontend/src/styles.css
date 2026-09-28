@@ -1496,6 +1496,8 @@ label > textarea {
   .primary-nav { display: flex; flex-direction: column; gap: 2px; }
   .primary-nav a { min-height: 44px; font-size: 0.6rem; }
   .entry-panel { left: 64px; }
+  /* Search hides the top bar; keep its row collapsed too. */
+  .shell-search { grid-template-rows: 0 1fr; }
 }
 /* Folded phones' cover screens (about 340px): the top bar's buttons share the width. */
 @media (max-width: 380px) {
