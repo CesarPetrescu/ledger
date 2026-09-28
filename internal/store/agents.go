@@ -32,14 +32,16 @@ func (db *DB) Agents(ctx context.Context, owner string) ([]AgentSummary, error) 
   SELECT source AS name FROM entry WHERE source<>$1
   UNION SELECT claimed_source FROM handoff_message WHERE claimed_source<>$1 AND work_state IN ('in_progress','blocked'))
 SELECT n.name,
- (SELECT max(created_at) FROM entry WHERE source=n.name),
+ -- Holding a handoff is activity too; GREATEST skips the missing side.
+ GREATEST((SELECT max(created_at) FROM entry WHERE source=n.name),
+  (SELECT max(GREATEST(claimed_at,status_updated_at)) FROM handoff_message WHERE claimed_source=n.name AND work_state IN ('in_progress','blocked'))),
  (SELECT count(*) FROM entry WHERE source=n.name AND created_at>now()-interval '7 days'),
  (SELECT count(*) FROM entry WHERE source=n.name),
  COALESCE((SELECT jsonb_agg(jsonb_build_object('slug',p.slug,'name',p.name) ORDER BY p.name) FROM project p
    WHERE EXISTS (SELECT 1 FROM entry e WHERE e.slug=p.slug AND e.source=n.name AND e.created_at>now()-interval '7 days')),'[]'),
  (SELECT count(*) FROM entry e JOIN entry_meta m ON m.entry_id=e.id LEFT JOIN entry_owner_state o ON o.entry_id=e.id
    WHERE e.source=n.name AND m.ask<>'' AND o.handled_at IS NULL AND (o.snoozed_until IS NULL OR o.snoozed_until<=current_date)),
- (SELECT count(*) FROM handoff_message WHERE claimed_source=n.name AND work_state IN ('in_progress','blocked'))
+ (SELECT count(DISTINCT handoff_id) FROM handoff_message WHERE claimed_source=n.name AND work_state IN ('in_progress','blocked'))
 FROM names n ORDER BY 2 DESC NULLS LAST,n.name`, owner)
 	if err != nil {
 		return nil, err

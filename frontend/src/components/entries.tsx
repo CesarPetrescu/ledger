@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { api, describeError, ENTRY_KINDS, type EntryFilter, type OwnerPatch, type ProjectSummary, type TableEntry } from '../api'
 import { useResource } from '../hooks/useResource'
 import { useUndo } from '../hooks/useUndo'
@@ -653,6 +653,12 @@ export function ProjectSummaryTable({ projects }: { projects: ProjectSummary[] }
  */
 export function AiStatus() {
   const summaries = useResource(api.getProjectSummaries, 'ai-status', 'entry entry_meta')
+  // A labeller that stops or loses its model sends no live event; check each minute.
+  const { reload } = summaries
+  useEffect(() => {
+    const timer = window.setInterval(reload, 60_000)
+    return () => window.clearInterval(timer)
+  }, [reload])
   const progress = summaries.data?.metadata
   if (!progress) return null
   const waiting = progress.total - progress.ready - progress.failed

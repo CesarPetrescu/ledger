@@ -1611,19 +1611,32 @@ func TestAgentsSummarizeWhatEachAgentDid(t *testing.T) {
 	if res.Code != http.StatusOK || json.Unmarshal(res.Body.Bytes(), &out) != nil || len(out.Agents) != 2 {
 		t.Fatalf("agents = %d %s", res.Code, res.Body.String())
 	}
-	codex, claude := out.Agents[0], out.Agents[1]
+	// Holding a handoff just now makes claude-code the most recently active.
+	codex, claude := out.Agents[1], out.Agents[0]
 	if codex.Name != "codex" || codex.WeekEntries != 2 || codex.OpenAsks != 1 || len(codex.Projects) != 2 || len(codex.Latest) != 2 || codex.Handoffs != 0 {
 		t.Fatalf("codex = %+v", codex)
 	}
 	if claude.Name != "claude-code" || claude.WeekEntries != 0 || claude.Entries != 1 || len(claude.Projects) != 0 || claude.Handoffs != 1 {
 		t.Fatalf("claude = %+v", claude)
 	}
+	// Two active messages in one handoff are one handoff; holding it counts as activity.
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO handoff_message(handoff_id,body,work_state,source,client_id,claimed_at,claimed_source,claimed_client_id,status_updated_source,status_updated_client_id)
+VALUES($1,'more','in_progress','codex','c',now(),'claude-code','c','claude-code','c')`, h.Handoff.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, `UPDATE entry SET created_at=now()-interval '40 days' WHERE source='codex'`); err != nil {
+		t.Fatal(err)
+	}
+	agents, err := db.Agents(ctx, "ledger-admin")
+	if err != nil || agents[0].Name != "claude-code" || agents[0].Handoffs != 1 || agents[0].LastActive == nil || time.Since(*agents[0].LastActive) > time.Hour {
+		t.Fatalf("handoff activity: %+v %v", agents, err)
+	}
 	// Handling the ask clears it from the agent's count.
 	if _, _, err := db.SetOwnerState(ctx, ask.ID, store.OwnerPatch{Handled: ptr(true)}); err != nil {
 		t.Fatal(err)
 	}
-	agents, err := db.Agents(ctx, "ledger-admin")
-	if err != nil || agents[0].OpenAsks != 0 {
+	agents, err = db.Agents(ctx, "ledger-admin")
+	if err != nil || agents[len(agents)-1].Name != "codex" || agents[len(agents)-1].OpenAsks != 0 {
 		t.Fatalf("after handling: %+v %v", agents, err)
 	}
 }

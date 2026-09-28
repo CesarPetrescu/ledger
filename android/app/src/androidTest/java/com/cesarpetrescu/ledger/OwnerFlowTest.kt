@@ -247,10 +247,12 @@ class OwnerFlowTest {
             ui.waitUntilDoesNotExist(hasText("Chose"), 15_000)
             ui.onNodeWithContentDescription("Back").performClick()
             // Agents shows what each agent did; Help explains the rules.
+            scrollTo("Agents")
             tap("Agents")
             awaitText("Working on 1 handoff")
             awaitText("Connect an agent")
             ui.onNodeWithContentDescription("Back").performClick()
+            scrollTo("Help")
             tap("Help")
             awaitText("How the Inbox decides")
             ui.onNodeWithContentDescription("Back").performClick()
