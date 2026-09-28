@@ -31,6 +31,8 @@ describe('undo, trash, and delete', () => {
       ...base,
       'GET /admin/api/entries': { body: { entries: [todo], sources: [], tags: [] } },
       'GET /admin/api/entries/50/related': { body: { related: [] } },
+      'GET /admin/api/entries/50': { body: { ...todo, repeats: [], repeats_total: 0 } },
+      'GET /admin/api/entries/50/history': { body: { history: [] } },
       'DELETE /admin/api/entries/50': { body: { trash_id: '7', action_id: '902' } },
     })
     renderApp('/admin/table?view=todos')

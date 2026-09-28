@@ -35,7 +35,7 @@ func TestCaptureConcurrentRetriesAreAtomic(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			entry, err := db.AppendEntryOnce(ctx, "atlas", "note", "Ședință Atlas", "glass", "glass-a", "same-request-001")
+			entry, err := db.AppendEntryOnce(ctx, store.NewEntry{Slug: "atlas", Kind: "note", Body: "Ședință Atlas", Source: "glass", ClientID: "glass-a"}, "same-request-001")
 			if err != nil {
 				errs <- err
 			} else {
@@ -60,11 +60,11 @@ func TestCaptureConcurrentRetriesAreAtomic(t *testing.T) {
 	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM entry`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("entries=%d err=%v", count, err)
 	}
-	if _, err := db.AppendEntryOnce(ctx, "atlas", "note", "Different content", "glass", "glass-a", "same-request-001"); err == nil {
+	if _, err := db.AppendEntryOnce(ctx, store.NewEntry{Slug: "atlas", Kind: "note", Body: "Different content", Source: "glass", ClientID: "glass-a"}, "same-request-001"); err == nil {
 		t.Fatal("conflicting retry was accepted")
 	}
 	// A different client has its own key namespace.
-	if _, err := db.AppendEntryOnce(ctx, "atlas", "note", "Independent", "glass", "glass-b", "same-request-001"); err != nil {
+	if _, err := db.AppendEntryOnce(ctx, store.NewEntry{Slug: "atlas", Kind: "note", Body: "Independent", Source: "glass", ClientID: "glass-b"}, "same-request-001"); err != nil {
 		t.Fatal(err)
 	}
 }

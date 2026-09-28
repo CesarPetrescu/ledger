@@ -5,6 +5,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog'
 import { useUndo } from '../hooks/useUndo'
 import { EmptyState, ErrorState, Icon, Loading, StaleNotice, TierBadge, Timestamp } from '../components/ui'
 import { EntriesView, HealthBadge, LIVE, ProjectSummaryTable } from '../components/entries'
+import { EntrySplit } from '../components/EntryPanel'
 import { useResource } from '../hooks/useResource'
 import { Link, navigate } from '../router'
 
@@ -338,7 +339,7 @@ function ProjectDetail({ slug, view, summary, onRetrySummary, onSaved }: { slug:
                   </li>
                 ))}
               </ul>
-            ) : <EntriesView key={view} view={view} fixedProject={slug} />}
+            ) : <EntrySplit><EntriesView key={view} view={view} fixedProject={slug} /></EntrySplit>}
         </>
       )}
     </article>

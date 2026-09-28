@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { api, describeError, ENTRY_KINDS, type EntryFilter, type OwnerPatch, type ProjectSummary, type TableEntry } from '../api'
+import { api, describeError, ENTRY_KINDS, OWNER_SOURCE, type EntryFilter, type OwnerPatch, type ProjectSummary, type TableEntry } from '../api'
 import { useResource } from '../hooks/useResource'
 import { useUndo } from '../hooks/useUndo'
 import { refreshAll } from '../live'
 import { ConfirmDialog } from './ConfirmDialog'
-import { LabelEditor } from './LabelEditor'
+import { useEntrySelection, writerName } from './EntryPanel'
 import { Link } from '../router'
 import { useToast } from './Toast'
 import { EmptyState, ErrorState, formatRelative, Icon, KindBadge, Loading, StaleNotice, TierBadge, Timestamp } from './ui'
@@ -203,7 +203,7 @@ export function TodoState({ entry, onChanged }: { entry: TableEntry; onChanged: 
  */
 export function whyHere(entry: TableEntry, now = Date.now()): string {
   const meta = entry.meta
-  if (meta?.ask && !entry.owner.handled) return `${entry.source} asked ${formatRelative(entry.created_at, now)} and is waiting on your answer.`
+  if (meta?.ask && !entry.owner.handled && entry.source !== OWNER_SOURCE) return `${entry.source} asked ${formatRelative(entry.created_at, now)} and is waiting on your answer.`
   if (entry.kind !== 'todo' || entry.resolved_by) return ''
   if (meta?.due) {
     const due = shortDate.format(new Date(`${meta.due}T12:00:00`))
@@ -220,7 +220,7 @@ export function FocusBadges({ entry }: { entry: TableEntry }) {
   const today = localDay()
   return (
     <span className="focus-badges">
-      {meta?.ask && !entry.owner.handled && <span className="badge" data-focus="ask">Asks you</span>}
+      {meta?.ask && !entry.owner.handled && entry.source !== OWNER_SOURCE && <span className="badge" data-focus="ask">Asks you</span>}
       {meta?.importance === 'important' && <span className="badge" data-focus="important">Important</span>}
       {meta?.state && <span className="badge" data-state={meta.state}>{STATE_LABEL[meta.state]}</span>}
       {entry.kind === 'todo' && meta?.priority && meta.priority !== 'normal' && <span className="badge" data-priority={meta.priority}>{meta.priority}</span>}
@@ -265,11 +265,11 @@ export function DeleteEntry({ entry, onChanged }: { entry: TableEntry; onChanged
   )
 }
 
-export function Facts({ entry }: { entry: TableEntry }) {
+export function Facts({ entry, hideAsk = false }: { entry: TableEntry; hideAsk?: boolean }) {
   const meta = entry.meta
   if (!meta) return null
   const facts: [string, string][] = [
-    ['Asks you', meta.ask ?? ''],
+    ['Asks you', hideAsk ? '' : meta.ask ?? ''],
     ['Next step', meta.next_step ?? ''],
     ['Blocked by', meta.blocker ?? ''],
     [entry.kind === 'decision' ? 'Why' : 'Why it matters', meta.why ?? ''],
@@ -321,19 +321,18 @@ export function Facts({ entry }: { entry: TableEntry }) {
   )
 }
 
-export function EntryRow({ entry, repeats = [], view, headline, hideProject = false, onTag, onChanged }: { entry: TableEntry; repeats?: TableEntry[]; view: RowView; headline?: string; hideProject?: boolean; onTag: (tag: string) => void; onChanged: () => void }) {
-  const [open, setOpen] = useState(false)
-  const [showRepeats, setShowRepeats] = useState(false)
+export function EntryRow({ entry, repeats = [], view, headline, hideProject = false, onChanged }: { entry: TableEntry; repeats?: TableEntry[]; view: RowView; headline?: string; hideProject?: boolean; onTag?: (tag: string) => void; onChanged: () => void }) {
+  const selection = useEntrySelection()
   const owner = useOwnerAction(onChanged)
-  const pending = !entry.meta
   const reading = view === 'reading'
   const summary = reading ? entry.meta?.why || entry.meta?.gist : entry.meta?.gist
-  const asking = Boolean(entry.meta?.ask && !entry.owner.handled)
+  const asking = Boolean(entry.meta?.ask && !entry.owner.handled && entry.source !== OWNER_SOURCE)
+  const selected = selection.selected === entry.id
   return (
-    <li className="entry-row" data-done={entry.resolved_by ? 'true' : undefined} data-read={reading && entry.owner.read ? 'true' : undefined}>
+    <li className="entry-row" data-entry-id={entry.id} aria-current={selected ? 'true' : undefined} data-done={entry.resolved_by ? 'true' : undefined} data-read={reading && entry.owner.read ? 'true' : undefined}>
       <div className="entry-row-main">
         <div className="entry-row-head">
-          <button type="button" className="entry-row-title" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+          <button type="button" className="entry-row-title" aria-haspopup="dialog" onClick={() => selection.open(entry.id)}>
             {headline ?? titleOf(entry)}
           </button>
           <FocusBadges entry={entry} />
@@ -343,44 +342,19 @@ export function EntryRow({ entry, repeats = [], view, headline, hideProject = fa
         <div className="entry-row-meta">
           {view === 'activity' && <KindBadge kind={entry.kind} />}
           {entry.meta?.category && <span className="category">{entry.meta.category}</span>}
-          {entry.meta?.tags.map((tag) => <button key={tag} type="button" className="chip" onClick={() => onTag(tag)} aria-label={`Filter by tag ${tag}`}>{tag}</button>)}
           {reading && entry.meta?.source && <span>{entry.meta.source}</span>}
           {view !== 'todos' && !hideProject && <Link to={`/projects/${entry.slug}`}>{entry.project_name}</Link>}
-          <code>{entry.source}</code>
-          {repeats.length > 0 && (
-            <button type="button" className="chip chip-repeat" aria-expanded={showRepeats} onClick={() => setShowRepeats((value) => !value)}>
-              +{repeats.length} {repeats.length === 1 ? 'repeat' : 'repeats'}
-            </button>
-          )}
+          <span>{writerName(entry.source)}</span>
+          {entry.reply_to && <span className="row-note">reply</span>}
+          {(entry.replies ?? 0) > 0 && <span className="row-note" title="Replies">{entry.replies} {entry.replies === 1 ? 'reply' : 'replies'}</span>}
+          {repeats.length > 0 && <span className="row-note">+{repeats.length} {repeats.length === 1 ? 'repeat' : 'repeats'}</span>}
           {view === 'todos' || view === 'inbox' ? <Timestamp iso={entry.created_at} /> : <time dateTime={entry.created_at} title={new Date(entry.created_at).toLocaleString()}>{timeFormat.format(new Date(entry.created_at))}</time>}
           {reading && entry.meta?.link && <a href={entry.meta.link} target="_blank" rel="noopener noreferrer">Open <Icon name="external" /></a>}
         </div>
-        {showRepeats && (
-          <ul className="repeats" aria-label="Repeats">
-            {repeats.map((repeat) => <li key={repeat.id}>{titleOf(repeat)} <span className="muted">· {repeat.source} · <Timestamp iso={repeat.created_at} /></span></li>)}
-          </ul>
-        )}
-        {open && (
-          <div className="entry-row-detail">
-            <Facts entry={entry} />
-            <p className="entry-body">{entry.body}</p>
-            {entry.meta && entry.meta.refs.length > 0 && <ul className="refs" aria-label="References">{entry.meta.refs.map((ref) => <li key={ref}><code>{ref}</code></li>)}</ul>}
-            <p className="muted small">{pending ? 'Summary pending.' : entry.meta?.origin === 'model' ? 'Title, summary, and tags generated by AI from the text above.' : 'Written from the console.'}</p>
-            <LabelEditor entry={entry} onChanged={onChanged} />
-            <RelatedList id={entry.id} />
-            <p className="detail-links">
-              <Link to={`/entries/${entry.id}`}>Open entry page</Link>
-              <DeleteEntry entry={entry} onChanged={onChanged} />
-            </p>
-          </div>
-        )}
       </div>
       <div className="entry-row-actions">
         {entry.kind === 'todo' && <TodoState entry={entry} onChanged={onChanged} />}
         {asking && <button type="button" className="btn btn-small" disabled={owner.busy} onClick={() => void owner.act(entry.id, { handled: true }, 'Marked handled.')}>Handled</button>}
-        {(asking || (entry.kind === 'todo' && !entry.resolved_by)) && view === 'inbox' && (
-          <button type="button" className="link-button" disabled={owner.busy} onClick={() => void owner.act(entry.id, { snooze_days: 1 }, 'Snoozed until tomorrow.')}>Snooze</button>
-        )}
         {reading && (
           <>
             <button type="button" className="btn btn-small" disabled={owner.busy} onClick={() => void owner.act(entry.id, { read: !entry.owner.read }, entry.owner.read ? 'Marked unread.' : 'Marked read.')}>

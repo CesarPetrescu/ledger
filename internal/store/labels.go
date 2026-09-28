@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -164,6 +165,11 @@ FROM entry_meta_override o WHERE o.entry_id=m.entry_id AND m.entry_id=$1`, entry
 		}
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM project_digest WHERE slug=(SELECT slug FROM entry WHERE id=$1)`, entryID); err != nil {
+		return err
+	}
+	// For the entry's history; a reset shows as its field name too.
+	changed := append(slices.Sorted(maps.Keys(set)), reset...)
+	if _, err := tx.Exec(ctx, `INSERT INTO entry_label_edit(entry_id,fields) VALUES($1,$2)`, entryID, changed); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

@@ -353,7 +353,7 @@ func (db *DB) ProjectSummaries(ctx context.Context) ([]ProjectSummary, error) {
  s.id,COALESCE(sm.title,''),COALESCE(s.body,''),s.created_at,COALESCE(s.source,''),COALESCE(d.summary,''),d.generated_at,
  COALESCE(hs.state,''),COALESCE(hs.detail,''),
  (SELECT count(*) FROM entry a JOIN entry_meta am ON am.entry_id=a.id LEFT JOIN entry_owner_state ao ON ao.entry_id=a.id
-  WHERE a.slug=p.slug AND am.ask<>'' AND ao.handled_at IS NULL AND (ao.snoozed_until IS NULL OR ao.snoozed_until<=current_date))
+  WHERE a.slug=p.slug AND a.source<>'`+OwnerSource+`' AND am.ask<>'' AND ao.handled_at IS NULL AND (ao.snoozed_until IS NULL OR ao.snoozed_until<=current_date))
 FROM project p
 LEFT JOIN project_digest d ON d.slug=p.slug
 LEFT JOIN LATERAL (SELECT id,body,created_at,source FROM entry WHERE slug=p.slug AND kind='status' ORDER BY created_at DESC,id DESC LIMIT 1) s ON true

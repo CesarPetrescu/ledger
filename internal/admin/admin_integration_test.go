@@ -815,7 +815,7 @@ func TestRelatedEntriesDuplicatesAndDigestsThroughTheAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	entries := request(t, server, http.MethodGet, "/admin/api/entries", "", authed(s, false))
-	if strings.Count(entries.Body.String(), `"duplicate_of":"`+strconv.FormatInt(ids["first"], 10)+`"`) != 3 || !strings.Contains(entries.Body.String(), `"body":"untitled","client_id":"c","created_at"`) {
+	if strings.Count(entries.Body.String(), `"duplicate_of":"`+strconv.FormatInt(ids["first"], 10)+`"`) != 3 || !strings.Contains(entries.Body.String(), `"body":"untitled","client_id":"c","context":"","created_at"`) {
 		t.Fatalf("entries = %s", entries.Body.String())
 	}
 	related := request(t, server, http.MethodGet, "/admin/api/entries/"+strconv.FormatInt(ids["cousin"], 10)+"/related", "", authed(s, false))
@@ -1321,7 +1321,7 @@ func TestUndoRefusesTriageRedoneSince(t *testing.T) {
 	}
 
 	// An idempotent write stays idempotent after its entry is restored.
-	once, err := db.AppendEntryOnce(ctx, "atlas", "note", "Glass capture", "glass", "c", "request-0001")
+	once, err := db.AppendEntryOnce(ctx, store.NewEntry{Slug: "atlas", Kind: "note", Body: "Glass capture", Source: "glass", ClientID: "c"}, "request-0001")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1329,13 +1329,13 @@ func TestUndoRefusesTriageRedoneSince(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.AppendEntryOnce(ctx, "atlas", "note", "Glass capture", "glass", "c", "request-0001"); !errors.Is(err, store.ErrEntryTrashed) {
+	if _, err := db.AppendEntryOnce(ctx, store.NewEntry{Slug: "atlas", Kind: "note", Body: "Glass capture", Source: "glass", ClientID: "c"}, "request-0001"); !errors.Is(err, store.ErrEntryTrashed) {
 		t.Fatalf("retry while trashed = %v", err)
 	}
 	if err := db.RestoreTrash(ctx, onceTrash); err != nil {
 		t.Fatal(err)
 	}
-	if retry, err := db.AppendEntryOnce(ctx, "atlas", "note", "Glass capture", "glass", "c", "request-0001"); err != nil || retry.ID != once.ID {
+	if retry, err := db.AppendEntryOnce(ctx, store.NewEntry{Slug: "atlas", Kind: "note", Body: "Glass capture", Source: "glass", ClientID: "c"}, "request-0001"); err != nil || retry.ID != once.ID {
 		t.Fatalf("retry after restore = %v %v, want entry %d", retry.ID, err, once.ID)
 	}
 }

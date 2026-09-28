@@ -37,7 +37,7 @@ import (
 const (
 	sessionCookie  = "ledger_admin_session"
 	csrfHeader     = "X-CSRF-Token"
-	writeSource    = "ledger-admin"
+	writeSource    = store.OwnerSource
 	maxBodyBytes   = 64 << 10
 	maxLoginBytes  = 8 << 10
 	defaultEntries = 100
@@ -97,6 +97,8 @@ func NewServer(config Config, db *store.DB) *Server {
 	s.mux.HandleFunc("POST /admin/api/entries/{id}/reopen", s.reopenTodo)
 	s.mux.HandleFunc("GET /admin/api/entries/{id}", s.getEntry)
 	s.mux.HandleFunc("GET /admin/api/entries/{id}/related", s.relatedEntries)
+	s.mux.HandleFunc("GET /admin/api/entries/{id}/history", s.entryHistory)
+	s.mux.HandleFunc("POST /admin/api/entries/{id}/replies", s.replyToEntry)
 	s.mux.HandleFunc("POST /admin/api/entries/{id}/owner", s.setOwnerState)
 	s.mux.HandleFunc("POST /admin/api/entries/{id}/labels", s.setLabels)
 	s.mux.HandleFunc("POST /admin/api/reading/read-all", s.markAllRead)
@@ -634,6 +636,7 @@ func tableEntryResponse(entry store.EntryWithProject) map[string]any {
 		item["duplicate_of"] = strconv.FormatInt(*entry.DuplicateOf, 10)
 	}
 	item["owner"] = entry.Owner
+	item["replies"] = entry.Replies
 	if entry.ResolvedBy != nil {
 		item["resolved_by"] = map[string]any{"entry_id": strconv.FormatInt(entry.ResolvedBy.EntryID, 10), "origin": entry.ResolvedBy.Origin, "created_at": entry.ResolvedBy.CreatedAt}
 	}
@@ -910,6 +913,73 @@ func (s *Server) getEntry(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, item)
 }
 
+func (s *Server) entryHistory(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathEntryID(w, r)
+	if !ok {
+		return
+	}
+	history, truncated, err := s.db.EntryHistory(r.Context(), id)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	if len(history) == 0 {
+		writeError(w, http.StatusNotFound, "entry not found")
+		return
+	}
+	events := make([]map[string]any, 0, len(history))
+	for _, h := range history {
+		event := map[string]any{"at": h.At, "kind": h.Kind, "actor": h.Actor, "text": h.Text, "undone": h.Undone}
+		if h.EntryID != nil {
+			event["entry_id"] = strconv.FormatInt(*h.EntryID, 10)
+		}
+		events = append(events, event)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"history": events, "truncated": truncated})
+}
+
+// replyToEntry saves the owner's answer under an entry. Replying to an open
+// ask also marks it handled, undoably.
+func (s *Server) replyToEntry(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathEntryID(w, r)
+	if !ok {
+		return
+	}
+	var input struct {
+		Body string `json:"body"`
+	}
+	if err := decodeJSON(w, r, &input, maxBodyBytes); err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	input.Body = strings.TrimSpace(input.Body)
+	if err := store.ValidateEntry("note", input.Body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var slug string
+	if found, err := s.db.ListEntries(r.Context(), store.EntryFilter{ID: id}); err != nil {
+		s.internalError(w, r, err)
+		return
+	} else if len(found) == 0 {
+		writeError(w, http.StatusNotFound, "entry not found")
+		return
+	} else {
+		slug = found[0].Slug
+	}
+	entry, actionID, err := s.db.Append(r.Context(), store.NewEntry{Slug: slug, Kind: "note", Body: input.Body, Source: writeSource, ClientID: clientIdentifier(sessionFrom(r)), ReplyTo: id})
+	switch {
+	case err == nil && actionID != 0:
+		writeJSON(w, http.StatusCreated, withAction(entryResponse(entry), actionID))
+	case err == nil:
+		writeJSON(w, http.StatusCreated, entryResponse(entry))
+	case errors.Is(err, store.ErrReplyNotFound), store.IsForeignKeyViolation(err):
+		writeError(w, http.StatusNotFound, "entry not found")
+	default:
+		s.internalError(w, r, err)
+	}
+}
+
 // maxRepeats is how many repeats the entry page lists, newest first.
 const maxRepeats = 50
 
@@ -983,10 +1053,15 @@ func spreadsheetText(value string) string {
 }
 
 func entryResponse(entry store.Entry) map[string]any {
-	return map[string]any{
+	item := map[string]any{
 		"id": strconv.FormatInt(entry.ID, 10), "slug": entry.Slug, "kind": entry.Kind, "body": entry.Body,
 		"source": entry.Source, "client_id": entry.ClientID, "created_at": entry.CreatedAt,
+		"context": entry.Context,
 	}
+	if entry.ReplyTo != nil {
+		item["reply_to"] = strconv.FormatInt(*entry.ReplyTo, 10)
+	}
+	return item
 }
 
 func entryResponses(entries []store.Entry) []map[string]any {

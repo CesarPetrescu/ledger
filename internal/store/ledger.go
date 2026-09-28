@@ -33,6 +33,9 @@ type Entry struct {
 	Source    string    `json:"source"`
 	ClientID  string    `json:"client_id"`
 	CreatedAt time.Time `json:"created_at"`
+	// ReplyTo is the entry this one answers; Context is where an agent wrote from.
+	ReplyTo *int64 `json:"reply_to,omitempty"`
+	Context string `json:"context,omitempty"`
 }
 
 type ProjectWithEntries struct {
@@ -101,7 +104,7 @@ func (db *DB) GetProjectPage(ctx context.Context, slug string, entryLimit int, b
 		}
 		cursorTime = &value
 	}
-	rows, err := db.Pool.Query(ctx, `SELECT id,slug,kind,body,source,client_id,created_at FROM entry
+	rows, err := db.Pool.Query(ctx, `SELECT id,slug,kind,body,source,client_id,created_at,reply_to,context FROM entry
 		WHERE slug=$1 AND ($3::timestamptz IS NULL OR (created_at,id) < ($3,$4::bigint))
 		ORDER BY created_at DESC,id DESC LIMIT $2`, slug, entryLimit+1, cursorTime, before)
 	if err != nil {
@@ -111,7 +114,7 @@ func (db *DB) GetProjectPage(ctx context.Context, slug string, entryLimit int, b
 	result := ProjectWithEntries{Project: p, Entries: []Entry{}}
 	for rows.Next() {
 		var e Entry
-		if err := rows.Scan(&e.ID, &e.Slug, &e.Kind, &e.Body, &e.Source, &e.ClientID, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.Slug, &e.Kind, &e.Body, &e.Source, &e.ClientID, &e.CreatedAt, &e.ReplyTo, &e.Context); err != nil {
 			return ProjectWithEntries{}, nil, err
 		}
 		result.Entries = append(result.Entries, e)
@@ -128,9 +131,7 @@ func (db *DB) GetProjectPage(ctx context.Context, slug string, entryLimit int, b
 }
 
 func (db *DB) AppendEntry(ctx context.Context, slug, kind, body, source, clientID string) (Entry, error) {
-	var e Entry
-	err := db.Pool.QueryRow(ctx, `INSERT INTO entry(slug,kind,body,source,client_id) VALUES($1,$2,$3,$4,$5) RETURNING id,slug,kind,body,source,client_id,created_at`, slug, kind, body, source, clientID).
-		Scan(&e.ID, &e.Slug, &e.Kind, &e.Body, &e.Source, &e.ClientID, &e.CreatedAt)
+	e, _, err := db.Append(ctx, NewEntry{Slug: slug, Kind: kind, Body: body, Source: source, ClientID: clientID})
 	return e, err
 }
 
