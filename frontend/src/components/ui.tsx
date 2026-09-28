@@ -151,3 +151,8 @@ export function StaleNotice({ message, onRetry }: { message: string; onRetry: ()
     </p>
   )
 }
+
+/** Ledger's logo: the same image as the favicon and app icon. */
+export function BrandMark({ size = 34 }: { size?: number }) {
+  return <img className="brand-mark" src={`${import.meta.env.BASE_URL}icon-192.png`} alt="" width={size} height={size} />
+}
