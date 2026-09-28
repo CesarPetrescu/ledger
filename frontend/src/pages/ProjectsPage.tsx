@@ -316,7 +316,9 @@ function ProjectDetail({ slug, view, summary, onRetrySummary, onSaved }: { slug:
         />
       ) : (
         <>
-          {onRetrySummary ? <StaleNotice message="Couldn't load this project's week, health, and open questions." onRetry={onRetrySummary} /> : <ProjectStatus summary={summary} />}
+          {/* The summary comes from a separate request that can fail or go stale on its own. */}
+          {onRetrySummary && <StaleNotice message={summary ? "This project's week, health, and open questions may be out of date." : "Couldn't load this project's week, health, and open questions."} onRetry={onRetrySummary} />}
+          <ProjectStatus summary={summary} />
           <nav className="detail-tabs" aria-label="Project sections">
             {PROJECT_TABS.map((tab) => (
               <Link key={tab.id} to={base + tab.path} aria-current={view === tab.id ? 'page' : undefined}>
@@ -435,7 +437,7 @@ export function ProjectsPage({ slug, view = 'activity' }: { slug?: string | unde
             />
           </>
         ) : slug ? (
-          <ProjectDetail key={slug} slug={slug} view={view} summary={summaryOf(slug)} onRetrySummary={!summaries.loading && !summaries.data ? summaries.reload : undefined} onSaved={upsertInList} />
+          <ProjectDetail key={slug} slug={slug} view={view} summary={summaryOf(slug)} onRetrySummary={summaries.stale || (!summaries.loading && !summaries.data) ? summaries.reload : undefined} onSaved={upsertInList} />
         ) : summaries.loading ? (
           <Loading label="Loading this week…" />
         ) : !summaries.data ? (
