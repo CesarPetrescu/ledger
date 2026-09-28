@@ -105,6 +105,33 @@ describe('handoff inbox', () => {
     expect(writeText).toHaveBeenCalledWith('<script>bad()</script>')
   })
 
+  it('shows messages as Markdown, safely, with a switch back to plain text', async () => {
+    localStorage.removeItem('ledger.markdown-preview')
+    const body = '# Plan\n\n- [x] **Contract** done\n\n| Step | Owner |\n|---|---|\n| M0 | codex |\n\n```\nPOST /v1/run\n```\n\n[bad](javascript:alert(1)) <b>raw</b> ![pixel](https://tracker.example/p.png)'
+    mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/handoffs': { body: page },
+      'GET /admin/api/projects': { body: { projects: [atlas] } },
+      'GET /admin/api/handoffs/7': { body: { ...detail, messages: [{ ...detail.messages[0]!, body }] } },
+    })
+    renderApp('/admin/handoffs/7')
+    const thread = await screen.findByRole('region', { name: /handoff messages/i })
+    expect(within(thread).getByRole('heading', { name: 'Plan' })).toBeInTheDocument()
+    expect(within(thread).getByText('Contract', { selector: 'strong' })).toBeInTheDocument()
+    expect(within(thread).getByRole('table')).toHaveTextContent('M0codex')
+    expect(within(thread).getByText('POST /v1/run', { selector: 'code' })).toBeInTheDocument()
+    // No raw HTML, no script links, no remote image loads.
+    expect(thread.querySelector('b')).toBeNull()
+    expect(thread.querySelector('img')).toBeNull()
+    expect(within(thread).getByRole('link', { name: /pixel \(image link\)/ })).toHaveAttribute('href', 'https://tracker.example/p.png')
+    expect(within(thread).getByText('bad').closest('a')?.getAttribute('href') ?? '').not.toMatch(/javascript/i)
+    // Off: the text exactly as written, remembered for next time.
+    await userEvent.setup().click(within(thread).getByRole('switch', { name: 'Markdown preview' }))
+    expect(within(thread).queryByRole('heading', { name: 'Plan' })).not.toBeInTheDocument()
+    expect(within(thread).getByText(/# Plan/)).toBeInTheDocument()
+    expect(localStorage.getItem('ledger.markdown-preview')).toBe('off')
+  })
+
   it('retries files on a saved draft and publishes only after upload', async () => {
     const draftMessage = { ...detail.messages[0]!, work_state: 'draft' as const, files: [] }
     const uploaded = { id: '16', message_id: '11', filename: 'retry.txt', media_type: 'text/plain', size_bytes: 5, sha256: 'def', created_at: '2026-09-04T10:00:00Z' }

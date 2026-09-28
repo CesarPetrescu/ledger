@@ -1,3 +1,4 @@
+import { MarkdownText, MarkdownToggle, useMarkdownPreview } from '../components/Markdown'
 import { useMemo, useRef, useState, type FormEvent } from 'react'
 import {
   api,
@@ -121,6 +122,7 @@ function DraftUploader({ message, onUpdated }: { message: HandoffMessage; onUpda
 
 function NewHandoff({ projects, initialProject }: { projects: Project[]; initialProject: string }) {
   const [input, setInput] = useState<HandoffCreateInput>({ title: '', description: '', scope: '', project_slug: initialProject, target: '', body: '', draft: false })
+  const [preview, setPreview] = useMarkdownPreview()
   const [files, setFiles] = useState<File[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -174,6 +176,8 @@ function NewHandoff({ projects, initialProject }: { projects: Project[]; initial
           <label>Target<input maxLength={100} value={input.target} onChange={(event) => set('target', event.target.value)} placeholder="Optional agent or model" /></label>
           <label>Files<input type="file" multiple onChange={(event) => setFiles(Array.from(event.target.files ?? []))} /></label>
           <label className="span-2">Message<textarea required maxLength={100000} rows={9} value={input.body} onChange={(event) => set('body', event.target.value)} /></label>
+          <div className="span-2"><MarkdownToggle on={preview} onChange={setPreview} /></div>
+          {preview && input.body.trim() && <MessagePreview body={input.body} />}
         </div>
         {files.length > 0 && <p className="muted small">{files.length} file{files.length === 1 ? '' : 's'} · {formatBytes(files.reduce((total, file) => total + file.size, 0))}</p>}
         {error && <p className="field-error" role="alert">{error}</p>}
@@ -186,7 +190,17 @@ function NewHandoff({ projects, initialProject }: { projects: Project[]; initial
   )
 }
 
-function MessageComposer({ handoffID, onAppended }: { handoffID: string; onAppended: (message: HandoffMessage) => void }) {
+/** How the message will read once sent, as you type. */
+function MessagePreview({ body }: { body: string }) {
+  return (
+    <section className="span-2 message-preview" aria-label="Preview">
+      <p className="eyebrow">Preview</p>
+      <MarkdownText text={body} />
+    </section>
+  )
+}
+
+function MessageComposer({ handoffID, preview, onAppended }: { handoffID: string; preview: boolean; onAppended: (message: HandoffMessage) => void }) {
   const [body, setBody] = useState('')
   const [target, setTarget] = useState('')
   const [files, setFiles] = useState<File[]>([])
@@ -228,6 +242,7 @@ function MessageComposer({ handoffID, onAppended }: { handoffID: string; onAppen
         <label>Target<input maxLength={100} value={target} onChange={(event) => setTarget(event.target.value)} placeholder="Optional agent or model" /></label>
         <label>Files<input ref={fileInput} type="file" multiple onChange={(event) => setFiles(Array.from(event.target.files ?? []))} /></label>
         <label className="span-2">Message<textarea required maxLength={100000} rows={6} value={body} onChange={(event) => setBody(event.target.value)} /></label>
+        {preview && body.trim() && <MessagePreview body={body} />}
       </div>
       {error && <p className="field-error" role="alert">{error}</p>}
       <div className="form-actions"><span className="muted small">Messages are permanent. Add a correction instead of editing.</span><button className="btn btn-primary" disabled={busy || !body.trim()}>{busy ? 'Appending…' : 'Append message'}</button></div>
@@ -247,6 +262,7 @@ function actionNames(message: HandoffMessage): string[] {
 }
 
 function HandoffThread({ id }: { id: string }) {
+  const [markdown, setMarkdown] = useMarkdownPreview()
   const detail = useResource(() => api.getHandoff(id), `handoff:${id}`, 'handoff handoff_message handoff_file')
   const [busy, setBusy] = useState('')
   const [loadingOlder, setLoadingOlder] = useState(false)
@@ -301,6 +317,7 @@ function HandoffThread({ id }: { id: string }) {
   if (detail.loading) return <Loading label="Loading handoff…" />
   if (!detail.data) return <ErrorState message={detail.error === 'handoff item not found' ? 'Handoff not found.' : "Couldn't load this handoff."} onRetry={detail.reload} />
   const { handoff, messages } = detail.data
+  const text = (value: string) => markdown ? <MarkdownText text={value} /> : value
   return (
     <article className="detail handoff-detail">
       <header className="detail-head">
@@ -313,9 +330,9 @@ function HandoffThread({ id }: { id: string }) {
         <button type="button" className="btn" onClick={() => void copyFull()}><Icon name="copy" /> Copy full handoff</button>
       </header>
       {detail.stale && <StaleNotice message="Showing the last loaded version; refresh failed." onRetry={detail.reload} />}
-      <dl className="handoff-summary"><div><dt>Description</dt><dd>{handoff.description}</dd></div><div><dt>Work scope</dt><dd>{handoff.scope}</dd></div></dl>
+      <dl className="handoff-summary"><div><dt>Description</dt><dd>{text(handoff.description)}</dd></div><div><dt>Work scope</dt><dd>{text(handoff.scope)}</dd></div></dl>
       <section className="handoff-thread" aria-label="Handoff messages">
-        <div className="section-head"><h2 className="section-title">Messages <span className="count">{messages.length} loaded</span></h2>{detail.data.next_before && <button type="button" className="btn" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? 'Loading…' : 'Load older'}</button>}</div>
+        <div className="section-head"><h2 className="section-title">Messages <span className="count">{messages.length} loaded</span></h2><MarkdownToggle on={markdown} onChange={setMarkdown} />{detail.data.next_before && <button type="button" className="btn" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? 'Loading…' : 'Load older'}</button>}</div>
         <ol>
           {messages.map((message) => (
             <li key={message.id} className="handoff-message">
@@ -323,7 +340,7 @@ function HandoffThread({ id }: { id: string }) {
                 <div className="handoff-message-meta"><strong>{message.source}</strong><Timestamp iso={message.created_at} />{message.target && <span>to {message.target}</span>}</div>
                 <div className="handoff-message-states"><HandoffBadge value={message.delivery_state} kind="delivery" /><HandoffBadge value={message.work_state} kind="work" /></div>
               </header>
-              <p className="handoff-body">{message.body}</p>
+              {markdown ? <div className="handoff-body handoff-body-md"><MarkdownText text={message.body} /></div> : <p className="handoff-body">{message.body}</p>}
               {message.files.length > 0 && <FileList files={message.files} removable={message.work_state === 'draft'} onRemoved={(fileID) => detail.update((current) => ({ ...current, messages: current.messages.map((item) => item.id === message.id ? { ...item, files: item.files.filter((file) => file.id !== fileID) } : item) }))} />}
               {message.work_state === 'draft' && <DraftUploader message={message} onUpdated={(updated) => detail.update((current) => ({ ...current, messages: current.messages.map((item) => item.id === updated.id ? updated : item) }))} />}
               <footer className="message-actions">
@@ -334,7 +351,7 @@ function HandoffThread({ id }: { id: string }) {
           ))}
         </ol>
       </section>
-      <MessageComposer handoffID={id} onAppended={(message) => detail.update((current) => ({ ...current, messages: current.messages.some((item) => item.id === message.id) ? current.messages.map((item) => item.id === message.id ? message : item) : [...current.messages, message] }))} />
+      <MessageComposer handoffID={id} preview={markdown} onAppended={(message) => detail.update((current) => ({ ...current, messages: current.messages.some((item) => item.id === message.id) ? current.messages.map((item) => item.id === message.id ? message : item) : [...current.messages, message] }))} />
     </article>
   )
 }
