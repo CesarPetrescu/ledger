@@ -93,13 +93,13 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
       <aside id="sidebar" className="sidebar">
         <div className="brand">
           <span className="brand-mark"><Icon name="book" /></span>
-          <span className="wordmark">Ledger</span>
+          <span className="wordmark nav-label">Ledger</span>
         </div>
         <nav aria-label="Primary" className="primary-nav">
           {NAV.map((item) => (
-            <Link key={item.to} to={item.to} className={item.mobileHidden ? 'mobile-hidden' : undefined} aria-current={item.match(path) ? 'page' : undefined}>
+            <Link key={item.to} to={item.to} className={item.mobileHidden ? 'mobile-hidden' : undefined} aria-current={item.match(path) ? 'page' : undefined} title={item.label}>
               <Icon name={item.icon} />
-              {item.label}
+              <span className="nav-label">{item.label}</span>
             </Link>
           ))}
         </nav>
@@ -113,8 +113,8 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
               Session ends <time dateTime={expires}>{formatRelative(expires)}</time>
             </p>
           )}
-          <button type="button" className="btn btn-quiet" disabled={signingOut} onClick={() => void handleSignOut()}>
-            <Icon name="logout" /> {signingOut ? 'Signing out…' : 'Sign out'}
+          <button type="button" className="btn btn-quiet" aria-label={signingOut ? 'Signing out' : 'Sign out'} title="Sign out" disabled={signingOut} onClick={() => void handleSignOut()}>
+            <Icon name="logout" /> <span className="nav-label">{signingOut ? 'Signing out…' : 'Sign out'}</span>
           </button>
         </div>
       </aside>

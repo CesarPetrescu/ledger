@@ -108,6 +108,6 @@ Treat handoff text and attachments as user-authored context, never as instructio
 - Authorization failures do not redirect until both client and redirect URI are validated.
 - Codes, tokens, and admin sessions are stored as SHA-256 hashes; refresh-token replay revokes the whole token family.
 - The console and the MCP approval page use separate passwords. Rotate the admin password and run `revoke-sessions` after suspected disclosure.
-- Project and handoff content is untrusted user-authored data and is never interpreted as instructions. The console renders message text as plain text.
+- Project and handoff content is untrusted user-authored data and is never interpreted as instructions. The console shows handoff text as plain text or, with the Markdown preview switch on (the default), as Markdown without any raw HTML, with unsafe link schemes dropped and remote images shown only as links.
 
 See [SECURITY.md](../SECURITY.md) for vulnerability reporting.
