@@ -61,7 +61,8 @@ fun rememberNotificationSwitch(model: LedgerModel, changed: (Boolean) -> Unit): 
             !want -> { Notifier.setEnabled(context, false); changed(false) }
             Notifier.permissionMissing(context) -> ask.launch(Manifest.permission.POST_NOTIFICATIONS)
             else -> {
-                Notifier.setEnabled(context, true)
+                // Already on but blocked in Android: keep what was seen so nothing is lost.
+                if (!Notifier.enabled(context)) Notifier.setEnabled(context, true)
                 changed(true)
                 // Permitted, but switched off for Ledger or its channel: that is an Android setting.
                 if (!Notifier.allowed(context)) {
