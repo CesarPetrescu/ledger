@@ -48,7 +48,8 @@ describe('project browser', () => {
     expect(await screen.findByRole('heading', { name: 'Atlas', level: 1 })).toBeInTheDocument()
     const status = screen.getByRole('region', { name: 'Project status' })
     expect(status).toHaveTextContent('Shipped the table page; two todos remain.')
-    expect(within(status).getByRole('link', { name: /1 question waits for you/i })).toHaveAttribute('href', '/admin/')
+    expect(within(status).getByRole('link', { name: /1\s*question waits for you/i })).toHaveAttribute('href', '/admin/')
+    expect(within(status).getByRole('link', { name: /open todo/i })).toHaveAttribute('href', '/admin/projects/atlas/todos')
     expect(screen.getByRole('link', { name: 'Activity', current: 'page' })).toBeInTheDocument()
     // Rows show the AI title and a link to the entry, not the raw body.
     expect(await screen.findByRole('button', { name: 'Use PostgreSQL everywhere' })).toBeInTheDocument()
@@ -89,7 +90,9 @@ describe('project browser', () => {
       'GET /admin/api/table/projects': { body: { ...noSummaries, projects: [{ ...atlasSummary, digest: '', status_title: '', status_body: 'Deployed the new build', status_at: '2026-09-03T12:00:00Z' }] } },
     })
     renderApp('/admin/projects/atlas')
-    expect(await screen.findByText('Latest: Deployed the new build')).toBeInTheDocument()
+    const status = await screen.findByRole('region', { name: 'Project status' })
+    expect(within(status).getByText('Latest status')).toBeInTheDocument()
+    expect(within(status).getByText('Deployed the new build')).toBeInTheDocument()
   })
 
   it('says so when the weekly summary fails to load, with a retry', async () => {

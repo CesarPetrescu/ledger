@@ -53,8 +53,9 @@ try {
   await page.getByRole('heading', { name: 'Atlas', exact: true }).waitFor()
   // The project page opens on its activity; consecutive entries from one agent
   // fold into a run, so open it to show every fixture entry.
-  await page.getByText('Web, Android and glasses clients are connected to the same Ledger.', { exact: true }).waitFor()
-  const run = page.getByRole('button', { name: /more from ledger-admin/ })
+  // The status also leads the project header; wait for it in the list.
+  await page.locator('.entry-list').getByText('Web, Android and glasses clients are connected to the same Ledger.', { exact: true }).waitFor()
+  const run = page.getByRole('button', { name: /more from (ledger-admin|You)/ })
   if (await run.count()) await run.click()
   await page.getByText('Review the latest changes, then pick the next useful action.', { exact: true }).waitFor()
   await page.evaluate(() => document.fonts.ready)

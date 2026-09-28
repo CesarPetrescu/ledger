@@ -1788,4 +1788,20 @@ func TestEntriesCanKeepOnlyOverdueOnes(t *testing.T) {
 	if res := request(t, server, http.MethodGet, "/admin/api/entries?due_before=soon", "", authed(s, false)); res.Code != http.StatusBadRequest {
 		t.Fatalf("bad due_before = %d", res.Code)
 	}
+	// A calendar's range: due from today up to (not including) tomorrow.
+	res = request(t, server, http.MethodGet, "/admin/api/entries?kind=todo&due_from="+today.Format(time.DateOnly)+"&due_before="+today.AddDate(0, 0, 1).Format(time.DateOnly), "", authed(s, false))
+	if body := res.Body.String(); res.Code != http.StatusOK || strings.Contains(body, late) || !strings.Contains(body, dueToday) || strings.Contains(body, undated) {
+		t.Fatalf("range = %d %s", res.Code, body)
+	}
+	lateID, _ := strconv.ParseInt(strings.Trim(strings.TrimPrefix(late, `"id":`), `"`), 10, 64)
+	if _, _, err := db.SetOwnerState(ctx, lateID, store.OwnerPatch{SnoozeDays: ptr(2)}); err != nil {
+		t.Fatal(err)
+	}
+	// By wake date, whether or not the day has come: today's view has none, the day after tomorrow's has it.
+	for from, want := range map[int]bool{0: false, 2: true} {
+		res = request(t, server, http.MethodGet, "/admin/api/entries?wakes_from="+today.AddDate(0, 0, from).Format(time.DateOnly)+"&wakes_before="+today.AddDate(0, 0, from+1).Format(time.DateOnly), "", authed(s, false))
+		if strings.Contains(res.Body.String(), late) != want {
+			t.Fatalf("wakes on +%d = %s", from, res.Body.String())
+		}
+	}
 }

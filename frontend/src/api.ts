@@ -160,6 +160,12 @@ export interface EntryFilter {
   /** Linked (news-shaped) entries: "all", "unread", or "starred". */
   reading?: string
   state?: string
+  /** YYYY-MM-DD bounds on the due date: from (inclusive), before (exclusive). */
+  due_from?: string
+  due_before?: string
+  /** YYYY-MM-DD bounds on the day a snooze ends: from (inclusive), before (exclusive). */
+  wakes_from?: string
+  wakes_before?: string
 }
 
 export interface EntryTablePage {

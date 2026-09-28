@@ -128,6 +128,11 @@ type EntryFilter struct {
 	RepeatsOf int64
 	// DueBefore keeps entries due before this day; nil means any.
 	DueBefore *time.Time
+	// DueFrom keeps entries due on or after this day; nil means any.
+	DueFrom *time.Time
+	// WakesFrom and WakesBefore keep entries whose snooze ends in [from, before),
+	// awake again or not; nil means any.
+	WakesFrom, WakesBefore *time.Time
 }
 
 // ListEntries returns matching entries from every project, newest first,
@@ -162,9 +167,10 @@ AND ($11='' OR (COALESCE(m.link,'')<>'' AND ($11='all' OR ($11='unread' AND o.re
 AND (NOT ($12 OR $10) OR o.snoozed_until IS NULL OR o.snoozed_until<=current_date)
 AND ($13='' OR (e.kind='status' AND m.state=$13))
 AND ($14::bigint=0 OR e.id=$14) AND ($15::bigint=0 OR m.duplicate_of=$15)
-AND ($16::date IS NULL OR m.due<$16)
+AND ($16::date IS NULL OR m.due<$16) AND ($17::date IS NULL OR m.due>=$17)
+AND ($18::date IS NULL OR o.snoozed_until<$18) AND ($19::date IS NULL OR o.snoozed_until>=$19)
 ORDER BY e.created_at DESC,e.id DESC LIMIT $8`, f.ProjectSlug, f.Kind, f.Source, f.Tag, f.Status, f.Query, f.Before, limit,
-		f.HideRoutine, f.NeedsYou, f.Reading, f.Awake, f.State, f.ID, f.RepeatsOf, f.DueBefore)
+		f.HideRoutine, f.NeedsYou, f.Reading, f.Awake, f.State, f.ID, f.RepeatsOf, f.DueBefore, f.DueFrom, f.WakesBefore, f.WakesFrom)
 	if err != nil {
 		return nil, err
 	}

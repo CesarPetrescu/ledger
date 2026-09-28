@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { api, describeError, type CalendarConnection, type CalendarEvent, type CalendarEventInput, type CalendarSource } from '../api'
+import { api, describeError, type CalendarConnection, type EntryFilter, type TableEntry, type CalendarEvent, type CalendarEventInput, type CalendarSource } from '../api'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import { EntrySplit, useEntrySelection } from '../components/EntryPanel'
+import { titleOf } from '../components/entries'
+import { navigate } from '../router'
+import { addDays, Agenda, modeRange, modeTitle, MonthGrid, step, WeekColumns, type CalendarItem, type CalendarMode } from './calendarViews'
 import { useToast } from '../components/Toast'
 import { EmptyState, ErrorState, Icon, Loading, StaleNotice } from '../components/ui'
 import { useResource } from '../hooks/useResource'
@@ -36,13 +40,6 @@ function eventColor(calendarID: string): number {
   let hash = 0
   for (const character of calendarID) hash = (hash * 31 + character.charCodeAt(0)) >>> 0
   return hash % 5
-}
-
-function calendarRange(anchor: string, days: number) {
-  const start = localDate(anchor)
-  const end = new Date(start)
-  end.setDate(end.getDate() + days)
-  return { start: start.toISOString(), end: end.toISOString() }
 }
 
 function ConnectCalendar({ onConnected }: { onConnected: () => void }) {
@@ -276,49 +273,61 @@ function EventEditor({ event, calendars, onClose, onSaved }: { event: CalendarEv
   )
 }
 
-function EventRow({ event, onEdit }: { event: CalendarEvent; onEdit: () => void }) {
-  const start = event.all_day ? localDate(event.start) : new Date(event.start)
-  const end = event.all_day ? localDate(event.end) : new Date(event.end)
-  const time = event.all_day ? 'All day' : `${start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}–${end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-  return (
-    <li className="calendar-event" data-color={eventColor(event.calendar_id)}>
-      <button type="button" onClick={onEdit}>
-        <span className="calendar-event-time">{time}</span>
-        <span className="calendar-event-main">
-          <strong>{event.title || 'Untitled event'}</strong>
-          <span>{event.calendar_name}{event.location ? ` · ${event.location}` : ''}{event.recurring ? ' · Recurring' : ''}</span>
-        </span>
-      </button>
-    </li>
-  )
-}
-
 function CalendarWorkspace({ connection, onDisconnected }: { connection: CalendarConnection; onDisconnected: () => void }) {
-  const calendars = useResource(() => api.listCalendars(), 'calendar:sources', 'calendar')
+  const calendars = useResource(() => (connection.connected ? api.listCalendars() : Promise.resolve([])), `calendar:sources:${connection.connected}`, 'calendar')
   const [selection, setSelection] = useState<string[] | null>(null)
-  const [managing, setManaging] = useState(connection.selected_calendars === 0)
+  const [managing, setManaging] = useState(connection.connected && connection.selected_calendars === 0)
   const [savingSelection, setSavingSelection] = useState(false)
   const [disconnecting, setDisconnecting] = useState(false)
   const [confirmDisconnect, setConfirmDisconnect] = useState(false)
   const [anchor, setAnchor] = useState(today())
-  const [days, setDays] = useState(7)
+  const [mode, setMode] = useState<CalendarMode>('month')
   const [calendarFilter, setCalendarFilter] = useState('')
   const [editing, setEditing] = useState<CalendarEvent | 'new' | null>(null)
   const toast = useToast()
+  const entrySelection = useEntrySelection()
 
-  const range = useMemo(() => calendarRange(anchor, days), [anchor, days])
-  const events = useResource(() => api.listCalendarEvents(range.start, range.end, calendarFilter), `calendar:events:${range.start}:${range.end}:${calendarFilter}`, 'calendar')
+  const { first, days } = modeRange(mode, anchor)
+  const last = addDays(first, days)
   const selectedCalendars = (calendars.data ?? []).filter((calendar) => calendar.selected)
   const activeSelection = selection ?? selectedCalendars.map((calendar) => calendar.id)
+  const hasCalendars = connection.connected && selectedCalendars.length > 0
+  const events = useResource(
+    () => (hasCalendars ? api.listCalendarEvents(localDate(first).toISOString(), localDate(last).toISOString(), calendarFilter) : Promise.resolve([])),
+    `calendar:events:${hasCalendars}:${first}:${last}:${calendarFilter}`, 'calendar')
+  const ledger = useResource(() => ledgerDates(first, last), `calendar:ledger:${first}:${last}`, 'project entry entry_meta entry_owner_state')
 
-  const grouped = useMemo(() => {
-    const groups = new Map<string, CalendarEvent[]>()
+  const items = useMemo<CalendarItem[]>(() => {
+    const out: CalendarItem[] = []
     for (const event of events.data ?? []) {
-      const date = event.all_day ? event.start : localDateKey(event.start)
-      groups.set(date, [...(groups.get(date) ?? []), event])
+      const start = event.all_day ? localDate(event.start) : new Date(event.start)
+      const end = event.all_day ? localDate(event.end) : new Date(event.end)
+      const time = event.all_day ? 'All day' : `${start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}–${end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+      // An event shows on every day it covers, so one that started earlier still shows.
+      const startDay = event.all_day ? event.start : localDateKey(event.start)
+      // All-day ends are exclusive; a timed event ending at midnight does not reach that day.
+      const endDay = event.all_day ? event.end : dateKey(new Date(end.getTime() - 1))
+      const lastDay = event.all_day ? addDays(endDay, -1) : endDay
+      for (let day = startDay < first ? first : startDay; day <= lastDay && day < last; day = addDays(day, 1)) {
+        out.push({ key: `e:${event.id}:${event.start}:${day}`, date: day, time: day === startDay ? time : 'Continues', sort: `${event.all_day ? '0' : '1'}${event.start}`, title: event.title || 'Untitled event',
+          detail: `${event.calendar_name}${event.location ? ` · ${event.location}` : ''}${event.recurring ? ' · Recurring' : ''}`, kind: 'event', color: eventColor(event.calendar_id), open: () => void openEvent(event) })
+      }
     }
-    return [...groups.entries()]
-  }, [events.data])
+    const now = today()
+    for (const todo of ledger.data?.due ?? []) {
+      const due = todo.meta?.due ?? ''
+      out.push({ key: `t:${todo.id}`, date: due, time: 'Todo due', sort: `2${titleOf(todo)}`, title: titleOf(todo), detail: todo.project_name, kind: 'todo', overdue: due < now, entryId: todo.id, open: () => entrySelection.open(todo.id) })
+    }
+    for (const entry of ledger.data?.waking ?? []) {
+      const day = entry.owner.snoozed_until ?? ''
+      out.push({ key: `w:${entry.id}`, date: day, time: 'Wakes up', sort: `3${titleOf(entry)}`, title: titleOf(entry), detail: `${entry.project_name} · snoozed`, kind: 'wake', entryId: entry.id, open: () => entrySelection.open(entry.id) })
+    }
+    for (const project of ledger.data?.deadlines ?? []) {
+      out.push({ key: `d:${project.slug}`, date: project.deadline, time: 'Deadline', sort: `0${project.name}`, title: project.name, detail: 'Project deadline', kind: 'deadline', open: () => navigate(`/projects/${encodeURIComponent(project.slug)}`) })
+    }
+    return out.filter((item) => item.date >= first && item.date < last)
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- openEvent only reads state at click time
+  }, [events.data, ledger.data, first, last, entrySelection.selected])
 
   const saveSelection = async () => {
     setSavingSelection(true)
@@ -362,15 +371,18 @@ function CalendarWorkspace({ connection, onDisconnected }: { connection: Calenda
     <>
       <header className="page-head calendar-head">
         <div>
-          <p className="eyebrow">Nextcloud · {connection.username}</p>
+          <p className="eyebrow">{connection.connected ? `Nextcloud · ${connection.username}` : 'Ledger dates'}</p>
           <h1>Calendar</h1>
-          <p className="muted">Your selected calendars, live from {connection.server_url}.</p>
+          <p className="muted">{connection.connected ? `Your selected calendars, live from ${connection.server_url}, with` : 'Shows'} todos that are due, project deadlines, and the day snoozed items come back.</p>
         </div>
-        <div className="calendar-head-actions">
-          <button type="button" className="btn" onClick={() => setManaging((open) => !open)}>Calendars</button>
-          {selectedCalendars.length > 0 && <button type="button" className="btn btn-primary" onClick={() => setEditing('new')}><Icon name="plus" /> Add event</button>}
-        </div>
+        {connection.connected && (
+          <div className="calendar-head-actions">
+            <button type="button" className="btn" onClick={() => setManaging((open) => !open)}>Calendars</button>
+            {selectedCalendars.length > 0 && <button type="button" className="btn btn-primary" onClick={() => setEditing('new')}><Icon name="plus" /> Add event</button>}
+          </div>
+        )}
       </header>
+      {!connection.connected && <details className="calendar-connect-later"><summary>Connect a Nextcloud calendar to see your events here too</summary><ConnectCalendar onConnected={onDisconnected} /></details>}
 
       {managing && (
         <section className="calendar-manage" aria-labelledby="calendar-manage-title">
@@ -398,30 +410,36 @@ function CalendarWorkspace({ connection, onDisconnected }: { connection: Calenda
         </section>
       )}
 
-      {selectedCalendars.length > 0 && (
-        <div className="calendar-toolbar">
-          <label>
-            Starting
-            <input type="date" value={anchor} onChange={(changeEvent) => setAnchor(changeEvent.target.value)} />
-          </label>
-          <fieldset className="segmented">
-            <legend>Range</legend>
-            <div>{[7, 30].map((rangeDays) => <label key={rangeDays}><input type="radio" name="calendar-range" checked={days === rangeDays} onChange={() => setDays(rangeDays)} /><span>{rangeDays} days</span></label>)}</div>
-          </fieldset>
-          <label>
-            Calendar
-            <select value={calendarFilter} onChange={(changeEvent) => setCalendarFilter(changeEvent.target.value)}><option value="">All selected</option>{selectedCalendars.map((calendar) => <option key={calendar.id} value={calendar.id}>{calendar.name}</option>)}</select>
-          </label>
-          <button type="button" className="btn" onClick={() => setAnchor(today())}>Today</button>
-        </div>
-      )}
+      {connection.connected && selectedCalendars.length === 0 && !managing && calendars.data && <EmptyState><p>Select at least one Nextcloud calendar to show its events here and give agents access to it.</p><button type="button" className="btn btn-primary" onClick={() => setManaging(true)}>Choose calendars</button></EmptyState>}
 
-      {selectedCalendars.length === 0 && !managing && <EmptyState><p>Select at least one calendar to show events and grant agent access.</p><button type="button" className="btn btn-primary" onClick={() => setManaging(true)}>Choose calendars</button></EmptyState>}
-      {selectedCalendars.length > 0 && events.loading && <Loading label="Loading calendar…" />}
+      <div className="calendar-toolbar">
+        <div className="cal-nav">
+          <button type="button" className="icon-button" aria-label="Previous" onClick={() => setAnchor(step(mode, anchor, -1))}><Icon name="back" /></button>
+          <h2 className="cal-title" aria-live="polite">{modeTitle(mode, anchor)}</h2>
+          <button type="button" className="icon-button cal-next" aria-label="Next" onClick={() => setAnchor(step(mode, anchor, 1))}><Icon name="back" /></button>
+          <button type="button" className="btn btn-small" onClick={() => setAnchor(today())}>Today</button>
+        </div>
+        <fieldset className="segmented">
+          <legend className="visually-hidden">View</legend>
+          <div>{(['month', 'week', 'agenda'] as const).map((option) => <label key={option}><input type="radio" name="calendar-view" checked={mode === option} onChange={() => setMode(option)} /><span>{option === 'month' ? 'Month' : option === 'week' ? 'Week' : 'Agenda'}</span></label>)}</div>
+        </fieldset>
+        {hasCalendars && (
+          <label className="cal-filter">
+            <span className="visually-hidden">Calendar</span>
+            <select value={calendarFilter} onChange={(changeEvent) => setCalendarFilter(changeEvent.target.value)}><option value="">All calendars</option>{selectedCalendars.map((calendar) => <option key={calendar.id} value={calendar.id}>{calendar.name}</option>)}</select>
+          </label>
+        )}
+      </div>
+      <p className="cal-legend muted small"><span data-kind="event">Events</span><span data-kind="todo">Todos due</span><span data-kind="deadline">Project deadlines</span><span data-kind="wake">Snoozed items waking</span></p>
+
+      {connection.connected && !managing && !calendars.loading && !calendars.data && <ErrorState message="Couldn't reach your Nextcloud calendars; only Ledger's own dates are shown." onRetry={calendars.reload} />}
       {events.stale && <StaleNotice message="Showing the last loaded calendar; refresh failed." onRetry={events.reload} />}
-      {selectedCalendars.length > 0 && !events.loading && !events.data && <ErrorState message="Couldn't load calendar events." onRetry={events.reload} />}
-      {selectedCalendars.length > 0 && events.data && events.data.length === 0 && <EmptyState><p>No events in this range.</p><button type="button" className="btn btn-primary" onClick={() => setEditing('new')}>Add an event</button></EmptyState>}
-      {grouped.length > 0 && <div className="calendar-agenda">{grouped.map(([date, items]) => <section key={date}><h2><time dateTime={date}>{localDate(date).toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })}</time></h2><ol>{items.map((event) => <EventRow key={`${event.id}:${event.start}`} event={event} onEdit={() => void openEvent(event)} />)}</ol></section>)}</div>}
+      {hasCalendars && !events.loading && !events.data && <ErrorState message="Couldn't load calendar events." onRetry={events.reload} />}
+      {!ledger.loading && !ledger.data && <ErrorState message="Couldn't load todos, deadlines, and snoozed items." onRetry={ledger.reload} />}
+      {(events.loading || ledger.loading) && !events.data && !ledger.data ? <Loading label="Loading calendar…" />
+        : mode === 'month' ? <MonthGrid anchor={anchor} items={items} today={today()} onDay={(day) => { setAnchor(day); setMode('agenda') }} />
+        : mode === 'week' ? <WeekColumns anchor={anchor} items={items} today={today()} />
+        : <Agenda items={items} today={today()} />}
 
       {editing && <EventEditor key={editing === 'new' ? 'new' : `${editing.id}:${editing.etag}`} event={editing === 'new' ? null : editing} calendars={selectedCalendars} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); events.reload() }} />}
       <ConfirmDialog open={confirmDisconnect} title="Disconnect Nextcloud?" confirmLabel="Disconnect" busy={disconnecting} onCancel={() => setConfirmDisconnect(false)} onConfirm={() => void disconnect()}><p>Ledger and its MCP clients will immediately lose calendar access. Existing events remain in Nextcloud.</p></ConfirmDialog>
@@ -429,10 +447,44 @@ function CalendarWorkspace({ connection, onDisconnected }: { connection: Calenda
   )
 }
 
+/** Todos due, snoozed items waking, and project deadlines between two days. */
+async function ledgerDates(first: string, last: string) {
+  const [due, waking, projects] = await Promise.all([
+    everyEntry({ kind: 'todo', status: 'open', due_from: first, due_before: last }),
+    // By wake date, so an item stays on its day once that day has come.
+    everyEntry({ wakes_from: first, wakes_before: last }),
+    api.listProjects(),
+  ])
+  return {
+    due,
+    waking: waking.filter((entry) => (entry.owner.snoozed_until ?? '') >= first && (entry.owner.snoozed_until ?? '') < last),
+    // Only a real date counts; some deadlines are words like "daily", or impossible days like 31 September.
+    deadlines: projects.filter((project) => realDate(project.deadline) && project.deadline >= first && project.deadline < last),
+  }
+}
+
+/** Every page of a filtered entry list; the filters bound it to the view's days. */
+async function everyEntry(filter: EntryFilter) {
+  const out: TableEntry[] = []
+  let before: string | undefined
+  for (;;) {
+    const result = await api.listEntries(filter, before)
+    out.push(...result.entries)
+    // A cursor that does not move would page forever.
+    if (!result.next_before || result.next_before === before) return out
+    before = result.next_before
+  }
+}
+
+function realDate(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) && dateKey(localDate(value)) === value
+}
+
 export function CalendarPage() {
   const connection = useResource(() => api.getCalendarConnection(), 'calendar:connection', 'calendar')
-  if (connection.loading) return <Loading label="Loading calendar connection…" />
+  if (connection.loading) return <Loading label="Loading calendar…" />
   if (!connection.data) return <ErrorState message="Couldn't load calendar connection." onRetry={connection.reload} />
-  if (!connection.data.connected) return <ConnectCalendar onConnected={connection.reload} />
-  return <CalendarWorkspace connection={connection.data} onDisconnected={connection.reload} />
+  // Ledger's own dates show even without Nextcloud; clicking a todo opens it beside the calendar.
+  // Keyed by connection, so connecting or disconnecting starts from a clean page.
+  return <EntrySplit><CalendarWorkspace key={String(connection.data.connected)} connection={connection.data} onDisconnected={connection.reload} /></EntrySplit>
 }
