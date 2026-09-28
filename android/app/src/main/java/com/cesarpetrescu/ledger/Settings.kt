@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.provider.Settings as AndroidSettings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -58,8 +59,16 @@ fun rememberNotificationSwitch(model: LedgerModel, changed: (Boolean) -> Unit): 
     return { want ->
         when {
             !want -> { Notifier.setEnabled(context, false); changed(false) }
-            Notifier.allowed(context) -> { Notifier.setEnabled(context, true); changed(true) }
-            else -> ask.launch(Manifest.permission.POST_NOTIFICATIONS)
+            Notifier.permissionMissing(context) -> ask.launch(Manifest.permission.POST_NOTIFICATIONS)
+            else -> {
+                Notifier.setEnabled(context, true)
+                changed(true)
+                // Permitted, but switched off for Ledger or its channel: that is an Android setting.
+                if (!Notifier.allowed(context)) {
+                    model.notice = "Turn on Ledger's notifications in Android settings to see them."
+                    context.startActivity(Intent(AndroidSettings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(AndroidSettings.EXTRA_APP_PACKAGE, context.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }
+            }
         }
     }
 }

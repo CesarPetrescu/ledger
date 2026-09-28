@@ -45,6 +45,9 @@ object Notifier {
             .setPeriodic(15 * 60 * 1000L)
             .setPersisted(true)
             .build())
+        // Learn what is already there now, so anything arriving from here on is announced.
+        val app = context.applicationContext
+        Thread { check(app) }.start()
     }
 
     /**
@@ -127,6 +130,10 @@ object Notifier {
         }
         return out
     }
+
+    /** Android 13+ asks for this permission; older versions grant it. */
+    fun permissionMissing(context: Context) = Build.VERSION.SDK_INT >= 33 &&
+        context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
 
     /** Whether a notification would actually show: permission, app switch, and channel. */
     fun allowed(context: Context): Boolean {
