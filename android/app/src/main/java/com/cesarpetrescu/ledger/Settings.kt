@@ -1,6 +1,7 @@
 package com.cesarpetrescu.ledger
 
 import android.Manifest
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -53,23 +54,33 @@ fun Settings(model: LedgerModel) {
 @Composable
 fun rememberNotificationSwitch(model: LedgerModel, changed: (Boolean) -> Unit): (Boolean) -> Unit {
     val context = LocalContext.current
+    // Opted in, but Android keeps them from showing: keep what was seen so nothing is lost; only Android's settings can allow them.
+    val blocked = {
+        if (!Notifier.enabled(context)) Notifier.setEnabled(context, true)
+        model.notice = "Turn on Ledger's notifications in Android settings to see them."
+        context.startActivity(Intent(AndroidSettings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(AndroidSettings.EXTRA_APP_PACKAGE, context.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+    val rationale = { (context as? Activity)?.shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS) == true }
+    var deniedBefore by rememberSaveable { mutableStateOf(false) }
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) { Notifier.setEnabled(context, true); changed(true) }
-        else model.notice = "Notifications stay off. Allow them for Ledger in Android settings to turn them on."
+        when {
+            granted -> { Notifier.setEnabled(context, true); changed(true) }
+            // Not denied before and still no reason to explain: Android showed no dialog, after
+            // repeated denials or by policy. Asking again would do nothing.
+            !deniedBefore && !rationale() -> blocked()
+            else -> model.notice = "Notifications stay off. Allow them for Ledger in Android settings to turn them on."
+        }
     }
     return { want ->
         when {
             !want -> { Notifier.setEnabled(context, false); changed(false) }
-            Notifier.permissionMissing(context) -> ask.launch(Manifest.permission.POST_NOTIFICATIONS)
+            Notifier.permissionMissing(context) -> { deniedBefore = rationale(); ask.launch(Manifest.permission.POST_NOTIFICATIONS) }
             else -> {
                 // Already on but blocked in Android: keep what was seen so nothing is lost.
                 if (!Notifier.enabled(context)) Notifier.setEnabled(context, true)
                 changed(Notifier.allowed(context))
                 // Permitted, but switched off for Ledger or its channel: that is an Android setting.
-                if (!Notifier.allowed(context)) {
-                    model.notice = "Turn on Ledger's notifications in Android settings to see them."
-                    context.startActivity(Intent(AndroidSettings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(AndroidSettings.EXTRA_APP_PACKAGE, context.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                }
+                if (!Notifier.allowed(context)) blocked()
             }
         }
     }

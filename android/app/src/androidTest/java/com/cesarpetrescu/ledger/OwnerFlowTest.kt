@@ -143,6 +143,27 @@ class OwnerFlowTest {
             awaitText("Confirm the fixture pricing")
             recreate(activity)
             awaitText("Confirm the fixture pricing")
+            if (android.os.Build.VERSION.SDK_INT >= 33) {
+                // Denied for good, Android shows no dialog: Turn on keeps the wish and opens Android's settings.
+                val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+                val shell = { command: String -> android.os.ParcelFileDescriptor.AutoCloseInputStream(automation.executeShellCommand(command)).use { it.readBytes() } }
+                val resumed = { var ours = false
+                    InstrumentationRegistry.getInstrumentation().runOnMainSync { ours = ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).isNotEmpty() }
+                    ours }
+                val until = { done: () -> Boolean -> val deadline = System.currentTimeMillis() + 10_000
+                    while (!done() && System.currentTimeMillis() < deadline) Thread.sleep(100)
+                    assertTrue(done()) }
+                val fixed = "${context.packageName} android.permission.POST_NOTIFICATIONS user-fixed"
+                shell("pm set-permission-flags $fixed")
+                tap("Turn on")
+                until { Notifier.enabled(context) }
+                until { !resumed() }
+                shell("input keyevent KEYCODE_BACK")
+                until { resumed() }
+                Notifier.setEnabled(context, false)
+                shell("pm clear-permission-flags $fixed")
+                awaitText("Confirm the fixture pricing")
+            }
             // Notifications: the first check only learns what is there; a new ask is announced once.
             if (android.os.Build.VERSION.SDK_INT >= 33) InstrumentationRegistry.getInstrumentation().uiAutomation
                 .grantRuntimePermission(context.packageName, android.Manifest.permission.POST_NOTIFICATIONS)

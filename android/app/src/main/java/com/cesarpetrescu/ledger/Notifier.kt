@@ -101,8 +101,10 @@ object Notifier {
         // Turned off or blocked while this was asking the server: record and announce nothing.
         if (!enabled(context) || !allowed(context)) return 0
         val prefs = prefs(context)
-        // Entry IDs belong to one server: signing in to another starts over.
-        val sameServer = prefs.getString("origin", null) == api.origin
+        // Entry IDs belong to one server: signing in to another starts over. The
+        // first check after opting in has no server yet, and that is not a switch.
+        val stored = prefs.getString("origin", null)
+        val sameServer = stored == null || stored == api.origin
         val seen = if (sameServer) prefs.getStringSet("seen", emptySet()).orEmpty() else emptySet()
         val (news, remember) = fresh(nudges(inbox, todos), seen)
         val seeded = sameServer && prefs.getBoolean("seeded", false)
