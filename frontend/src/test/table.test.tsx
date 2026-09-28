@@ -253,7 +253,8 @@ describe('table', () => {
     const { calls } = mockApi({ ...base, 'GET /admin/api/entries': { body: { entries: [{ ...decisionEntry, owner, project_name: 'Beacon', slug: 'beacon' }], sources: [], tags: [] } } })
     renderApp('/admin/table?view=activity&project=beacon&q=Export%20design%20decision')
     expect(await screen.findByRole('searchbox', { name: /search text/i })).toHaveValue('Export design decision')
-    expect(Object.fromEntries(calls.find((call) => call.path === '/admin/api/entries')!.url.searchParams)).toMatchObject({ project: 'beacon', q: 'Export design decision' })
+    // The list asks the server after the field fills in; wait for that request.
+    await vi.waitFor(() => expect(Object.fromEntries(calls.find((call) => call.path === '/admin/api/entries')!.url.searchParams)).toMatchObject({ project: 'beacon', q: 'Export design decision' }))
   })
 
   it('opens with the tag and agent filters from the address', async () => {
