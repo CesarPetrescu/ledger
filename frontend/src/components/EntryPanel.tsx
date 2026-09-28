@@ -48,7 +48,8 @@ export function EntrySplit({ children }: { children: ReactNode }) {
   }
   // Moving between entries replaces the URL; opening from nothing adds a Back step.
   const open = (id: string) => navigate(withEntry(id), { replace: Boolean(selected) })
-  const close = () => navigate(withEntry(''))
+  // Closing replaces the address, so Back leaves the list instead of reopening the entry.
+  const close = () => navigate(withEntry(''), { replace: true })
 
   useEffect(() => {
     if (!selected) return

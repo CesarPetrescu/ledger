@@ -204,6 +204,16 @@ func TestFollowUpsSnoozesAndThreadHistory(t *testing.T) {
 	if res.Code != http.StatusCreated || !handled(followUp.ID) || handled(root.ID) {
 		t.Fatalf("reply = %d %s; follow-up handled=%v root handled=%v", res.Code, res.Body.String(), handled(followUp.ID), handled(root.ID))
 	}
+	// An agent reading the follow-up sees the conversation after it.
+	if view, err := db.GetEntry(ctx, strconv.FormatInt(followUp.ID, 10)); err != nil || view.RepliesTotal != 1 || view.Replies[0].Body != "Yearly" {
+		t.Fatalf("follow-up view = %+v %v", view, err)
+	}
+	// The owner's own entries never count as waiting on the owner.
+	add("Note to self", store.OwnerSource, 0, "Remember to check")
+	summaries, err := db.ProjectSummaries(ctx)
+	if err != nil || len(summaries) != 1 || summaries[0].NeedsYou != 1 {
+		t.Fatalf("summaries = %+v %v", summaries, err)
+	}
 	// The agent answers the follow-up: the follow-up needs the owner again.
 	add("Yearly it is; one more thing", "codex", followUp.ID, "")
 	if handled(followUp.ID) {

@@ -138,10 +138,17 @@ func (db *DB) GetEntry(ctx context.Context, id string) (EntryView, error) {
 	if err != nil {
 		return e, err
 	}
-	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM entry WHERE reply_to=$1`, n).Scan(&e.RepliesTotal); err != nil {
+	// Replies hang off the thread's root; any entry in the thread shows the rest of it.
+	root := n
+	if e.ReplyTo != "" {
+		if root, err = ParseCursor(e.ReplyTo); err != nil {
+			return e, err
+		}
+	}
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM entry WHERE reply_to=$1 AND id<>$2`, root, n).Scan(&e.RepliesTotal); err != nil {
 		return e, err
 	}
-	rows, err := db.Pool.Query(ctx, `SELECT * FROM (SELECT id::text,source,body,created_at,id n FROM entry WHERE reply_to=$1 ORDER BY created_at DESC,id DESC LIMIT $2) r ORDER BY created_at,n`, n, maxReplies)
+	rows, err := db.Pool.Query(ctx, `SELECT * FROM (SELECT id::text,source,body,created_at,id n FROM entry WHERE reply_to=$1 AND id<>$3 ORDER BY created_at DESC,id DESC LIMIT $2) r ORDER BY created_at,n`, root, maxReplies, n)
 	if err != nil {
 		return e, err
 	}
