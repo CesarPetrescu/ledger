@@ -383,7 +383,8 @@ private fun EntrySheet(model: LedgerModel, entry: JSONObject, repeats: List<JSON
     val id = entry.text("id")
     val openTodo = entry.text("kind") == "todo" && entry.optJSONObject("resolved_by") == null
     val act: (() -> Unit) -> Unit = { action -> action(); close() }
-    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).navigationBarsPadding().padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    // imePadding keeps the reply box and its Send button above the keyboard on small phones.
+    Column(Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).navigationBarsPadding().padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("${entry.text("project_name")} · ${label(entry.text("kind"))} · ${writerName(entry.text("source"))} · ${displayTime(entry.text("created_at"))}",
             style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(entryTitle(entry), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
@@ -480,22 +481,25 @@ fun asksYou(entry: JSONObject) = entry.optJSONObject("meta")?.text("ask")?.isNot
 private fun ReplyBox(model: LedgerModel, entry: JSONObject, asking: Boolean, sent: () -> Unit) {
     var text by rememberSaveable(entry.text("id")) { mutableStateOf("") }
     val agent = entry.text("source").takeIf { it != OWNER_SOURCE }.orEmpty()
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        OutlinedTextField(text, { text = it.take(4000) }, Modifier.fillMaxWidth(), minLines = if (asking) 3 else 2,
-            label = { Text(if (asking) "Answer $agent" else "Reply") },
-            placeholder = { Text(if (asking) "Type your answer" else if (agent.isNotBlank()) "A note or instruction for $agent" else "A note") })
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(buildString {
-                append(if (agent.isNotBlank()) "$agent sees it the next time it checks Ledger." else "Saved under this entry.")
-                if (asking) append(" Sending marks the question handled.")
-            }, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Button(onClick = {
-                val body = text.trim()
-                model.undoable(if (asking) "Answer sent; marked handled" else "Reply saved", after = { text = ""; sent() }) {
-                    it.request("POST", "/entries/${segment(entry.text("id"))}/replies", json("body" to body))
-                }
-            }, enabled = !model.busy && text.isNotBlank()) { Text(if (asking) "Send answer" else "Reply") }
+    val send = {
+        val body = text.trim()
+        model.undoable(if (asking) "Answer sent; marked handled" else "Reply saved", after = { text = ""; sent() }) {
+            it.request("POST", "/entries/${segment(entry.text("id"))}/replies", json("body" to body))
         }
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        // Send sits inside the field, so the keyboard never hides it on a small phone.
+        OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), minLines = if (asking) 3 else 2,
+            label = { Text(if (asking) "Answer $agent" else "Reply") },
+            placeholder = { Text(if (asking) "Type your answer" else if (agent.isNotBlank()) "A note or instruction for $agent" else "A note") },
+            isError = text.codePointCount(0, text.length) > 4000,
+            trailingIcon = { TextButton(onClick = send, enabled = !model.busy && text.isNotBlank() && text.codePointCount(0, text.length) <= 4000) { Text("Send") } })
+        Text(buildString {
+            append(if (agent.isNotBlank()) "$agent sees it the next time it checks Ledger." else "Saved under this entry.")
+            if (asking) append(" Sending marks the question handled.")
+            // The server counts characters, not UTF-16 units: an emoji is one.
+            if (text.codePointCount(0, text.length) > 4000) append(" Too long: keep it to 4,000 characters.")
+        }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -518,19 +522,29 @@ fun historyLine(event: JSONObject): String {
 private fun History(model: LedgerModel, entry: JSONObject, open: (String) -> Unit) {
     val client = model.api ?: return
     val id = entry.text("id")
-    var events by remember(id) { mutableStateOf<List<JSONObject>?>(null) }
-    LaunchedEffect(id, client, model.revision) {
-        events = try {
-            withContext(Dispatchers.IO) { client.request("GET", "/entries/${segment(id)}/history").rows("history") }
+    var history by remember(id) { mutableStateOf<JSONObject?>(null) }
+    var failed by remember(id) { mutableStateOf(false) }
+    var attempt by remember(id) { mutableStateOf(0) }
+    LaunchedEffect(id, client, model.revision, attempt) {
+        try {
+            history = withContext(Dispatchers.IO) { client.request("GET", "/entries/${segment(id)}/history") }
+            failed = false
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             if (e is ApiError && e.status == 401) model.failed(e, client)
-            events ?: emptyList()
+            // Keep what was shown; say the refresh failed.
+            failed = true
         }
     }
+    val events = history?.rows("history")
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("History", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         entry.text("context").takeIf { it.isNotBlank() }?.let { Text("Written from $it", style = MaterialTheme.typography.bodySmall) }
+        if (failed) Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(if (events == null) "Couldn't load the history." else "Couldn't refresh the history.", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            TextButton(onClick = { attempt++ }) { Text("Retry") }
+        }
+        if (history?.optBoolean("truncated") == true) Text("Older history is not shown; this lists the newest 200 events.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         // A reply already says so; its "marked handled" twin would repeat it.
         events.orEmpty().filterNot { it.text("kind") == "action" && it.text("text").startsWith("Replied") }.forEach { event ->
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {

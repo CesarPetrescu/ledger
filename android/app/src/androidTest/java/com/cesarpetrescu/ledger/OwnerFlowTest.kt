@@ -257,7 +257,7 @@ class OwnerFlowTest {
             tap("Confirm the fixture pricing")
             ui.waitUntilAtLeastOneExists(hasText("claude-code wrote it through Fixture Agent", substring = true), 15_000)
             fillField("Answer claude-code", "The fixture pricing is right.")
-            tap("Send answer")
+            tap("Send")
             awaitText("Nothing is waiting on you.")
             // Correct a label; the row then shows it and no longer asks for a check.
             tap("Write the fixture todo")
