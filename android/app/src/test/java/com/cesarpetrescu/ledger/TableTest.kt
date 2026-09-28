@@ -133,8 +133,10 @@ class TableTest {
         val ask = JSONObject().put("id", "70").put("source", "codex").put("project_name", "Atlas").put("meta", JSONObject().put("ask", "Confirm the pricing"))
         val overdue = JSONObject().put("id", "50").put("project_name", "Atlas").put("meta", JSONObject().put("title", "Add export").put("due", "2026-09-10"))
         val later = JSONObject().put("id", "51").put("project_name", "Atlas").put("meta", JSONObject().put("title", "Later").put("due", "2026-10-10"))
-        val inbox = JSONObject().put("needs_you", org.json.JSONArray().put(ask)).put("todos", org.json.JSONArray().put(overdue).put(later))
-        val nudges = Notifier.nudges(inbox, LocalDate.parse("2026-09-20"))
+        val inbox = JSONObject().put("needs_you", org.json.JSONArray().put(ask))
+        // An overdue todo that also asks something is announced once, as the ask.
+        val askingTodo = JSONObject(ask.toString()).put("meta", JSONObject().put("ask", "Confirm the pricing").put("due", "2026-09-01"))
+        val nudges = Notifier.nudges(inbox, listOf(overdue, later, askingTodo), LocalDate.parse("2026-09-20"))
         assertEquals(listOf("a:70", "t:50:2026-09-10"), nudges.map { it.key })
         assertEquals("codex asks you", nudges[0].title)
         assertEquals("Confirm the pricing · Atlas", nudges[0].text)

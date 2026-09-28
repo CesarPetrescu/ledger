@@ -47,13 +47,18 @@ object Notifier {
             .build())
     }
 
-    /** What in this inbox deserves a notification: open asks and overdue todos. */
-    fun nudges(inbox: JSONObject, today: LocalDate = LocalDate.now()): List<Nudge> = buildList {
-        inbox.rows("needs_you").forEach { entry ->
+    /**
+     * What deserves a notification: the inbox's open asks, and overdue todos
+     * among all open ones (the inbox lists only the most urgent few).
+     */
+    fun nudges(inbox: JSONObject, todos: List<JSONObject>, today: LocalDate = LocalDate.now()): List<Nudge> = buildList {
+        val asks = inbox.rows("needs_you")
+        asks.forEach { entry ->
             val ask = entry.optJSONObject("meta")?.text("ask").orEmpty().ifBlank { entryTitle(entry) }
             add(Nudge("a:${entry.text("id")}", entry.text("id"), "${entry.text("source")} asks you", "$ask · ${entry.text("project_name")}"))
         }
-        inbox.rows("todos").forEach { entry ->
+        val asked = asks.map { it.text("id") }.toSet()
+        todos.filter { it.text("id") !in asked }.forEach { entry ->
             val due = runCatching { LocalDate.parse(entry.optJSONObject("meta")?.text("due")) }.getOrNull()
             // A new due date is news again.
             if (due != null && due < today) add(Nudge("t:${entry.text("id")}:$due", entry.text("id"), "Overdue: ${entryTitle(entry)}", entry.text("project_name")))
@@ -70,14 +75,16 @@ object Notifier {
      */
     fun check(context: Context): Int {
         if (!enabled(context)) return 0
+        // Without permission to show them, keep what was seen so items announce once it returns.
+        if (!allowed(context)) return 0
         val api = SessionStore(context).read() ?: return 0
-        val inbox = try { api.request("GET", "/inbox") } catch (_: Exception) { return 0 }
+        val (inbox, todos) = try { api.request("GET", "/inbox") to openTodos(api) } catch (_: Exception) { return 0 }
         val prefs = prefs(context)
-        val (news, remember) = fresh(nudges(inbox), prefs.getStringSet("seen", emptySet()).orEmpty())
+        val (news, remember) = fresh(nudges(inbox, todos), prefs.getStringSet("seen", emptySet()).orEmpty())
         val seeded = prefs.getBoolean("seeded", false)
         prefs.edit().putStringSet("seen", remember).putBoolean("seeded", true).apply()
         // The first check after turning notifications on only learns what is already there.
-        if (!seeded || news.isEmpty() || !allowed(context)) return 0
+        if (!seeded || news.isEmpty()) return 0
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CHANNEL, "Needs you", NotificationManager.IMPORTANCE_DEFAULT).apply {
             description = "When an agent asks you something or a todo becomes overdue"
@@ -100,6 +107,20 @@ object Notifier {
             .setContentIntent(open(context, "inbox", CHANNEL.hashCode()))
             .build())
         return news.size
+    }
+
+    /** Every open, awake todo, a page at a time. */
+    // ponytail: stops after 2,000 open todos; page further if a backlog ever grows past that.
+    private fun openTodos(api: Api): List<JSONObject> {
+        val out = mutableListOf<JSONObject>()
+        var before = ""
+        repeat(10) {
+            val page = api.request("GET", "/entries?kind=todo&status=open&awake=1&limit=200" + if (before.isBlank()) "" else "&before=${segment(before)}")
+            out += page.rows("entries")
+            before = page.text("next_before")
+            if (before.isBlank()) return out
+        }
+        return out
     }
 
     fun allowed(context: Context) = Build.VERSION.SDK_INT < 33 ||

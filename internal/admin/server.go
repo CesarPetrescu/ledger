@@ -511,6 +511,14 @@ func entryFilter(query url.Values) (store.EntryFilter, error) {
 	if f.State != "" && !slices.Contains([]string{"done", "in_progress", "blocked"}, f.State) {
 		return f, errors.New("state must be done, in_progress, or blocked")
 	}
+	// awake=1 leaves out entries snoozed past today, as the inbox does.
+	switch query.Get("awake") {
+	case "", "0":
+	case "1":
+		f.Awake = true
+	default:
+		return f, errors.New("awake must be 0 or 1")
+	}
 	return f, nil
 }
 

@@ -1738,3 +1738,24 @@ func TestMarkAllReadIsOneUndoableAction(t *testing.T) {
 		t.Fatalf("second undo = %d %s", res.Code, res.Body.String())
 	}
 }
+
+func TestEntriesCanLeaveOutSnoozedOnes(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
+	_, s := login(t, server, "correct horse", "")
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	awake, _ := db.AppendEntry(ctx, "atlas", "todo", "Due soon", "codex", "c")
+	snoozed, _ := db.AppendEntry(ctx, "atlas", "todo", "Snoozed", "codex", "c")
+	if _, _, err := db.SetOwnerState(ctx, snoozed.ID, store.OwnerPatch{SnoozeDays: ptr(3)}); err != nil {
+		t.Fatal(err)
+	}
+	res := request(t, server, http.MethodGet, "/admin/api/entries?kind=todo&status=open&awake=1", "", authed(s, false))
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"id":"`+strconv.FormatInt(awake.ID, 10)+`"`) || strings.Contains(res.Body.String(), `"id":"`+strconv.FormatInt(snoozed.ID, 10)+`"`) {
+		t.Fatalf("awake = %d %s", res.Code, res.Body.String())
+	}
+	if res := request(t, server, http.MethodGet, "/admin/api/entries?awake=2", "", authed(s, false)); res.Code != http.StatusBadRequest {
+		t.Fatalf("bad awake = %d", res.Code)
+	}
+}
