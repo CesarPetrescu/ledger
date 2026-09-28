@@ -145,4 +145,12 @@ class TableTest {
         assertEquals(listOf("t:50:2026-09-10"), fresh.map { it.key })
         assertEquals(setOf("a:70", "t:50:2026-09-10"), remember)
     }
+
+    @Test fun beforeABaselineOnlyWhatArrivedAfterOptInIsAnnounced() {
+        val optIn = java.time.Instant.parse("2026-09-20T10:00:00Z")
+        val before = Nudge("a:1", "1", "t", "x", java.time.Instant.parse("2026-09-20T09:00:00Z"))
+        val after = Nudge("a:2", "2", "t", "x", java.time.Instant.parse("2026-09-20T11:00:00Z"))
+        assertEquals(listOf("a:2"), Notifier.toAnnounce(listOf(before, after), seeded = false, since = optIn).map { it.key })
+        assertEquals(listOf("a:1", "a:2"), Notifier.toAnnounce(listOf(before, after), seeded = true, since = optIn).map { it.key })
+    }
 }

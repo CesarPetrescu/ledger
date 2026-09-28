@@ -14,10 +14,13 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import org.json.JSONObject
+import java.time.Instant
 import java.time.LocalDate
+import java.time.OffsetDateTime
+import java.time.ZoneId
 
-/** One thing worth telling the owner about, keyed so it is told once. */
-data class Nudge(val key: String, val entryId: String, val title: String, val text: String)
+/** One thing worth telling the owner about, keyed so it is told once; at is when it became news. */
+data class Nudge(val key: String, val entryId: String, val title: String, val text: String, val at: Instant? = null)
 
 /**
  * Tells the owner when an agent asks them something or a todo becomes
@@ -37,7 +40,8 @@ object Notifier {
     /** schedule is false only in tests, so the system job cannot race them. */
     fun setEnabled(context: Context, on: Boolean, schedule: Boolean = true) {
         // Starting over means only what arrives from now on is announced.
-        prefs(context).edit().putBoolean("enabled", on).putBoolean("seeded", false).remove("seen").apply()
+        prefs(context).edit().putBoolean("enabled", on).putBoolean("seeded", false).remove("seen")
+            .putLong("enabled-at", System.currentTimeMillis()).apply()
         val jobs = context.getSystemService(JobScheduler::class.java)
         if (!on || !schedule) return jobs.cancel(JOB_ID)
         jobs.schedule(JobInfo.Builder(JOB_ID, ComponentName(context, InboxCheckJob::class.java))
@@ -58,19 +62,29 @@ object Notifier {
         val asks = inbox.rows("needs_you")
         asks.forEach { entry ->
             val ask = entry.optJSONObject("meta")?.text("ask").orEmpty().ifBlank { entryTitle(entry) }
-            add(Nudge("a:${entry.text("id")}", entry.text("id"), "${entry.text("source")} asks you", "$ask · ${entry.text("project_name")}"))
+            add(Nudge("a:${entry.text("id")}", entry.text("id"), "${entry.text("source")} asks you", "$ask · ${entry.text("project_name")}",
+                runCatching { OffsetDateTime.parse(entry.text("created_at")).toInstant() }.getOrNull()))
         }
         val asked = asks.map { it.text("id") }.toSet()
         todos.filter { it.text("id") !in asked }.forEach { entry ->
             val due = runCatching { LocalDate.parse(entry.optJSONObject("meta")?.text("due")) }.getOrNull()
             // A new due date is news again.
-            if (due != null && due < today) add(Nudge("t:${entry.text("id")}:$due", entry.text("id"), "Overdue: ${entryTitle(entry)}", entry.text("project_name")))
+            if (due != null && due < today) add(Nudge("t:${entry.text("id")}:$due", entry.text("id"), "Overdue: ${entryTitle(entry)}", entry.text("project_name"),
+                due.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant()))
         }
     }
 
     /** The nudges not announced before, and what to remember as announced. */
     fun fresh(current: List<Nudge>, seen: Set<String>): Pair<List<Nudge>, Set<String>> =
         current.filter { it.key !in seen } to current.map { it.key }.toSet()
+
+    /**
+     * What to announce. Once a baseline exists, everything new; before that
+     * (the first check after turning notifications on, even one that ran late
+     * because the first attempt failed), only what became news after then.
+     */
+    fun toAnnounce(news: List<Nudge>, seeded: Boolean, since: Instant): List<Nudge> =
+        if (seeded) news else news.filter { it.at != null && it.at.isAfter(since) }
 
     /**
      * Asks the server once and posts notifications for anything new. Blocks on
@@ -92,14 +106,16 @@ object Notifier {
         val seen = if (sameServer) prefs.getStringSet("seen", emptySet()).orEmpty() else emptySet()
         val (news, remember) = fresh(nudges(inbox, todos), seen)
         val seeded = sameServer && prefs.getBoolean("seeded", false)
+        // On another server nothing predates the switch; otherwise the opt-in moment is the boundary.
+        val since = if (sameServer) Instant.ofEpochMilli(prefs.getLong("enabled-at", 0)) else Instant.now()
         prefs.edit().putStringSet("seen", remember).putBoolean("seeded", true).putString("origin", api.origin).apply()
-        // The first check after turning notifications on only learns what is already there.
-        if (!seeded || news.isEmpty()) return 0
+        val announce = toAnnounce(news, seeded, since)
+        if (announce.isEmpty()) return 0
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CHANNEL, "Needs you", NotificationManager.IMPORTANCE_DEFAULT).apply {
             description = "When an agent asks you something or a todo becomes overdue"
         })
-        news.take(MAX_SHOWN).forEach { nudge ->
+        announce.take(MAX_SHOWN).forEach { nudge ->
             manager.notify(nudge.key.hashCode(), android.app.Notification.Builder(context, CHANNEL)
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .setContentTitle(nudge.title)
@@ -109,14 +125,14 @@ object Notifier {
                 .setContentIntent(open(context, "entry-view/${segment(nudge.entryId)}", nudge.key.hashCode(), api.origin))
                 .build())
         }
-        if (news.size > MAX_SHOWN) manager.notify(CHANNEL.hashCode(), android.app.Notification.Builder(context, CHANNEL)
+        if (announce.size > MAX_SHOWN) manager.notify(CHANNEL.hashCode(), android.app.Notification.Builder(context, CHANNEL)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("${news.size - MAX_SHOWN} more need you")
+            .setContentTitle("${announce.size - MAX_SHOWN} more need you")
             .setContentText("Open the Inbox to see them all.")
             .setAutoCancel(true)
             .setContentIntent(open(context, "inbox", CHANNEL.hashCode(), api.origin))
             .build())
-        return news.size
+        return announce.size
     }
 
     /** Every open, awake todo, a page at a time. */
