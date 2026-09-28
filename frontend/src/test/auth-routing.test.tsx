@@ -24,7 +24,7 @@ describe('authenticated shell and routing', () => {
     expect(await screen.findByRole('heading', { name: /^inbox$/i })).toBeInTheDocument()
     expect(window.location.pathname).toBe('/admin/')
     await user.click(screen.getByRole('button', { name: /sign out/i }))
-    expect(await screen.findByRole('heading', { name: /operator sign-in/i })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /welcome back/i })).toBeInTheDocument()
     expect(screen.getByText(/signed out/i)).toBeInTheDocument()
     const logout = calls.find((call) => call.path === '/admin/api/logout')
     expect(new Headers(logout?.init.headers).get('X-CSRF-Token')).toBe('csrf-123')
@@ -43,7 +43,7 @@ describe('authenticated shell and routing', () => {
     await userEvent.setup().click(screen.getByRole('button', { name: /sign out/i }))
 
     expect(await screen.findByRole('heading', { name: /^agents$/i })).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: /operator sign-in/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /welcome back/i })).not.toBeInTheDocument()
     expect(screen.getByRole('status', { name: /notifications/i })).toHaveTextContent(/server could not complete the request/i)
     expect(screen.getByRole('status', { name: /notifications/i })).not.toHaveTextContent(/internal detail/i)
   })
@@ -55,7 +55,7 @@ describe('authenticated shell and routing', () => {
       'GET /admin/api/table/projects': { status: 401, body: { error: 'unauthenticated' } },
     })
     renderApp()
-    expect(await screen.findByRole('heading', { name: /operator sign-in/i })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /welcome back/i })).toBeInTheDocument()
     expect(screen.getByText(/session expired/i)).toBeInTheDocument()
   })
 

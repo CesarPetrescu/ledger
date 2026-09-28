@@ -3,7 +3,7 @@ import { describeError } from '../api'
 import { useAuth } from '../auth'
 import { Link, navigate, useLocation } from '../router'
 import { useToast } from './Toast'
-import { Icon, formatRelative, type IconName } from './ui'
+import { BrandMark, Icon, formatRelative, type IconName } from './ui'
 import { useLiveUpdates } from '../live'
 import { applyTheme, readTheme, THEME_ORDER, type ThemeChoice } from '../theme'
 
@@ -92,7 +92,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
       </header>
       <aside id="sidebar" className="sidebar">
         <div className="brand">
-          <span className="brand-mark"><Icon name="book" /></span>
+          <BrandMark />
           <span className="wordmark nav-label">Ledger</span>
         </div>
         <nav aria-label="Primary" className="primary-nav">

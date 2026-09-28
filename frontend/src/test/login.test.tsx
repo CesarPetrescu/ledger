@@ -7,7 +7,8 @@ describe('login', () => {
   it('shows a compact password-only sign-in when there is no session', async () => {
     mockApi({ 'GET /admin/api/session': anonymousSession })
     renderApp()
-    expect(await screen.findByRole('heading', { name: /operator sign-in/i })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /welcome back/i })).toBeInTheDocument()
+    expect(screen.getByText(/operator sign-in/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/^password$/i)).toHaveAttribute('type', 'password')
     expect(screen.queryByLabelText(/username|email/i)).not.toBeInTheDocument()
     expect(document.querySelectorAll('input')).toHaveLength(1)
