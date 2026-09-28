@@ -56,9 +56,16 @@ class MainActivity : ComponentActivity() {
         opened.value = requested(intent)
     }
 
+    // A route not yet opened (the app was starting or busy) survives a rotation.
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        opened.value?.let { (route, origin) -> outState.putString(ROUTE, route); outState.putString(ORIGIN, origin) }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (savedInstanceState == null) opened.value = requested(intent)
+        opened.value = if (savedInstanceState == null) requested(intent)
+            else savedInstanceState.getString(ROUTE)?.let { it to savedInstanceState.getString(ORIGIN).orEmpty() }
         enableEdgeToEdge()
         setContent {
             val model: LedgerModel = viewModel()
