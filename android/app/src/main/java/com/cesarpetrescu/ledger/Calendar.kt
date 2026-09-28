@@ -114,10 +114,17 @@ fun CalendarScreen(model: LedgerModel) {
     val zone = ZoneId.systemDefault()
     Load(model, "calendar:$month", { api ->
         val connection = api.request("GET", "/calendar/connection")
-        val events = if (connection.optBoolean("connected") && connection.optInt("selected_calendars") > 0)
+        // Nextcloud being down must not hide Ledger's own dates; say so instead.
+        var eventsFailed = false
+        val events = if (connection.optBoolean("connected") && connection.optInt("selected_calendars") > 0) try {
             api.request("GET", "/calendar/events?start=${segment(first.atStartOfDay(zone).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME))}&end=${segment(last.atStartOfDay(zone).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME))}").optJSONArray("events") ?: JSONArray()
-        else JSONArray()
-        json("connection" to connection, "events" to events,
+        } catch (e: Exception) {
+            // A lost sign-in and a cancelled load still go the usual way.
+            if (e is kotlinx.coroutines.CancellationException || (e is ApiError && e.status == 401)) throw e
+            eventsFailed = true
+            JSONArray()
+        } else JSONArray()
+        json("connection" to connection, "events" to events, "events_failed" to eventsFailed,
             "due" to JSONArray(allEntries(api, "kind=todo&status=open&due_from=$first&due_before=$last")),
             "waking" to JSONArray(allEntries(api, "wakes_from=$first&wakes_before=$last")),
             "projects" to (api.request("GET", "/projects").optJSONArray("projects") ?: JSONArray()))
@@ -132,6 +139,12 @@ fun CalendarScreen(model: LedgerModel) {
                     TextButton(onClick = { show(month.minusMonths(1)) }, modifier = Modifier.semantics { contentDescription = "Previous month" }) { Text("‹", style = MaterialTheme.typography.headlineSmall) }
                     OutlinedButton(onClick = { show(YearMonth.from(today)) }, contentPadding = PaddingValues(horizontal = 14.dp)) { Text("Today") }
                     TextButton(onClick = { show(month.plusMonths(1)) }, modifier = Modifier.semantics { contentDescription = "Next month" }) { Text("›", style = MaterialTheme.typography.headlineSmall) }
+                }
+            }
+            if (data.optBoolean("events_failed")) item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Couldn't reach your Nextcloud calendar; showing Ledger's own dates.", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    TextButton(onClick = model::refresh) { Text("Retry") }
                 }
             }
             item { MonthGrid(days, month, selected, today, items) { selectedText = it.toString() } }

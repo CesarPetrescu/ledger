@@ -270,11 +270,11 @@ fun Tag(text: String, tone: Tone) {
 
 private fun owner(entry: JSONObject) = entry.optJSONObject("owner") ?: JSONObject()
 
-private fun resolve(model: LedgerModel, entry: JSONObject) =
-    model.undoable("Todo marked done") { it.request("POST", "/entries/${segment(entry.text("id"))}/resolve") }
+private fun resolve(model: LedgerModel, entry: JSONObject, after: () -> Unit = {}) =
+    model.undoable("Todo marked done", after = after) { it.request("POST", "/entries/${segment(entry.text("id"))}/resolve") }
 
-private fun ownerAction(model: LedgerModel, entry: JSONObject, message: String, vararg patch: Pair<String, Any?>) =
-    model.undoable(message) { it.request("POST", "/entries/${segment(entry.text("id"))}/owner", json(*patch)) }
+private fun ownerAction(model: LedgerModel, entry: JSONObject, message: String, vararg patch: Pair<String, Any?>, after: () -> Unit = {}) =
+    model.undoable(message, after = after) { it.request("POST", "/entries/${segment(entry.text("id"))}/owner", json(*patch)) }
 
 /** The two swipe actions a row offers, if any: start-to-end, then end-to-start. */
 private fun swipeActions(model: LedgerModel, entry: JSONObject, view: String): Pair<Pair<String, () -> Unit>?, Pair<String, () -> Unit>?> {
@@ -363,7 +363,8 @@ fun openEntry(model: LedgerModel, entry: JSONObject) = model.go("entry-view/${se
 @Composable
 fun EntryScreen(model: LedgerModel, id: String) =
     Load(model, "entry:$id", { it.request("GET", "/entries/${segment(id)}") }) { entry ->
-        // After an action that settles it (done, handled, answered, snoozed, deleted), return to the list.
+        // Once an action that settles it succeeds (done, handled, answered, snoozed, deleted), return to the list;
+        // a failure keeps the page open to try again.
         EntrySheet(model, entry, entry.rows("repeats"), close = model::back, afterDelete = {})
     }
 
@@ -375,8 +376,6 @@ private fun EntrySheet(model: LedgerModel, entry: JSONObject, repeats: List<JSON
     val meta = entry.optJSONObject("meta")
     val id = entry.text("id")
     val openTodo = entry.text("kind") == "todo" && entry.optJSONObject("resolved_by") == null
-    // Leave first: going back is ignored once the action is running.
-    val act: (() -> Unit) -> Unit = { action -> close(); action() }
     // imePadding keeps the reply box and its Send button above the keyboard on small phones.
     Column(Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).navigationBarsPadding().padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("${entry.text("project_name")} · ${label(entry.text("kind"))} · ${writerName(entry.text("source"))} · ${displayTime(entry.text("created_at"))}",
@@ -385,23 +384,23 @@ private fun EntrySheet(model: LedgerModel, entry: JSONObject, repeats: List<JSON
         val labels = focusLabels(entry)
         if (labels.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) { labels.forEach { (t, tone) -> Tag(t, tone) } }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (openTodo) Button(onClick = { act { resolve(model, entry) } }, enabled = !model.busy) { Text("Mark done") }
-            entry.optJSONObject("resolved_by")?.let { OutlinedButton(onClick = { act { model.undoable("Todo reopened") { it.request("POST", "/entries/${segment(id)}/reopen") } } }, enabled = !model.busy) { Text("Reopen") } }
-            if (asksYou(entry)) Button(onClick = { act { ownerAction(model, entry, "Marked handled", "handled" to true) } }, enabled = !model.busy) { Text("Handled") }
-            if (openTodo || asksYou(entry)) OutlinedButton(onClick = { act { ownerAction(model, entry, "Snoozed until tomorrow", "snooze_days" to 1) } }, enabled = !model.busy) { Text("Snooze") }
+            if (openTodo) Button(onClick = { resolve(model, entry, after = close) }, enabled = !model.busy) { Text("Mark done") }
+            entry.optJSONObject("resolved_by")?.let { OutlinedButton(onClick = { model.undoable("Todo reopened") { it.request("POST", "/entries/${segment(id)}/reopen") } }, enabled = !model.busy) { Text("Reopen") } }
+            if (asksYou(entry)) Button(onClick = { ownerAction(model, entry, "Marked handled", "handled" to true, after = close) }, enabled = !model.busy) { Text("Handled") }
+            if (openTodo || asksYou(entry)) OutlinedButton(onClick = { ownerAction(model, entry, "Snoozed until tomorrow", "snooze_days" to 1, after = close) }, enabled = !model.busy) { Text("Snooze") }
             if (meta?.text("link")?.isNotBlank() == true) {
                 val read = owner(entry).optBoolean("read")
                 val starred = owner(entry).optBoolean("starred")
                 // Only a link that actually opened counts as read.
                 OutlinedButton(onClick = { if (openBrowser(context, meta.text("link"), model) && !read) ownerAction(model, entry, "Marked read", "read" to true) }) { Text("Open link") }
-                OutlinedButton(onClick = { act { ownerAction(model, entry, if (read) "Marked unread" else "Marked read", "read" to !read) } }, enabled = !model.busy) { Text(if (read) "Mark unread" else "Mark read") }
-                OutlinedButton(onClick = { act { ownerAction(model, entry, if (starred) "Unstarred" else "Starred", "starred" to !starred) } }, enabled = !model.busy) { Text(if (starred) "Unstar" else "Star") }
+                OutlinedButton(onClick = { ownerAction(model, entry, if (read) "Marked unread" else "Marked read", "read" to !read, after = if (read) ({}) else close) }, enabled = !model.busy) { Text(if (read) "Mark unread" else "Mark read") }
+                OutlinedButton(onClick = { ownerAction(model, entry, if (starred) "Unstarred" else "Starred", "starred" to !starred) }, enabled = !model.busy) { Text(if (starred) "Unstar" else "Star") }
             }
-            if (openTodo && meta?.text("due")?.isNotBlank() == true) OutlinedButton(onClick = { act { addToCalendar(model, entry) } }, enabled = !model.busy) { Text("Add to calendar") }
+            if (openTodo && meta?.text("due")?.isNotBlank() == true) OutlinedButton(onClick = { addToCalendar(model, entry) }, enabled = !model.busy) { Text("Add to calendar") }
             if (meta != null && meta.text("title").isNotBlank() && meta.text("origin") == "model") LabelEditor(model, entry, close)
             TextButton(onClick = { close(); model.go(projectRoute(entry.text("slug"))) }) { Text("Open project") }
             ConfirmButton("Delete", "Move this entry to Trash? You can undo it or restore it from Trash for 30 days.", !model.busy) {
-                act { model.undoable("Entry moved to Trash", after = afterDelete) { it.request("DELETE", "/entries/${segment(id)}") } }
+                model.undoable("Entry moved to Trash", after = { afterDelete(); close() }) { it.request("DELETE", "/entries/${segment(id)}") }
             }
         }
         whyHere(entry).takeIf { it.isNotBlank() }?.let { Text("Why it needs you: $it", style = MaterialTheme.typography.bodyMedium) }
