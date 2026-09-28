@@ -27,7 +27,13 @@ func (db *DB) AppendEntryOnce(ctx context.Context, e NewEntry, requestID string)
 	if !requestIDPattern.MatchString(requestID) {
 		return Entry{}, errors.New("idempotency_key must be 8 to 80 letters, digits, underscores or hyphens")
 	}
-	payload, _ := json.Marshal([]any{slug, kind, body, source, e.ReplyTo, e.Context})
+	// A plain entry keeps the original receipt format, so retries from before
+	// replies existed still match their receipts.
+	fields := []any{slug, kind, body, source}
+	if e.ReplyTo != 0 || e.Context != "" {
+		fields = append(fields, e.ReplyTo, e.Context)
+	}
+	payload, _ := json.Marshal(fields)
 	hash := sha256.Sum256(payload)
 	tx, err := db.Pool.Begin(ctx)
 	if err != nil {

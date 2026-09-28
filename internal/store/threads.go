@@ -68,7 +68,6 @@ func (db *DB) Append(ctx context.Context, e NewEntry) (Entry, int64, error) {
 
 func insertEntry(ctx context.Context, tx pgx.Tx, e NewEntry) (Entry, int64, error) {
 	var root *int64
-	var noRoot bool
 	// The entry answered directly: a follow-up question can itself ask the owner.
 	var asked int64
 	var askedTitle string
@@ -87,12 +86,6 @@ func insertEntry(ctx context.Context, tx pgx.Tx, e NewEntry) (Entry, int64, erro
 		if slug != e.Slug {
 			return Entry{}, 0, ErrReplyElsewhere
 		}
-		var present bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM entry WHERE id=$1)`, id).Scan(&present); err != nil {
-			return Entry{}, 0, err
-		}
-		// With the root in Trash there is nothing to bring back yet.
-		noRoot = !present
 		root = &id
 		// The owner's answer settles the open question it answers: the entry
 		// replied to if it asks one, else the thread's root.
@@ -120,9 +113,7 @@ RETURNING id,slug,kind,body,source,client_id,created_at,reply_to,context`, e.Slu
 		return entry, 0, nil
 	}
 	if e.Source != OwnerSource {
-		if noRoot {
-			return entry, 0, nil
-		}
+		// A root in Trash has no row here; the follow-up still comes back.
 		// An agent answered: the thread, and the follow-up it answers, need the owner again, snoozed or not.
 		_, err := tx.Exec(ctx, `UPDATE entry_owner_state SET handled_at=NULL,snoozed_until=NULL,updated_at=now() WHERE entry_id IN ($1,$2) AND (handled_at IS NOT NULL OR snoozed_until IS NOT NULL)`, *root, e.ReplyTo)
 		return entry, 0, err

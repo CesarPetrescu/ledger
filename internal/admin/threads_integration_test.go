@@ -3,6 +3,8 @@
 package admin
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -265,5 +267,51 @@ func TestTrashKeepsLabelHistoryUntilPurgedAndRestoresOlderPayloads(t *testing.T)
 	}
 	if edits(purged) != 0 {
 		t.Fatal("label history outlived the entry")
+	}
+}
+
+func TestAgentAnswerReopensAFollowUpUnderATrashedRoot(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	root, _, _ := db.Append(ctx, store.NewEntry{Slug: "atlas", Kind: "note", Body: "Root", Source: "codex", ClientID: "c"})
+	child, _, _ := db.Append(ctx, store.NewEntry{Slug: "atlas", Kind: "note", Body: "Follow-up", Source: "codex", ClientID: "c", ReplyTo: root.ID})
+	if err := db.SaveEntryMeta(ctx, child.ID, store.EntryMeta{Title: "Follow-up", Ask: "Which one?"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := db.SetOwnerState(ctx, child.ID, store.OwnerPatch{Handled: ptr(true)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := db.TrashEntry(ctx, root.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := db.Append(ctx, store.NewEntry{Slug: "atlas", Kind: "note", Body: "Answer", Source: "codex", ClientID: "c", ReplyTo: child.ID}); err != nil {
+		t.Fatal(err)
+	}
+	found, err := db.ListEntries(ctx, store.EntryFilter{ID: child.ID})
+	if err != nil || len(found) != 1 || found[0].Owner.Handled {
+		t.Fatalf("follow-up = %+v %v", found, err)
+	}
+}
+
+func TestPlainRetriesKeepTheirReceipts(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := db.AppendEntryOnce(ctx, store.NewEntry{Slug: "atlas", Kind: "note", Body: "Once", Source: "glass", ClientID: "c"}, "retry-0001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A receipt written before replies existed hashed only these four fields.
+	legacy := sha256.Sum256([]byte(`["atlas","note","Once","glass"]`))
+	var stored []byte
+	if err := db.Pool.QueryRow(ctx, `SELECT payload_hash FROM entry_write_receipt WHERE request_id='retry-0001'`).Scan(&stored); err != nil || !bytes.Equal(stored, legacy[:]) {
+		t.Fatalf("receipt hash changed format: %x %v", stored, err)
+	}
+	again, err := db.AppendEntryOnce(ctx, store.NewEntry{Slug: "atlas", Kind: "note", Body: "Once", Source: "glass", ClientID: "c"}, "retry-0001")
+	if err != nil || again.ID != first.ID {
+		t.Fatalf("retry = %+v %v", again, err)
 	}
 }
