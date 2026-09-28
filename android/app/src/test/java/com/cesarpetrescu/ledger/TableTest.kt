@@ -22,6 +22,35 @@ class TableTest {
         assertEquals("claude-code replied", historyLine(event("reply", "claude-code", "Done")))
     }
 
+    @Test fun monthGridStartsOnMondayAndShowsSixWeeks() {
+        val days = monthDays(java.time.YearMonth.of(2026, 9))
+        assertEquals(42, days.size)
+        assertEquals(LocalDate.of(2026, 8, 31), days.first())
+        assertEquals(java.time.DayOfWeek.MONDAY, days.first().dayOfWeek)
+        assertEquals(true, LocalDate.of(2026, 9, 30) in days)
+    }
+
+    @Test fun calendarDaysHoldEventsTodosDeadlinesAndWakeUps() {
+        val utc = java.time.ZoneOffset.UTC
+        val first = LocalDate.of(2026, 9, 28)
+        val last = first.plusDays(7)
+        val trip = JSONObject().put("id", "trip").put("title", "Conference").put("all_day", true).put("start", "2026-09-20").put("end", "2026-09-30")
+        val call = JSONObject().put("id", "call").put("title", "Call").put("all_day", false).put("start", "2026-09-29T09:00:00Z").put("end", "2026-09-29T10:00:00Z")
+        val todo = JSONObject().put("id", "7").put("body", "Invoice").put("project_name", "Atlas").put("meta", JSONObject().put("due", "2026-09-28"))
+        val woken = JSONObject().put("id", "8").put("body", "Later").put("owner", JSONObject().put("snoozed_until", "2026-10-01"))
+        val projects = listOf(JSONObject().put("slug", "atlas").put("name", "Atlas").put("deadline", "2026-10-02"), JSONObject().put("slug", "x").put("name", "X").put("deadline", "daily"))
+        val days = dayItems(listOf(trip, call), listOf(todo), listOf(woken), projects, first, last, today = LocalDate.of(2026, 9, 29), zone = utc)
+        // A trip that began before the view shows on the days it still covers, and not after it ends.
+        assertEquals("Conference", days[first]!!.first { it.kind == "event" }.title)
+        assertEquals(true, days[LocalDate.of(2026, 9, 30)].orEmpty().none { it.title == "Conference" })
+        assertEquals(listOf("All day", "09:00–10:00"), days[LocalDate.of(2026, 9, 29)]!!.map { it.time })
+        assertEquals(true, days[first]!!.first { it.kind == "todo" }.overdue)
+        assertEquals("entry-view/8", days[LocalDate.of(2026, 10, 1)]!!.single().route)
+        assertEquals("Deadline", days[LocalDate.of(2026, 10, 2)]!!.single().time)
+        // The trip twice (28th and 29th), the call, the todo, the wake-up, and the real deadline.
+        assertEquals(6, days.values.sumOf { it.size })
+    }
+
     @Test fun onlyAgentsAskYou() {
         val ask = { source: String -> JSONObject().put("source", source).put("meta", JSONObject().put("ask", "Pick one")) }
         assertEquals(true, asksYou(ask("codex")))
