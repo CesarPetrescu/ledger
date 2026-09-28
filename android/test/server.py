@@ -24,7 +24,9 @@ ACTIONS = []
 REPLIES = []
 DECISION = dict(id='80', slug='atlas', project_name='Atlas', kind='decision', body='Use SQLite for the fixture cache.', source='codex', created_at='2026-09-06T06:00:00Z',
                 owner=dict(OWNER), meta=dict(title='Use SQLite for the fixture cache', tags=['storage'], refs=[], origin='model', details=dict(chosen='SQLite')))
-EVENT = dict(id='event-1', calendar_id='calendar-1', calendar_name='Planning', title='Plan the week', start='2026-09-06T10:00:00Z', end='2026-09-06T11:00:00Z', all_day=False, recurring=False, etag='"v1"')
+# Dated today, so the calendar's opening day shows it whatever day the test runs.
+TODAY = __import__('datetime').date.today().isoformat()
+EVENT = dict(id='event-1', calendar_id='calendar-1', calendar_name='Planning', title='Plan the week', start=f'{TODAY}T10:00:00Z', end=f'{TODAY}T11:00:00Z', all_day=False, recurring=False, etag='"v1"')
 
 def record(kind, label, undo):
     ACTIONS.append(dict(id=str(len(ACTIONS) + 1), kind=kind, label=label, project_slug='atlas', created_at='2026-09-06T13:00:00Z', undoable=True, undo=undo))

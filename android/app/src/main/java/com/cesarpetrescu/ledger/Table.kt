@@ -251,7 +251,7 @@ private fun PagedEntries(model: LedgerModel, pager: Pager, query: String, header
     }
 }
 
-// ---- Rows, swipe actions, and the details sheet ----
+// ---- Rows, swipe actions, and the entry page ----
 
 @Composable
 fun Tag(text: String, tone: Tone) {
@@ -356,25 +356,18 @@ private fun EntryRowContent(entry: JSONObject, view: String, repeats: List<JSONO
     }
 }
 
-/** Remembers which entry's details sheet is open, shared by a screen's rows. */
-class SheetState { var entry by mutableStateOf<JSONObject?>(null); var repeats by mutableStateOf(listOf<JSONObject>()) }
-
-@Composable
-fun EntrySheetHost(model: LedgerModel, sheet: SheetState) {
-    val entry = sheet.entry ?: return
-    ModalBottomSheet(onDismissRequest = { sheet.entry = null }) {
-        EntrySheet(model, entry, sheet.repeats, close = { sheet.entry = null })
-    }
-}
+/** Opens an entry on its own page; Back returns to the list where it was. */
+fun openEntry(model: LedgerModel, entry: JSONObject) = model.go("entry-view/${segment(entry.text("id"))}")
 
 /** One entry on its own screen: search results, related entries, and repeats open here. */
 @Composable
 fun EntryScreen(model: LedgerModel, id: String) =
     Load(model, "entry:$id", { it.request("GET", "/entries/${segment(id)}") }) { entry ->
-        EntrySheet(model, entry, entry.rows("repeats"), close = {}, afterDelete = model::back)
+        // After an action that settles it (done, handled, answered, snoozed, deleted), return to the list.
+        EntrySheet(model, entry, entry.rows("repeats"), close = model::back, afterDelete = {})
     }
 
-/** An entry's details, in a sheet over a list or as the entry screen. */
+/** An entry's details on its own page. */
 @Composable
 private fun EntrySheet(model: LedgerModel, entry: JSONObject, repeats: List<JSONObject>, close: () -> Unit, afterDelete: () -> Unit = {}) {
     val open: (String) -> Unit = { target -> close(); model.go("entry-view/${segment(target)}") }
@@ -382,7 +375,8 @@ private fun EntrySheet(model: LedgerModel, entry: JSONObject, repeats: List<JSON
     val meta = entry.optJSONObject("meta")
     val id = entry.text("id")
     val openTodo = entry.text("kind") == "todo" && entry.optJSONObject("resolved_by") == null
-    val act: (() -> Unit) -> Unit = { action -> action(); close() }
+    // Leave first: going back is ignored once the action is running.
+    val act: (() -> Unit) -> Unit = { action -> close(); action() }
     // imePadding keeps the reply box and its Send button above the keyboard on small phones.
     Column(Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).navigationBarsPadding().padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("${entry.text("project_name")} · ${label(entry.text("kind"))} · ${writerName(entry.text("source"))} · ${displayTime(entry.text("created_at"))}",
@@ -608,7 +602,6 @@ private fun FilterChips(options: List<Pair<String, String>>, selected: String, c
 /** Everything that needs the owner, most urgent first. */
 @Composable
 fun InboxScreen(model: LedgerModel) {
-    val sheet = remember { SheetState() }
     Load(model, "inbox", { it.request("GET", "/inbox") }) { data ->
         val asks = data.rows("needs_you")
         val todos = data.rows("todos")
@@ -627,13 +620,13 @@ fun InboxScreen(model: LedgerModel) {
                 }
                 item { SectionHeader("Needs you · ${asks.size}") }
                 if (asks.isEmpty()) item { Box(Modifier.padding(horizontal = 20.dp)) { Empty("Nothing is waiting on you.") } }
-                items(asks, key = { "a" + it.text("id") }) { e -> EntryItem(model, e, "inbox", headline = e.optJSONObject("meta")?.text("ask")) { entry, r -> sheet.entry = entry; sheet.repeats = r } }
+                items(asks, key = { "a" + it.text("id") }) { e -> EntryItem(model, e, "inbox", headline = e.optJSONObject("meta")?.text("ask")) { entry, _ -> openEntry(model, entry) } }
                 item {
                     val total = data.optInt("todos_total")
                     SectionHeader("Todos · ${if (todos.size < total) "${todos.size} of $total" else "$total"}") { if (total > 0) TextButton(onClick = { model.go("todos") }) { Text("All todos") } }
                 }
                 if (todos.isEmpty()) item { Box(Modifier.padding(horizontal = 20.dp)) { Empty("No open todos. Nice.") } }
-                items(todos, key = { "t" + it.text("id") }) { e -> EntryItem(model, e, "inbox") { entry, r -> sheet.entry = entry; sheet.repeats = r } }
+                items(todos, key = { "t" + it.text("id") }) { e -> EntryItem(model, e, "inbox") { entry, _ -> openEntry(model, entry) } }
                 if (blocked.isNotEmpty()) {
                     item { SectionHeader("Blocked · ${blocked.size}") }
                     items(blocked, key = { "b" + it.text("slug") }) { p -> ProjectLine(model, p, p.text("status_detail").ifBlank { p.text("status_title") }) }
@@ -645,7 +638,6 @@ fun InboxScreen(model: LedgerModel) {
             }
         }
     }
-    EntrySheetHost(model, sheet)
 }
 
 @Composable
@@ -710,7 +702,6 @@ fun ProjectScreen(model: LedgerModel, slug: String, initialTab: String = "activi
     var q by rememberSaveable { mutableStateOf(initialQuery) }
     var showRoutine by rememberSaveable { mutableStateOf(initialQuery.isNotBlank()) }
     var todoState by rememberSaveable { mutableStateOf("open") }
-    val sheet = remember { SheetState() }
     // A search looks everywhere, routine entries included.
     val query = tableQuery(tab, project = slug, q = q, status = todoState, hideRoutine = !showRoutine && q.isBlank())
     val pager = rememberPager(model, query)
@@ -751,12 +742,11 @@ fun ProjectScreen(model: LedgerModel, slug: String, initialTab: String = "activi
                 val folded = foldRepeats(entries).let { heads -> if (tab == "todos") heads.sortedBy { priorityRank(it.entry) } else heads }
                 runsBy(folded) { if (tab == "todos") "" else dayLabel(it.entry.text("created_at")) }.forEach { (day, group) ->
                     if (day.isNotBlank()) item(key = "h:$day:${group.first().entry.text("id")}") { SectionHeader(day) }
-                    items(group, key = { it.entry.text("id") }) { f -> EntryItem(model, f.entry, tab, f.repeats, showProject = false) { e, r -> sheet.entry = e; sheet.repeats = r } }
+                    items(group, key = { it.entry.text("id") }) { f -> EntryItem(model, f.entry, tab, f.repeats, showProject = false) { e, _ -> openEntry(model, e) } }
                 }
             }
         }
     }
-    EntrySheetHost(model, sheet)
 }
 
 private fun priorityRank(entry: JSONObject) = when (entry.optJSONObject("meta")?.text("priority")) { "high" -> 0; "low" -> 2; else -> 1 }
@@ -764,24 +754,21 @@ private fun priorityRank(entry: JSONObject) = when (entry.optJSONObject("meta")?
 /** Open todos across projects, grouped by project and most important first. */
 @Composable
 fun TodosScreen(model: LedgerModel) {
-    val sheet = remember { SheetState() }
     val query = tableQuery("todos", status = "open")
     val pager = rememberPager(model, query)
     PagedEntries(model, pager, query, empty = "No open todos. Nice.") { entries ->
         val heads = foldRepeats(entries).sortedWith(compareBy({ it.entry.text("project_name") }, { it.entry.text("slug") }, { priorityRank(it.entry) }))
         runsBy(heads) { it.entry.text("slug") }.forEach { (slug, group) ->
             item(key = "h:$slug") { SectionHeader(group.first().entry.text("project_name")) }
-            items(group, key = { it.entry.text("id") }) { f -> EntryItem(model, f.entry, "todos", f.repeats, showProject = false) { e, r -> sheet.entry = e; sheet.repeats = r } }
+            items(group, key = { it.entry.text("id") }) { f -> EntryItem(model, f.entry, "todos", f.repeats, showProject = false) { e, _ -> openEntry(model, e) } }
         }
     }
-    EntrySheetHost(model, sheet)
 }
 
 /** Linked news-style entries: headline, why it matters, and read/star triage. */
 @Composable
 fun ReadingScreen(model: LedgerModel) {
     var filter by rememberSaveable { mutableStateOf("unread") }
-    val sheet = remember { SheetState() }
     val query = tableQuery("reading", reading = filter)
     val pager = rememberPager(model, query)
     Column {
@@ -791,10 +778,9 @@ fun ReadingScreen(model: LedgerModel) {
             model.undoable("Marked everything read") { it.request("POST", "/reading/read-all?reading=unread") }
         }, enabled = !model.busy, modifier = Modifier.padding(horizontal = 12.dp)) { Text("Mark all read") }
         PagedEntries(model, pager, query, empty = if (filter == "unread") "Nothing left to read." else "Nothing here yet.") { entries ->
-            items(foldRepeats(entries), key = { it.entry.text("id") }) { f -> EntryItem(model, f.entry, "reading", f.repeats) { e, r -> sheet.entry = e; sheet.repeats = r } }
+            items(foldRepeats(entries), key = { it.entry.text("id") }) { f -> EntryItem(model, f.entry, "reading", f.repeats) { e, _ -> openEntry(model, e) } }
         }
     }
-    EntrySheetHost(model, sheet)
 }
 
 /** A project's name, with its slug when another project shares the name. */
@@ -817,7 +803,6 @@ fun TableScreen(model: LedgerModel, initialSource: String = "") = Load(model, "t
     var typed by rememberSaveable { mutableStateOf("") }
     var q by rememberSaveable { mutableStateOf("") }
     var filtersOpen by rememberSaveable { mutableStateOf(false) }
-    val sheet = remember { SheetState() }
     // A search looks everywhere, routine entries included.
     val query = tableQuery(view, project = project, source = source, tag = tag, status = todoState, q = q, kind = kind, hideRoutine = !showRoutine && q.isBlank())
     val pager = rememberPager(model, query)
@@ -855,11 +840,10 @@ fun TableScreen(model: LedgerModel, initialSource: String = "") = Load(model, "t
         runsBy(folded) { if (view == "todos") it.entry.text("slug") else dayLabel(it.entry.text("created_at")) }.forEach { (key, group) ->
             item(key = "h:$key:${group.first().entry.text("id")}") { SectionHeader(if (view == "todos") projects.firstOrNull { it.text("slug") == key }?.let { projectName(it, projects) } ?: group.first().entry.text("project_name") else key) }
             items(group, key = { it.entry.text("id") }) { f ->
-                EntryItem(model, f.entry, view, f.repeats, showProject = view != "todos" && project.isBlank()) { e, r -> sheet.entry = e; sheet.repeats = r }
+                EntryItem(model, f.entry, view, f.repeats, showProject = view != "todos" && project.isBlank()) { e, _ -> openEntry(model, e) }
             }
         }
     }
-    EntrySheetHost(model, sheet)
 }
 
 @Composable
