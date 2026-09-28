@@ -60,6 +60,11 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.material3)
+    // Markdown in handoffs: a small parser; the app draws the result itself.
+    implementation(libs.commonmark)
+    implementation(libs.commonmark.tables)
+    implementation(libs.commonmark.strikethrough)
+    implementation(libs.commonmark.tasks)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     testImplementation(libs.junit)

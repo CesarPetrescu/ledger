@@ -66,10 +66,11 @@ fun Handoffs(model: LedgerModel) {
 @Composable
 fun HandoffDetail(model: LedgerModel, id: String) {
     var before by rememberSaveable { mutableStateOf("") }
+    val markdown = rememberMarkdownPreview()
     Load(model, "handoff:$id:$before", { it.request("GET", handoffPath(id, before)) }) { data ->
         val h = data.getJSONObject("handoff")
         Page {
-            item { SummaryCard(h.text("title"), h.text("project_name").ifBlank { "General" }, listOf(h.text("description"), h.text("scope")).filter { it.isNotBlank() }.joinToString("\n\n")) }
+            item { MarkdownCard(h.text("title"), h.text("project_name").ifBlank { "General" }, listOf(h.text("description"), h.text("scope")).filter { it.isNotBlank() }.joinToString("\n\n"), markdown.value) }
             item {
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { model.go("message-new/$id") }, enabled = !model.busy) { Text("Add message") }
@@ -77,7 +78,8 @@ fun HandoffDetail(model: LedgerModel, id: String) {
                     DownloadButton(model, "/handoffs/${segment(id)}/export", "handoff-$id.md", "Export", "text/markdown")
                 }
             }
-            items(data.rows("messages"), key = { it.text("id") }) { message -> MessageCard(model, message) }
+            item { MarkdownSwitch(markdown) }
+            items(data.rows("messages"), key = { it.text("id") }) { message -> MessageCard(model, message, markdown.value) }
             item { Row {
                 if (before.isNotBlank()) TextButton(onClick = { before = "" }) { Text("Latest messages") }
                 if (data.text("next_before").isNotBlank()) TextButton(onClick = { before = data.text("next_before") }) { Text("Older messages") }
@@ -87,13 +89,13 @@ fun HandoffDetail(model: LedgerModel, id: String) {
 }
 
 @Composable
-private fun MessageCard(model: LedgerModel, message: JSONObject) {
+private fun MessageCard(model: LedgerModel, message: JSONObject, markdown: Boolean) {
     val id = message.text("id")
     var retarget by remember { mutableStateOf(false) }
     var target by rememberSaveable { mutableStateOf(message.text("target")) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        SummaryCard("${label(message.text("work_state"))} · ${label(message.text("delivery_state"))}",
-            "${displayTime(message.text("created_at"))} · ${message.text("source")}" + if (message.text("target").isNotBlank()) " → ${message.text("target")}" else "", message.text("body"))
+        MarkdownCard("${label(message.text("work_state"))} · ${label(message.text("delivery_state"))}",
+            "${displayTime(message.text("created_at"))} · ${message.text("source")}" + if (message.text("target").isNotBlank()) " → ${message.text("target")}" else "", message.text("body"), markdown)
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             messageActions(message.text("work_state"), message.text("delivery_state")).forEach { action ->
                 OutlinedButton(enabled = !model.busy, onClick = { model.act("${label(action)} applied") { it.request("POST", "/handoff-messages/${segment(id)}/actions", json("action" to action)) } }) { Text(label(action)) }
@@ -119,6 +121,7 @@ fun HandoffEditor(model: LedgerModel, id: String = "") {
 
 @Composable
 private fun HandoffForm(model: LedgerModel, id: String, h: JSONObject) {
+    val markdown = rememberMarkdownPreview()
     var title by rememberSaveable { mutableStateOf(h.text("title")) }
     var project by rememberSaveable { mutableStateOf(h.text("project_slug")) }
     var description by rememberSaveable { mutableStateOf(h.text("description")) }
@@ -134,6 +137,8 @@ private fun HandoffForm(model: LedgerModel, id: String, h: JSONObject) {
         item { Field("Scope", scope, { scope = it }, max = 500) }
         if (id.isBlank()) {
             item { Field("First message", body, { body = it }, multiline = true, max = 100000) }
+            item { MarkdownSwitch(markdown) }
+            if (markdown.value) item { MarkdownPreviewBox(body) }
             item { Field("Target (optional)", target, { target = it }, max = 100) }
             item { DraftSwitch(draft) { draft = it } }
         }
@@ -157,12 +162,15 @@ fun DraftSwitch(draft: Boolean, change: (Boolean) -> Unit) {
 
 @Composable
 fun MessageEditor(model: LedgerModel, id: String) {
+    val markdown = rememberMarkdownPreview()
     var body by rememberSaveable { mutableStateOf("") }
     var target by rememberSaveable { mutableStateOf("") }
     var draft by rememberSaveable { mutableStateOf(true) }
     Page {
         item { Text("Add a message", style = MaterialTheme.typography.headlineSmall) }
         item { Field("Message", body, { body = it }, multiline = true, max = 100000) }
+        item { MarkdownSwitch(markdown) }
+        if (markdown.value) item { MarkdownPreviewBox(body) }
         item { Field("Target (optional)", target, { target = it }, max = 100) }
         item { DraftSwitch(draft) { draft = it } }
         item { Text("Messages are permanent. Add a correction as a new message.", style = MaterialTheme.typography.bodySmall) }
