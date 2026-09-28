@@ -3,8 +3,10 @@ package config
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/cesarpetrescu/ledger/internal/store"
 )
@@ -46,8 +48,26 @@ func Float(name string, fallback float64) float64 {
 	return fallback
 }
 
+// OpenDB waits up to two minutes for the database: after a host reboot Docker
+// restarts every container at once, ignoring compose's start order.
 func OpenDB(ctx context.Context) *store.DB {
-	db, err := store.Open(ctx, Required("LEDGER_DATABASE_URL"))
+	return openDB(ctx, Required("LEDGER_DATABASE_URL"), 2*time.Minute, 2*time.Second)
+}
+
+func openDB(ctx context.Context, dsn string, wait, every time.Duration) *store.DB {
+	deadline := time.Now().Add(wait)
+	// Each attempt ends by the deadline too, so a stalled handshake cannot hang startup.
+	open := func() (*store.DB, error) {
+		attempt, cancel := context.WithDeadline(ctx, deadline)
+		defer cancel()
+		return store.Open(attempt, dsn)
+	}
+	db, err := open()
+	for err != nil && time.Now().Before(deadline) {
+		log.Printf("database not ready, retrying: %v", err)
+		time.Sleep(every)
+		db, err = open()
+	}
 	if err != nil {
 		panic(err)
 	}
