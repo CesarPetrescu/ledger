@@ -134,3 +134,26 @@ describe('calendar views', () => {
     expect(screen.getByText('Todo due')).toBeInTheDocument()
   })
 })
+
+it('shows an event on every day it covers, even when it started before the view', async () => {
+  const day = (offset: number) => {
+    const date = new Date()
+    date.setDate(date.getDate() + offset)
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+  }
+  const trip: CalendarEvent = { ...planning, id: 'trip', title: 'Conference trip', all_day: true, start: day(-40), end: day(2) }
+  mockApi({
+    'GET /admin/api/session': authenticatedSession,
+    'GET /admin/api/calendar/connection': { body: { connected: true, server_url: 'https://cloud.example.com', username: 'alex', selected_calendars: 1 } },
+    'GET /admin/api/calendar/calendars': { body: { calendars } },
+    'GET /admin/api/calendar/events': { body: { events: [trip] } },
+    'GET /admin/api/entries': { body: { entries: [], sources: [], tags: [] } },
+    'GET /admin/api/projects': { body: { projects: [] } },
+  })
+  renderApp('/admin/calendar')
+  const user = userEvent.setup()
+  await user.click(await screen.findByRole('radio', { name: 'Week' }))
+  const today = await screen.findByRole('region', { name: new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'short' }).format(new Date()) })
+  expect(await within(today).findByText('Conference trip')).toBeInTheDocument()
+  expect(within(today).getByText('Continues')).toBeInTheDocument()
+})

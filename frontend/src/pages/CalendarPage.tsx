@@ -303,9 +303,15 @@ function CalendarWorkspace({ connection, onDisconnected }: { connection: Calenda
       const start = event.all_day ? localDate(event.start) : new Date(event.start)
       const end = event.all_day ? localDate(event.end) : new Date(event.end)
       const time = event.all_day ? 'All day' : `${start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}–${end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-      // ponytail: a multi-day event shows on its first day only; spread it across days if long events become common.
-      out.push({ key: `e:${event.id}:${event.start}`, date: event.all_day ? event.start : localDateKey(event.start), time, sort: `${event.all_day ? '0' : '1'}${event.start}`, title: event.title || 'Untitled event',
-        detail: `${event.calendar_name}${event.location ? ` · ${event.location}` : ''}${event.recurring ? ' · Recurring' : ''}`, kind: 'event', color: eventColor(event.calendar_id), open: () => void openEvent(event) })
+      // An event shows on every day it covers, so one that started earlier still shows.
+      const startDay = event.all_day ? event.start : localDateKey(event.start)
+      // All-day ends are exclusive; a timed event ending at midnight does not reach that day.
+      const endDay = event.all_day ? event.end : dateKey(new Date(end.getTime() - 1))
+      const lastDay = event.all_day ? addDays(endDay, -1) : endDay
+      for (let day = startDay < first ? first : startDay; day <= lastDay && day < last; day = addDays(day, 1)) {
+        out.push({ key: `e:${event.id}:${event.start}:${day}`, date: day, time: day === startDay ? time : 'Continues', sort: `${event.all_day ? '0' : '1'}${event.start}`, title: event.title || 'Untitled event',
+          detail: `${event.calendar_name}${event.location ? ` · ${event.location}` : ''}${event.recurring ? ' · Recurring' : ''}`, kind: 'event', color: eventColor(event.calendar_id), open: () => void openEvent(event) })
+      }
     }
     const now = today()
     for (const todo of ledger.data?.due ?? []) {
