@@ -13,6 +13,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -63,7 +64,7 @@ fun rememberNotificationSwitch(model: LedgerModel, changed: (Boolean) -> Unit): 
             else -> {
                 // Already on but blocked in Android: keep what was seen so nothing is lost.
                 if (!Notifier.enabled(context)) Notifier.setEnabled(context, true)
-                changed(true)
+                changed(Notifier.allowed(context))
                 // Permitted, but switched off for Ledger or its channel: that is an Android setting.
                 if (!Notifier.allowed(context)) {
                     model.notice = "Turn on Ledger's notifications in Android settings to see them."
@@ -78,6 +79,11 @@ fun rememberNotificationSwitch(model: LedgerModel, changed: (Boolean) -> Unit): 
 fun NotificationsChoice(model: LedgerModel) {
     val context = LocalContext.current
     var on by remember { mutableStateOf(Notifier.enabled(context) && Notifier.allowed(context)) }
+    // Back from Android's notification settings, show what they now allow.
+    LifecycleResumeEffect(Unit) {
+        on = Notifier.enabled(context) && Notifier.allowed(context)
+        onPauseOrDispose {}
+    }
     val toggle = rememberNotificationSwitch(model) { on = it }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
