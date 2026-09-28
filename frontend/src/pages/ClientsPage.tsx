@@ -47,6 +47,8 @@ export function ClientsPage() {
             <li><span>Admin sessions</span><strong>{overview.data.counts.active_admin_sessions}</strong></li>
           </ul>
         )}
+        {!overview.loading && !overview.data && <StaleNotice message="Couldn't load the counts." onRetry={overview.reload} />}
+        {overview.stale && <StaleNotice message="These counts may be out of date." onRetry={overview.reload} />}
       </header>
       {page.loading && <Loading label="Loading clients…" />}
       {!page.loading && !page.data && <ErrorState message="Couldn't load OAuth clients." onRetry={page.reload} />}

@@ -51,6 +51,12 @@ describe('oauth clients', () => {
     await waitFor(() => expect(calls.filter((call) => call.path === '/admin/api/oauth/clients')).toHaveLength(2))
   })
 
+  it('says so when the counts fail to load, with a retry', async () => {
+    mockApi({ 'GET /admin/api/session': authenticatedSession, 'GET /admin/api/oauth/clients': { body: { clients } }, 'GET /admin/api/overview': { status: 500, body: { error: 'hidden' } } })
+    renderApp('/admin/clients')
+    expect(await screen.findByText("Couldn't load the counts.")).toBeInTheDocument()
+  })
+
   it('shows an empty state when nothing is registered', async () => {
     mockApi({ 'GET /admin/api/session': authenticatedSession, 'GET /admin/api/oauth/clients': { body: { clients: [] } } })
     renderApp('/admin/clients')
