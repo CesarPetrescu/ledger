@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useMemo, useState, type FormEvent, useLayoutEffect, useRef } from 'react'
 import { api, describeError, TIERS, type DeletionPreview, type Project, type ProjectInput, type ProjectSummary } from '../api'
 import { useToast } from '../components/Toast'
 import { ConfirmDialog } from '../components/ConfirmDialog'
@@ -251,6 +251,18 @@ const PROJECT_TABS: { id: ProjectView; label: string; path: string }[] = [
 /** Where the project stands: what needs you, how much is open, who worked on it this week, and its week in a few lines. */
 function ProjectStatus({ slug, summary }: { slug: string; summary: ProjectSummary | undefined }) {
   const [expanded, setExpanded] = useState(false)
+  // Offer "read more" only when the three lines actually cut the text, at any width.
+  const [clipped, setClipped] = useState(false)
+  const digest = useRef<HTMLParagraphElement>(null)
+  useLayoutEffect(() => {
+    const element = digest.current
+    if (!element) return
+    const measure = () => setClipped(element.scrollHeight > element.clientHeight + 1)
+    measure()
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null
+    observer?.observe(element)
+    return () => observer?.disconnect()
+  }, [summary?.digest, summary?.status_title, summary?.status_body])
   if (!summary) return null
   const base = `/projects/${encodeURIComponent(slug)}`
   const blocked = summary.status_state === 'blocked'
@@ -272,8 +284,8 @@ function ProjectStatus({ slug, summary }: { slug: string; summary: ProjectSummar
         <div className="project-week">
           <p className="eyebrow">{summary.digest ? 'This week' : 'Latest status'}</p>
           {/* Until the AI summarises the week, the latest status stands in. */}
-          <p className={expanded ? 'digest' : 'digest clamp'}>{latest}</p>
-          {latest.length > 280 && <button type="button" className="link-button" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>{expanded ? 'Show less' : 'Read the whole week'}</button>}
+          <p ref={digest} className={expanded ? 'digest' : 'digest clamp'}>{latest}</p>
+          {(clipped || expanded) && <button type="button" className="link-button" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>{expanded ? 'Show less' : 'Read the whole week'}</button>}
         </div>
       ) : <p className="muted">No status yet. A weekly summary appears once agents have written here.</p>}
     </section>
