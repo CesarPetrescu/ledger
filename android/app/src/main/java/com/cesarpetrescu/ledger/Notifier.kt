@@ -84,6 +84,8 @@ object Notifier {
         if (!allowed(context)) return 0
         val api = SessionStore(context).read() ?: return 0
         val (inbox, todos) = try { api.request("GET", "/inbox") to openTodos(api) } catch (_: Exception) { return 0 }
+        // Turned off while this was asking the server: record and announce nothing.
+        if (!enabled(context)) return 0
         val prefs = prefs(context)
         // Entry IDs belong to one server: signing in to another starts over.
         val sameServer = prefs.getString("origin", null) == api.origin
