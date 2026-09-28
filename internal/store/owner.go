@@ -44,6 +44,21 @@ func (db *DB) SetOwnerState(ctx context.Context, entryID int64, p OwnerPatch) (O
 	if err := tx.QueryRow(ctx, `SELECT e.slug,COALESCE(NULLIF(m.title,''),left(e.body,120)) FROM entry e LEFT JOIN entry_meta m ON m.entry_id=e.id WHERE e.id=$1 FOR UPDATE OF e`, entryID).Scan(&slug, &title); err != nil {
 		return OwnerState{}, 0, err
 	}
+	s, before, after, err := applyOwnerPatch(ctx, tx, entryID, p)
+	if err != nil {
+		return OwnerState{}, 0, err
+	}
+	actionID, err := recordAction(ctx, tx, "owner", &entryID, slug, ownerLabel(p)+": "+title,
+		map[string]any{"entry_id": entryID, "before": before, "after": after})
+	if err != nil {
+		return OwnerState{}, 0, err
+	}
+	return s, actionID, tx.Commit(ctx)
+}
+
+// applyOwnerPatch writes a triage patch for a locked entry and returns its
+// state before and after, for undo.
+func applyOwnerPatch(ctx context.Context, tx pgx.Tx, entryID int64, p OwnerPatch) (OwnerState, *ownerRow, *ownerRow, error) {
 	snapshot := func() (*ownerRow, error) {
 		var r ownerRow
 		err := tx.QueryRow(ctx, `SELECT read_at,starred,handled_at,to_char(snoozed_until,'YYYY-MM-DD'),updated_at FROM entry_owner_state WHERE entry_id=$1`, entryID).
@@ -55,7 +70,7 @@ func (db *DB) SetOwnerState(ctx context.Context, entryID int64, p OwnerPatch) (O
 	}
 	before, err := snapshot()
 	if err != nil {
-		return OwnerState{}, 0, err
+		return OwnerState{}, nil, nil, err
 	}
 	var s OwnerState
 	if err := tx.QueryRow(ctx, `INSERT INTO entry_owner_state AS o(entry_id,read_at,starred,handled_at,snoozed_until)
@@ -68,18 +83,62 @@ ON CONFLICT(entry_id) DO UPDATE SET
  updated_at=now()
 RETURNING o.read_at IS NOT NULL,o.starred,o.handled_at IS NOT NULL,COALESCE(to_char(o.snoozed_until,'YYYY-MM-DD'),'')`,
 		entryID, p.Read, p.Starred, p.Handled, p.SnoozeDays).Scan(&s.Read, &s.Starred, &s.Handled, &s.SnoozedUntil); err != nil {
-		return OwnerState{}, 0, err
+		return OwnerState{}, nil, nil, err
 	}
 	after, err := snapshot()
-	if err != nil {
-		return OwnerState{}, 0, err
+	return s, before, after, err
+}
+
+// MarkAllRead marks every unread reading entry that matches f as read, as
+// one action that undoes together. It reports how many it marked; with none
+// it writes nothing and records no action.
+// ponytail: one statement per entry in one transaction; batch it if backlogs reach thousands.
+func (db *DB) MarkAllRead(ctx context.Context, f EntryFilter) (int, int64, error) {
+	f.Reading, f.Limit, f.Before = "unread", 0, nil
+	unread, err := db.ListEntries(ctx, f)
+	if err != nil || len(unread) == 0 {
+		return 0, 0, err
 	}
-	actionID, err := recordAction(ctx, tx, "owner", &entryID, slug, ownerLabel(p)+": "+title,
-		map[string]any{"entry_id": entryID, "before": before, "after": after})
-	if err != nil {
-		return OwnerState{}, 0, err
+	ids := make([]int64, len(unread))
+	for i, e := range unread {
+		ids[i] = e.ID
 	}
-	return s, actionID, tx.Commit(ctx)
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer tx.Rollback(ctx)
+	// Lock the entries in one order, as other writers do; skip any read meanwhile.
+	locked, err := tx.Query(ctx, `SELECT e.id FROM entry e LEFT JOIN entry_owner_state o ON o.entry_id=e.id
+WHERE e.id=ANY($1) AND o.read_at IS NULL ORDER BY e.id FOR UPDATE OF e`, ids)
+	if err != nil {
+		return 0, 0, err
+	}
+	present, err := pgx.CollectRows(locked, pgx.RowTo[int64])
+	if err != nil {
+		return 0, 0, err
+	}
+	read := true
+	items := make([]map[string]any, 0, len(present))
+	for _, id := range present {
+		_, before, after, err := applyOwnerPatch(ctx, tx, id, OwnerPatch{Read: &read})
+		if err != nil {
+			return 0, 0, err
+		}
+		items = append(items, map[string]any{"entry_id": id, "before": before, "after": after})
+	}
+	if len(items) == 0 {
+		return 0, 0, nil
+	}
+	label := "Marked 1 read"
+	if len(items) != 1 {
+		label = fmt.Sprintf("Marked %d read", len(items))
+	}
+	actionID, err := recordAction(ctx, tx, "read_all", nil, "", label, map[string]any{"entries": items})
+	if err != nil {
+		return 0, 0, err
+	}
+	return len(items), actionID, tx.Commit(ctx)
 }
 
 // ownerLabel names a triage patch for the recent-actions list.

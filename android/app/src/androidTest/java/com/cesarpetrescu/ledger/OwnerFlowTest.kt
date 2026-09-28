@@ -74,6 +74,15 @@ class OwnerFlowTest {
         }
         ui.onNodeWithText(text).assertIsDisplayed()
     }
+    /** Runs network work off the main thread, as the system job does. */
+    private fun <T> onBackground(block: () -> T): T {
+        var result: Result<T>? = null
+        val thread = Thread { result = runCatching(block) }
+        thread.start()
+        thread.join(30_000)
+        return result!!.getOrThrow()
+    }
+
     private fun recreate(activity: ActivityScenario<MainActivity>) {
         ui.waitForIdle()
         activity.recreate()
@@ -133,6 +142,24 @@ class OwnerFlowTest {
             tap("Sign in")
             awaitText("Confirm the fixture pricing")
             recreate(activity)
+            awaitText("Confirm the fixture pricing")
+            // Notifications: the first check only learns what is there; a new ask is announced once.
+            if (android.os.Build.VERSION.SDK_INT >= 33) InstrumentationRegistry.getInstrumentation().uiAutomation
+                .grantRuntimePermission(context.packageName, android.Manifest.permission.POST_NOTIFICATIONS)
+            Notifier.setEnabled(context, true, schedule = false)
+            assertEquals(0, onBackground { Notifier.check(context) })
+            context.getSharedPreferences("notify", Context.MODE_PRIVATE).edit().remove("seen").commit()
+            assertEquals(1, onBackground { Notifier.check(context) })
+            val posted = context.getSystemService(android.app.NotificationManager::class.java).activeNotifications
+            assertTrue(posted.any { it.notification.extras.getString(android.app.Notification.EXTRA_TITLE) == "claude-code asks you" })
+            assertEquals(0, onBackground { Notifier.check(context) })
+            Notifier.setEnabled(context, false)
+            context.getSystemService(android.app.NotificationManager::class.java).cancelAll()
+            // Tapping it opens the entry.
+            activity.onActivity { it.startActivity(android.content.Intent(it, MainActivity::class.java).putExtra(MainActivity.ROUTE, "entry-view/70")
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)) }
+            awaitText("Pricing claims unverified")
+            ui.onNodeWithContentDescription("Back").performClick()
             awaitText("Confirm the fixture pricing")
             tap("Projects")
             tap("Atlas")

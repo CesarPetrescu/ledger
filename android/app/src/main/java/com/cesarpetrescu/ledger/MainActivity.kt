@@ -39,8 +39,20 @@ import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 
 class MainActivity : ComponentActivity() {
+    companion object {
+        /** A screen to open, from a notification. */
+        const val ROUTE = "route"
+    }
+    private val opened = mutableStateOf<String?>(null)
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        opened.value = intent.getStringExtra(ROUTE)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) opened.value = intent?.getStringExtra(ROUTE)
         enableEdgeToEdge()
         setContent {
             val model: LedgerModel = viewModel()
@@ -50,7 +62,7 @@ class MainActivity : ComponentActivity() {
                 enableEdgeToEdge(bars, bars)
                 onDispose {}
             }
-            MaterialTheme(colorScheme = if (dark) DarkColors else LightColors) { LedgerApp(model) }
+            MaterialTheme(colorScheme = if (dark) DarkColors else LightColors) { LedgerApp(model, opened) }
         }
     }
 }
@@ -75,7 +87,16 @@ fun isDark() = MaterialTheme.colorScheme.background.luminance() < 0.5f
 val LocalEditingEnabled = compositionLocalOf { true }
 
 @Composable
-fun LedgerApp(model: LedgerModel = viewModel()) {
+fun LedgerApp(model: LedgerModel = viewModel(), opened: MutableState<String?>? = null) {
+    // A notification opens its entry (or the inbox) once the session is ready.
+    val requested = opened?.value
+    LaunchedEffect(requested, model.api, model.starting) {
+        if (requested == null || model.starting || model.api == null) return@LaunchedEffect
+        opened.value = null
+        if (!Regex("inbox|entry-view/[0-9]+").matches(requested)) return@LaunchedEffect
+        model.tab("inbox")
+        if (requested != "inbox") model.go(requested)
+    }
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(model.notice, model.undoId) {
         val message = model.notice ?: return@LaunchedEffect

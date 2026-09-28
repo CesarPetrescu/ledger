@@ -268,6 +268,21 @@ describe('table', () => {
     expect(last?.get('hide_routine')).toBeNull()
   })
 
+  it('marks everything unread in the reading list read at once, with one undo', async () => {
+    const news: TableEntry = { ...noteEntry, owner, id: '90', created_at: now, project_name: 'AI news', slug: 'ai-news',
+      meta: { title: 'Ollama v0.40 ships MLX by default', tags: [], refs: [], origin: 'model', link: 'https://example.com/release' } }
+    const { calls } = mockApi({
+      ...base,
+      'GET /admin/api/entries': { body: { entries: [news], sources: [], tags: [] } },
+      'POST /admin/api/reading/read-all': { body: { count: 1, action_id: '950' } },
+    })
+    renderApp('/admin/table?view=reading')
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Mark all read' }))
+    expect(await screen.findByText('Marked 1 read.')).toBeInTheDocument()
+    const post = calls.find((call) => call.path === '/admin/api/reading/read-all')!
+    expect(post.url.searchParams.get('reading')).toBe('unread')
+  })
+
   it('reads the news feed: why it matters, source, external link, read and star', async () => {
     const news: TableEntry = { ...noteEntry, owner, id: '90', created_at: now, project_name: 'AI news', slug: 'ai-news',
       meta: { title: 'Ollama v0.40 ships MLX by default', tags: [], refs: [], origin: 'model', why: 'Macs get a faster default engine', source: 'GitHub', link: 'https://example.com/release' } }

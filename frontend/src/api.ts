@@ -524,6 +524,8 @@ export const api = {
   inbox: () => request<InboxResponse>('GET', '/inbox'),
   setOwner: (id: string, patch: OwnerPatch) => request<OwnerState & Undoable>('POST', `/entries/${encodeURIComponent(id)}/owner`, patch),
   setLabels: (id: string, set: LabelPatch, reset: LabelField[] = []) => request<{ saved: true }>('POST', `/entries/${encodeURIComponent(id)}/labels`, { set, reset }),
+  /** Marks every unread reading entry matching the filter as read, as one undoable action. */
+  markAllRead: (filter: EntryFilter) => request<{ count: number; action_id?: string }>('POST', `/reading/read-all${entryQuery(filter)}`),
   deleteEntry: (id: string) => request<Undoable & { trash_id: string }>('DELETE', `/entries/${encodeURIComponent(id)}`),
   deletionPreview: (slug: string) => request<DeletionPreview>('GET', `/projects/${encodeURIComponent(slug)}/deletion`),
   deleteProject: (slug: string) => request<Undoable & { trash_id: string }>('DELETE', `/projects/${encodeURIComponent(slug)}`, { confirm: slug }),

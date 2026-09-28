@@ -1675,3 +1675,66 @@ func TestLabellingStatusSaysWhyItIsPaused(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+func TestMarkAllReadIsOneUndoableAction(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
+	_, s := login(t, server, "correct horse", "")
+	for _, p := range []store.Project{{Slug: "atlas", Name: "Atlas", Tier: "focus"}, {Slug: "beacon", Name: "Beacon", Tier: "park"}} {
+		if _, err := db.UpsertProject(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	news := func(slug, title string) int64 {
+		e, _ := db.AppendEntry(ctx, slug, "note", title, "claude-code", "c")
+		if err := db.SaveEntryMeta(ctx, e.ID, store.EntryMeta{Title: title, Link: "https://example.com/" + strconv.FormatInt(e.ID, 10)}); err != nil {
+			t.Fatal(err)
+		}
+		return e.ID
+	}
+	first, second, other := news("atlas", "One"), news("atlas", "Two"), news("beacon", "Three")
+	already := news("atlas", "Already read")
+	if _, _, err := db.SetOwnerState(ctx, already, store.OwnerPatch{Read: ptr(true)}); err != nil {
+		t.Fatal(err)
+	}
+	readCount := func() int {
+		var n int
+		_ = db.Pool.QueryRow(ctx, `SELECT count(*) FROM entry_owner_state WHERE read_at IS NOT NULL`).Scan(&n)
+		return n
+	}
+	res := request(t, server, http.MethodPost, "/admin/api/reading/read-all?project=atlas", "", authed(s, true))
+	var out struct {
+		Count    int    `json:"count"`
+		ActionID string `json:"action_id"`
+	}
+	if res.Code != http.StatusOK || json.Unmarshal(res.Body.Bytes(), &out) != nil || out.Count != 2 || out.ActionID == "" || readCount() != 3 {
+		t.Fatalf("read all = %d %s read=%d", res.Code, res.Body.String(), readCount())
+	}
+	var label string
+	if err := db.Pool.QueryRow(ctx, `SELECT label FROM owner_action WHERE id=$1`, out.ActionID).Scan(&label); err != nil || label != "Marked 2 read" {
+		t.Fatalf("label = %q %v", label, err)
+	}
+	// Nothing left to mark: no write and no action.
+	if res := request(t, server, http.MethodPost, "/admin/api/reading/read-all?project=atlas", "", authed(s, true)); res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"count":0`) || strings.Contains(res.Body.String(), "action_id") {
+		t.Fatalf("second read all = %d %s", res.Code, res.Body.String())
+	}
+	// One of them changes afterwards: undo restores the other and leaves it.
+	if _, _, err := db.SetOwnerState(ctx, second, store.OwnerPatch{Starred: ptr(true)}); err != nil {
+		t.Fatal(err)
+	}
+	if res := request(t, server, http.MethodPost, "/admin/api/actions/"+out.ActionID+"/undo", "", authed(s, true)); res.Code != http.StatusOK {
+		t.Fatalf("undo = %d %s", res.Code, res.Body.String())
+	}
+	var firstRead, secondRead, otherRead bool
+	if err := db.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM entry_owner_state WHERE entry_id=$1 AND read_at IS NOT NULL),
+ EXISTS (SELECT 1 FROM entry_owner_state WHERE entry_id=$2 AND read_at IS NOT NULL),
+ EXISTS (SELECT 1 FROM entry_owner_state WHERE entry_id=$3 AND read_at IS NOT NULL)`, first, second, other).Scan(&firstRead, &secondRead, &otherRead); err != nil {
+		t.Fatal(err)
+	}
+	if firstRead || !secondRead || otherRead {
+		t.Fatalf("after undo: first=%v second=%v other=%v", firstRead, secondRead, otherRead)
+	}
+	if res := request(t, server, http.MethodPost, "/admin/api/actions/"+out.ActionID+"/undo", "", authed(s, true)); res.Code != http.StatusConflict {
+		t.Fatalf("second undo = %d %s", res.Code, res.Body.String())
+	}
+}
