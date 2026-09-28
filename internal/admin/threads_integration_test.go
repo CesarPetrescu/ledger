@@ -78,7 +78,7 @@ func TestRepliesThreadAndHistory(t *testing.T) {
 
 	// Agents read the thread through get_entry.
 	view, err := db.GetEntry(ctx, askID)
-	if err != nil || view.Context != "repo ledger, branch main" || len(view.Replies) != 2 || view.Replies[0].Body != "10% is right" || view.Replies[1].Source != "codex" {
+	if err != nil || view.Context != "repo ledger, branch main" || view.RepliesTotal != 2 || len(view.Replies) != 2 || view.Replies[0].Body != "10% is right" || view.Replies[1].Source != "codex" {
 		t.Fatalf("view = %+v %v", view, err)
 	}
 
@@ -108,10 +108,50 @@ func TestRepliesThreadAndHistory(t *testing.T) {
 	if !strings.HasPrefix(joined, "created/") {
 		t.Errorf("history not oldest first: %s", joined)
 	}
+	// A long history keeps its newest events and says older ones were left out.
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO entry_label_edit(entry_id,fields,created_at) SELECT $1,'{old}',now()-interval '1 year'+g*interval '1 second' FROM generate_series(1,250) g`, ask.ID); err != nil {
+		t.Fatal(err)
+	}
+	res = request(t, server, http.MethodGet, "/admin/api/entries/"+askID+"/history", "", authed(s, false))
+	var long struct {
+		History   []struct{ Kind, Text string } `json:"history"`
+		Truncated bool                          `json:"truncated"`
+	}
+	if json.Unmarshal(res.Body.Bytes(), &long) != nil || !long.Truncated || len(long.History) != 200 || long.History[len(long.History)-1].Kind != "labels" || long.History[len(long.History)-1].Text != "title" {
+		t.Fatalf("long history: truncated=%v len=%d last=%+v", long.Truncated, len(long.History), long.History[len(long.History)-1])
+	}
+
+	// With the root in Trash, a reply to one of its replies still joins the root.
+	if _, _, err := db.TrashEntry(ctx, ask.ID); err != nil {
+		t.Fatal(err)
+	}
+	late, _, err := db.Append(ctx, store.NewEntry{Slug: "atlas", Kind: "note", Body: "While it was away", Source: "codex", ClientID: "c", ReplyTo: replyID})
+	if err != nil || late.ReplyTo == nil || *late.ReplyTo != ask.ID {
+		t.Fatalf("reply under trashed root = %+v %v", late, err)
+	}
+
 	if res := request(t, server, http.MethodGet, "/admin/api/entries/999999/history", "", authed(s, false)); res.Code != http.StatusNotFound {
 		t.Fatalf("missing history = %d", res.Code)
 	}
 	if res := request(t, server, http.MethodPost, "/admin/api/entries/"+askID+"/replies", `{"body":"   "}`, authed(s, true)); res.Code != http.StatusBadRequest {
 		t.Fatalf("empty reply = %d", res.Code)
+	}
+}
+
+func TestGetEntryListsTheNewestReplies(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	root, _, err := db.Append(ctx, store.NewEntry{Slug: "atlas", Kind: "note", Body: "Root", Source: "codex", ClientID: "c"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO entry(slug,kind,body,source,client_id,reply_to,created_at) SELECT 'atlas','note','reply '||g,'codex','c',$1,now()+g*interval '1 second' FROM generate_series(1,105) g`, root.ID); err != nil {
+		t.Fatal(err)
+	}
+	view, err := db.GetEntry(ctx, strconv.FormatInt(root.ID, 10))
+	if err != nil || view.RepliesTotal != 105 || len(view.Replies) != 100 || view.Replies[0].Body != "reply 6" || view.Replies[99].Body != "reply 105" {
+		t.Fatalf("replies total=%d len=%d first=%q last=%q err=%v", view.RepliesTotal, len(view.Replies), view.Replies[0].Body, view.Replies[len(view.Replies)-1].Body, err)
 	}
 }

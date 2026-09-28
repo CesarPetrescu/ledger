@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -68,11 +69,13 @@ func (db *DB) Append(ctx context.Context, e NewEntry) (Entry, int64, error) {
 func insertEntry(ctx context.Context, tx pgx.Tx, e NewEntry) (Entry, int64, error) {
 	var root *int64
 	var rootTitle string
-	var openAsk bool
+	var openAsk, noRoot bool
 	if e.ReplyTo > 0 {
 		var id int64
 		var slug string
-		err := tx.QueryRow(ctx, `SELECT COALESCE(r.id,e.id),COALESCE(r.slug,e.slug) FROM entry e LEFT JOIN entry r ON r.id=e.reply_to WHERE e.id=$1`, e.ReplyTo).Scan(&id, &slug)
+		// A reply's own root stays the root even while that root is in Trash, so
+		// the thread is whole again when it is restored. Replies share a project.
+		err := tx.QueryRow(ctx, `SELECT COALESCE(reply_to,id),slug FROM entry WHERE id=$1`, e.ReplyTo).Scan(&id, &slug)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Entry{}, 0, ErrReplyNotFound
 		}
@@ -82,11 +85,16 @@ func insertEntry(ctx context.Context, tx pgx.Tx, e NewEntry) (Entry, int64, erro
 		if slug != e.Slug {
 			return Entry{}, 0, ErrReplyElsewhere
 		}
-		if err := tx.QueryRow(ctx, `SELECT COALESCE(NULLIF(m.title,''),left(e.body,120)),COALESCE(m.ask,'')<>'' AND o.handled_at IS NULL
-FROM entry e LEFT JOIN entry_meta m ON m.entry_id=e.id LEFT JOIN entry_owner_state o ON o.entry_id=e.id WHERE e.id=$1 FOR UPDATE OF e`, id).Scan(&rootTitle, &openAsk); err != nil {
+		err = tx.QueryRow(ctx, `SELECT COALESCE(NULLIF(m.title,''),left(e.body,120)),COALESCE(m.ask,'')<>'' AND o.handled_at IS NULL
+FROM entry e LEFT JOIN entry_meta m ON m.entry_id=e.id LEFT JOIN entry_owner_state o ON o.entry_id=e.id WHERE e.id=$1 FOR UPDATE OF e`, id).Scan(&rootTitle, &openAsk)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return Entry{}, 0, err
 		}
 		root = &id
+		if errors.Is(err, pgx.ErrNoRows) {
+			// The root is in Trash: nothing to mark handled or bring back yet.
+			noRoot = true
+		}
 	}
 	var entry Entry
 	if err := tx.QueryRow(ctx, `INSERT INTO entry(slug,kind,body,source,client_id,reply_to,context) VALUES($1,$2,$3,$4,$5,$6,$7)
@@ -94,7 +102,7 @@ RETURNING id,slug,kind,body,source,client_id,created_at,reply_to,context`, e.Slu
 		Scan(&entry.ID, &entry.Slug, &entry.Kind, &entry.Body, &entry.Source, &entry.ClientID, &entry.CreatedAt, &entry.ReplyTo, &entry.Context); err != nil {
 		return Entry{}, 0, err
 	}
-	if root == nil {
+	if root == nil || noRoot {
 		return entry, 0, nil
 	}
 	if e.Source != OwnerSource {
@@ -125,11 +133,12 @@ type HistoryEvent struct {
 	Undone  bool      `json:"undone,omitempty"`
 }
 
-// maxHistory bounds an entry's history; the oldest events are kept.
+// maxHistory bounds an entry's history; the newest events are kept.
 const maxHistory = 200
 
-// EntryHistory lists what happened to an entry, oldest first.
-func (db *DB) EntryHistory(ctx context.Context, id int64) ([]HistoryEvent, error) {
+// EntryHistory lists what happened to an entry, oldest first; truncated says
+// older events were left out.
+func (db *DB) EntryHistory(ctx context.Context, id int64) (events []HistoryEvent, truncated bool, err error) {
 	rows, err := db.Pool.Query(ctx, `SELECT * FROM (
  SELECT e.created_at at,'created' kind,e.source actor,COALESCE(c.name,'') text,NULL::bigint entry_id,false undone
    FROM entry e LEFT JOIN oauth_client c ON c.client_id=e.client_id WHERE e.id=$1
@@ -143,16 +152,16 @@ func (db *DB) EntryHistory(ctx context.Context, id int64) ([]HistoryEvent, error
  UNION ALL SELECT l.created_at,'labels',$2,array_to_string(l.fields,', '),NULL,false
    FROM entry_label_edit l WHERE l.entry_id=$1
  UNION ALL SELECT r.created_at,'reply',r.source,r.body,r.id,false FROM entry r WHERE r.reply_to=$1
-) h ORDER BY at,kind LIMIT $3`, id, OwnerSource, maxHistory)
+) h ORDER BY at DESC,kind DESC LIMIT $3`, id, OwnerSource, maxHistory+1)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer rows.Close()
 	out := []HistoryEvent{}
 	for rows.Next() {
 		var h HistoryEvent
 		if err := rows.Scan(&h.At, &h.Kind, &h.Actor, &h.Text, &h.EntryID, &h.Undone); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		// Action labels end with the entry's own title; the history is already about it.
 		if h.Kind == "action" {
@@ -160,5 +169,11 @@ func (db *DB) EntryHistory(ctx context.Context, id int64) ([]HistoryEvent, error
 		}
 		out = append(out, h)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	truncated = len(out) > maxHistory
+	out = out[:min(len(out), maxHistory)]
+	slices.Reverse(out)
+	return out, truncated, nil
 }

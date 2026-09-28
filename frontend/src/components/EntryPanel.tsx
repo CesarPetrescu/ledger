@@ -297,8 +297,9 @@ function History({ entry }: { entry: TableEntry }) {
         <ErrorState message="Couldn't load the history." onRetry={history.reload} />
       ) : (
         <ol className="timeline">
+          {history.data.truncated && <li className="timeline-more muted small">Older history is not shown; this lists the newest 200 events.</li>}
           {/* Replying already shows as the reply; its "marked handled" twin would repeat it. */}
-          {history.data.filter((event) => !(event.kind === 'action' && event.text.startsWith('Replied'))).map((event, index) => (
+          {history.data.history.filter((event) => !(event.kind === 'action' && event.text.startsWith('Replied'))).map((event, index) => (
             <li key={index} data-kind={event.kind} data-owner={event.actor === OWNER_SOURCE ? 'true' : undefined}>
               <p className="timeline-line">{describe(event)} <Timestamp iso={event.at} /></p>
               {event.kind === 'reply' && <p className="timeline-message">{event.text}</p>}

@@ -83,7 +83,12 @@ type EntryView struct {
 	Context   string    `json:"context,omitempty"`
 	// Replies answer this entry, oldest first; only get_entry fills them.
 	Replies []EntryReply `json:"replies,omitempty"`
+	// RepliesTotal counts every reply; only the newest maxReplies are listed.
+	RepliesTotal int `json:"replies_total,omitempty"`
 }
+
+// maxReplies is how many of a thread's newest replies get_entry lists.
+const maxReplies = 100
 
 // EntryReply is one answer in an entry's thread.
 type EntryReply struct {
@@ -127,14 +132,18 @@ func (db *DB) GetEntry(ctx context.Context, id string) (EntryView, error) {
 	if err != nil {
 		return e, err
 	}
-	rows, err := db.Pool.Query(ctx, `SELECT id::text,source,body,created_at FROM entry WHERE reply_to=$1 ORDER BY created_at,id LIMIT 100`, n)
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM entry WHERE reply_to=$1`, n).Scan(&e.RepliesTotal); err != nil {
+		return e, err
+	}
+	rows, err := db.Pool.Query(ctx, `SELECT * FROM (SELECT id::text,source,body,created_at,id n FROM entry WHERE reply_to=$1 ORDER BY created_at DESC,id DESC LIMIT $2) r ORDER BY created_at,n`, n, maxReplies)
 	if err != nil {
 		return e, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var r EntryReply
-		if err := rows.Scan(&r.ID, &r.Source, &r.Body, &r.CreatedAt); err != nil {
+		var order int64
+		if err := rows.Scan(&r.ID, &r.Source, &r.Body, &r.CreatedAt, &order); err != nil {
 			return e, err
 		}
 		e.Replies = append(e.Replies, r)

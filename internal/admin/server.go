@@ -918,7 +918,7 @@ func (s *Server) entryHistory(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	history, err := s.db.EntryHistory(r.Context(), id)
+	history, truncated, err := s.db.EntryHistory(r.Context(), id)
 	if err != nil {
 		s.internalError(w, r, err)
 		return
@@ -935,7 +935,7 @@ func (s *Server) entryHistory(w http.ResponseWriter, r *http.Request) {
 		}
 		events = append(events, event)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"history": events})
+	writeJSON(w, http.StatusOK, map[string]any{"history": events, "truncated": truncated})
 }
 
 // replyToEntry saves the owner's answer under an entry. Replying to an open

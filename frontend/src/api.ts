@@ -554,7 +554,7 @@ export const api = {
   restoreTrash: (id: string) => request<{ restored: boolean }>('POST', `/trash/${encodeURIComponent(id)}/restore`),
   purgeTrash: (id: string) => request<void>('DELETE', `/trash/${encodeURIComponent(id)}`),
   getEntry: (id: string) => request<TableEntry & { repeats: TableEntry[]; repeats_total: number }>('GET', `/entries/${encodeURIComponent(id)}`),
-  entryHistory: (id: string) => request<{ history: HistoryEvent[] }>('GET', `/entries/${encodeURIComponent(id)}/history`).then((response) => response.history),
+  entryHistory: (id: string) => request<{ history: HistoryEvent[]; truncated?: boolean }>('GET', `/entries/${encodeURIComponent(id)}/history`),
   replyToEntry: (id: string, body: string) => request<Entry & Partial<Undoable>>('POST', `/entries/${encodeURIComponent(id)}/replies`, { body }),
   relatedEntries: (id: string) => request<{ related: RelatedEntry[] }>('GET', `/entries/${encodeURIComponent(id)}/related`).then((response) => response.related),
   reopenTodo: (id: string) => request<Entry & Undoable>('POST', `/entries/${encodeURIComponent(id)}/reopen`),
