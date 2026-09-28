@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -192,6 +193,13 @@ private fun inline(parent: Node): AnnotatedString {
     val scheme = MaterialTheme.colorScheme
     val code = SpanStyle(fontFamily = FontFamily.Monospace, background = scheme.surfaceVariant)
     val linkStyle = TextLinkStyles(SpanStyle(color = scheme.primary, textDecoration = TextDecoration.Underline))
+    val uriHandler = LocalUriHandler.current
+    // Nothing on the phone may handle a link (say, mailto: with no email app); that must not crash the app.
+    fun link(url: String) = LinkAnnotation.Url(url, linkStyle) { runCatching { uriHandler.openUri(url) } }
+    fun plain(node: Node): String = buildString {
+        fun collect(n: Node) { if (n is org.commonmark.node.Text) append(n.literal) else if (n is Code) append(n.literal) else n.children().forEach(::collect) }
+        node.children().forEach(::collect)
+    }
     return buildAnnotatedString {
         fun walk(node: Node) {
             when (node) {
@@ -200,10 +208,11 @@ private fun inline(parent: Node): AnnotatedString {
                 is Emphasis -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { node.children().forEach(::walk) }
                 is StrongEmphasis -> withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { node.children().forEach(::walk) }
                 is Strikethrough -> withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) { node.children().forEach(::walk) }
-                is Link -> if (safeLink(node.destination)) withLink(LinkAnnotation.Url(node.destination.trim(), linkStyle)) { node.children().forEach(::walk) } else node.children().forEach(::walk)
+                is Link -> if (safeLink(node.destination)) withLink(link(node.destination.trim())) { node.children().forEach(::walk) } else node.children().forEach(::walk)
                 is Image -> {
-                    val alt = buildString { node.children().forEach { if (it is org.commonmark.node.Text) append(it.literal) } }.ifBlank { "Image" }
-                    if (safeLink(node.destination)) withLink(LinkAnnotation.Url(node.destination.trim(), linkStyle)) { append("$alt (image link)") } else append(alt)
+                    // The whole label, formatting and all, as plain words.
+                    val alt = plain(node).ifBlank { "Image" }
+                    if (safeLink(node.destination)) withLink(link(node.destination.trim())) { append("$alt (image link)") } else append(alt)
                 }
                 is SoftLineBreak -> append(' ')
                 is HardLineBreak -> append('\n')
