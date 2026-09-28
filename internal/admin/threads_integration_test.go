@@ -155,3 +155,56 @@ func TestGetEntryListsTheNewestReplies(t *testing.T) {
 		t.Fatalf("replies total=%d len=%d first=%q last=%q err=%v", view.RepliesTotal, len(view.Replies), view.Replies[0].Body, view.Replies[len(view.Replies)-1].Body, err)
 	}
 }
+
+func TestFollowUpsSnoozesAndThreadHistory(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
+	_, s := login(t, server, "correct horse", "")
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	add := func(body, source string, replyTo int64, ask string) store.Entry {
+		e, _, err := db.Append(ctx, store.NewEntry{Slug: "atlas", Kind: "note", Body: body, Source: source, ClientID: "c", ReplyTo: replyTo})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := db.SaveEntryMeta(ctx, e.ID, store.EntryMeta{Title: body, Ask: ask}); err != nil {
+			t.Fatal(err)
+		}
+		return e
+	}
+	handled := func(id int64) bool {
+		found, err := db.ListEntries(ctx, store.EntryFilter{ID: id})
+		if err != nil || len(found) != 1 {
+			t.Fatal(err)
+		}
+		return found[0].Owner.Handled
+	}
+	root := add("Which plan?", "codex", 0, "Pick a plan")
+	// Snoozed, then an agent writes more: it comes back now, not at the snooze date.
+	if _, _, err := db.SetOwnerState(ctx, root.ID, store.OwnerPatch{SnoozeDays: ptr(7)}); err != nil {
+		t.Fatal(err)
+	}
+	followUp := add("Also: monthly or yearly?", "codex", root.ID, "Monthly or yearly billing")
+	needs, err := db.ListEntries(ctx, store.EntryFilter{NeedsYou: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[int64]bool{}
+	for _, e := range needs {
+		ids[e.ID] = true
+	}
+	if !ids[root.ID] || !ids[followUp.ID] {
+		t.Fatalf("needs you = %v, want root %d and follow-up %d", ids, root.ID, followUp.ID)
+	}
+	// Answering the follow-up settles the follow-up; the root still waits.
+	res := request(t, server, http.MethodPost, "/admin/api/entries/"+strconv.FormatInt(followUp.ID, 10)+"/replies", `{"body":"Yearly"}`, authed(s, true))
+	if res.Code != http.StatusCreated || !handled(followUp.ID) || handled(root.ID) {
+		t.Fatalf("reply = %d %s; follow-up handled=%v root handled=%v", res.Code, res.Body.String(), handled(followUp.ID), handled(root.ID))
+	}
+	// Opened on the follow-up, the history shows the whole conversation.
+	res = request(t, server, http.MethodGet, "/admin/api/entries/"+strconv.FormatInt(followUp.ID, 10)+"/history", "", authed(s, false))
+	if body := res.Body.String(); !strings.Contains(body, `"text":"Yearly"`) || strings.Contains(body, `"text":"Also: monthly or yearly?","entry_id"`) {
+		t.Fatalf("follow-up history = %s", body)
+	}
+}

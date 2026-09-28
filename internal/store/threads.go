@@ -68,8 +68,10 @@ func (db *DB) Append(ctx context.Context, e NewEntry) (Entry, int64, error) {
 
 func insertEntry(ctx context.Context, tx pgx.Tx, e NewEntry) (Entry, int64, error) {
 	var root *int64
-	var rootTitle string
-	var openAsk, noRoot bool
+	var noRoot bool
+	// The entry answered directly: a follow-up question can itself ask the owner.
+	var asked int64
+	var askedTitle string
 	if e.ReplyTo > 0 {
 		var id int64
 		var slug string
@@ -85,15 +87,27 @@ func insertEntry(ctx context.Context, tx pgx.Tx, e NewEntry) (Entry, int64, erro
 		if slug != e.Slug {
 			return Entry{}, 0, ErrReplyElsewhere
 		}
-		err = tx.QueryRow(ctx, `SELECT COALESCE(NULLIF(m.title,''),left(e.body,120)),COALESCE(m.ask,'')<>'' AND o.handled_at IS NULL
-FROM entry e LEFT JOIN entry_meta m ON m.entry_id=e.id LEFT JOIN entry_owner_state o ON o.entry_id=e.id WHERE e.id=$1 FOR UPDATE OF e`, id).Scan(&rootTitle, &openAsk)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		var present bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM entry WHERE id=$1)`, id).Scan(&present); err != nil {
 			return Entry{}, 0, err
 		}
+		// With the root in Trash there is nothing to bring back yet.
+		noRoot = !present
 		root = &id
-		if errors.Is(err, pgx.ErrNoRows) {
-			// The root is in Trash: nothing to mark handled or bring back yet.
-			noRoot = true
+		// The owner's answer settles the open question it answers: the entry
+		// replied to if it asks one, else the thread's root.
+		for _, candidate := range []int64{e.ReplyTo, id} {
+			var open bool
+			var title string
+			err := tx.QueryRow(ctx, `SELECT COALESCE(NULLIF(m.title,''),left(e.body,120)),COALESCE(m.ask,'')<>'' AND o.handled_at IS NULL
+FROM entry e LEFT JOIN entry_meta m ON m.entry_id=e.id LEFT JOIN entry_owner_state o ON o.entry_id=e.id WHERE e.id=$1 FOR UPDATE OF e`, candidate).Scan(&title, &open)
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return Entry{}, 0, err
+			}
+			if open {
+				asked, askedTitle = candidate, title
+				break
+			}
 		}
 	}
 	var entry Entry
@@ -102,24 +116,27 @@ RETURNING id,slug,kind,body,source,client_id,created_at,reply_to,context`, e.Slu
 		Scan(&entry.ID, &entry.Slug, &entry.Kind, &entry.Body, &entry.Source, &entry.ClientID, &entry.CreatedAt, &entry.ReplyTo, &entry.Context); err != nil {
 		return Entry{}, 0, err
 	}
-	if root == nil || noRoot {
+	if root == nil {
 		return entry, 0, nil
 	}
 	if e.Source != OwnerSource {
-		// An agent answered: the thread needs the owner again.
-		_, err := tx.Exec(ctx, `UPDATE entry_owner_state SET handled_at=NULL,updated_at=now() WHERE entry_id=$1 AND handled_at IS NOT NULL`, *root)
+		if noRoot {
+			return entry, 0, nil
+		}
+		// An agent answered: the thread needs the owner again, snoozed or not.
+		_, err := tx.Exec(ctx, `UPDATE entry_owner_state SET handled_at=NULL,snoozed_until=NULL,updated_at=now() WHERE entry_id=$1 AND (handled_at IS NOT NULL OR snoozed_until IS NOT NULL)`, *root)
 		return entry, 0, err
 	}
-	if !openAsk {
+	if asked == 0 {
 		return entry, 0, nil
 	}
 	handled := true
-	_, before, after, err := applyOwnerPatch(ctx, tx, *root, OwnerPatch{Handled: &handled})
+	_, before, after, err := applyOwnerPatch(ctx, tx, asked, OwnerPatch{Handled: &handled})
 	if err != nil {
 		return Entry{}, 0, err
 	}
-	actionID, err := recordAction(ctx, tx, "owner", root, e.Slug, "Replied, marked handled: "+rootTitle,
-		map[string]any{"entry_id": *root, "before": before, "after": after})
+	actionID, err := recordAction(ctx, tx, "owner", &asked, e.Slug, "Replied, marked handled: "+askedTitle,
+		map[string]any{"entry_id": asked, "before": before, "after": after})
 	return entry, actionID, err
 }
 
@@ -151,7 +168,9 @@ func (db *DB) EntryHistory(ctx context.Context, id int64) (events []HistoryEvent
    FROM owner_action a WHERE a.entry_id=$1 AND a.kind<>'read_all'
  UNION ALL SELECT l.created_at,'labels',$2,array_to_string(l.fields,', '),NULL,false
    FROM entry_label_edit l WHERE l.entry_id=$1
- UNION ALL SELECT r.created_at,'reply',r.source,r.body,r.id,false FROM entry r WHERE r.reply_to=$1
+ -- Every entry in a thread shows the whole conversation.
+ UNION ALL SELECT r.created_at,'reply',r.source,r.body,r.id,false FROM entry r
+   WHERE r.reply_to=(SELECT COALESCE(reply_to,id) FROM entry WHERE id=$1) AND r.id<>$1
 ) h ORDER BY at DESC,kind DESC LIMIT $3`, id, OwnerSource, maxHistory+1)
 	if err != nil {
 		return nil, false, err
