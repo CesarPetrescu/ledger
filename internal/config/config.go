@@ -56,11 +56,17 @@ func OpenDB(ctx context.Context) *store.DB {
 
 func openDB(ctx context.Context, dsn string, wait, every time.Duration) *store.DB {
 	deadline := time.Now().Add(wait)
-	db, err := store.Open(ctx, dsn)
+	// Each attempt ends by the deadline too, so a stalled handshake cannot hang startup.
+	open := func() (*store.DB, error) {
+		attempt, cancel := context.WithDeadline(ctx, deadline)
+		defer cancel()
+		return store.Open(attempt, dsn)
+	}
+	db, err := open()
 	for err != nil && time.Now().Before(deadline) {
 		log.Printf("database not ready, retrying: %v", err)
 		time.Sleep(every)
-		db, err = store.Open(ctx, dsn)
+		db, err = open()
 	}
 	if err != nil {
 		panic(err)
