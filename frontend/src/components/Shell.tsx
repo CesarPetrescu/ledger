@@ -113,7 +113,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
               Session ends <time dateTime={expires}>{formatRelative(expires)}</time>
             </p>
           )}
-          <button type="button" className="btn btn-quiet" disabled={signingOut} onClick={() => void handleSignOut()}>
+          <button type="button" className="btn btn-quiet" aria-label={signingOut ? 'Signing out' : 'Sign out'} title="Sign out" disabled={signingOut} onClick={() => void handleSignOut()}>
             <Icon name="logout" /> <span className="nav-label">{signingOut ? 'Signing out…' : 'Sign out'}</span>
           </button>
         </div>
