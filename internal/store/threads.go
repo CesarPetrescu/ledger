@@ -72,6 +72,11 @@ func insertEntry(ctx context.Context, tx pgx.Tx, e NewEntry) (Entry, int64, erro
 	var asked int64
 	var askedTitle string
 	if e.ReplyTo > 0 {
+		// Project before entries, as everywhere else, so a reply racing a
+		// project deletion cannot deadlock with it.
+		if _, err := tx.Exec(ctx, `SELECT 1 FROM project WHERE slug=$1 FOR KEY SHARE`, e.Slug); err != nil {
+			return Entry{}, 0, err
+		}
 		var id int64
 		var slug string
 		// A reply's own root stays the root even while that root is in Trash, so
