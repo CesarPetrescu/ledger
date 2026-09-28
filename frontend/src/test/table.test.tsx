@@ -41,9 +41,10 @@ describe('table', () => {
 
   it('shows extraction progress while a labeller runs, and sends old table views to their pages', async () => {
     mockApi({ ...base, 'GET /admin/api/entries': { body: { entries: [], sources: [], tags: [] } } })
-    renderApp('/admin/table')
+    const first = renderApp('/admin/table')
     expect(await screen.findByText(/AI summaries: 4 of 10/)).toHaveAttribute('role', 'status')
     expect(screen.getByRole('link', { name: 'Activity', current: 'page' })).toBeInTheDocument()
+    first.unmount()
     renderApp('/admin/table?view=projects')
     await vi.waitFor(() => expect(window.location.pathname).toBe('/admin/projects'))
   })
@@ -222,8 +223,8 @@ describe('table', () => {
   it('opens with the tag and agent filters from the address', async () => {
     const { calls } = mockApi({ ...base, 'GET /admin/api/entries': { body: { entries: [], sources: ['codex'], tags: ['export'] } } })
     renderApp('/admin/table?view=activity&tag=export&source=codex')
-    expect(await screen.findByRole('combobox', { name: /filter by tag/i })).toHaveValue('export')
-    expect(screen.getByRole('combobox', { name: /filter by agent/i })).toHaveValue('codex')
+    await vi.waitFor(() => expect(screen.getByRole('combobox', { name: /filter by tag/i })).toHaveValue('export'))
+    await vi.waitFor(() => expect(screen.getByRole('combobox', { name: /filter by agent/i })).toHaveValue('codex'))
     expect(Object.fromEntries(calls.find((call) => call.path === '/admin/api/entries')!.url.searchParams)).toMatchObject({ tag: 'export', source: 'codex' })
   })
 
