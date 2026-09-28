@@ -102,6 +102,10 @@ func TestComposeAndProxyTopology(t *testing.T) {
 			t.Errorf("compose retains %q", obsolete)
 		}
 	}
+	// Docker starts nothing after a host reboot without a restart policy.
+	if got := strings.Count(compose, "restart: unless-stopped"); got != 7 {
+		t.Errorf("services with a restart policy = %d, want all 7", got)
+	}
 	if strings.Count(compose, `"8080:8080"`) != 1 {
 		t.Errorf("compose host exposure count = %d", strings.Count(compose, `"8080:8080"`))
 	}
@@ -112,8 +116,12 @@ func TestComposeAndProxyTopology(t *testing.T) {
 	}
 	nginx := string(nginxBody)
 	for _, required := range []string{
-		"proxy_pass http://ledger-auth:8082",
-		"proxy_pass http://ledger-mcp:8081",
+		// Resolved per request, so a service that restarts on a new address is found.
+		"resolver 127.0.0.11",
+		"set $auth ledger-auth:8082;",
+		"proxy_pass http://$auth",
+		"set $mcp ledger-mcp:8081;",
+		"proxy_pass http://$mcp",
 		"proxy_set_header X-Ledger-Client-IP $remote_addr",
 	} {
 		if !strings.Contains(nginx, required) {
@@ -260,9 +268,11 @@ func TestEdgeProxyRoutesAdminSameOriginAndKeepsInternalRoutesPrivate(t *testing.
 		"absolute_redirect off;",
 		"client_max_body_size 40m;",
 		"location ^~ /admin/api",
-		"proxy_pass http://ledger-admin:8084",
+		"set $admin ledger-admin:8084;",
+		"proxy_pass http://$admin",
 		"location ^~ /admin/",
-		"proxy_pass http://ledger-frontend:8085",
+		"set $frontend ledger-frontend:8085;",
+		"proxy_pass http://$frontend",
 		"location / { return 404; }",
 	} {
 		if !strings.Contains(nginx, required) {

@@ -12,6 +12,7 @@ x-postgres-ready: &postgres-ready
 
 services:
   nginx:
+    restart: unless-stopped
     image: nginx:1.27-alpine
     ports:
       - "8080:8080"
@@ -34,6 +35,7 @@ services:
         ipv4_address: ${LEDGER_NGINX_INTERNAL_IP:-10.251.250.254}
 
   ledger-auth:
+    restart: unless-stopped
     build:
       context: .
       args:
@@ -47,6 +49,7 @@ services:
       - ledger-internal
 
   ledger-mcp:
+    restart: unless-stopped
     build:
       context: .
       args:
@@ -66,6 +69,7 @@ services:
       - ledger-internal
 
   ledger-index:
+    restart: unless-stopped
     build:
       context: .
       args:
@@ -88,6 +92,7 @@ services:
 
   # Operator API on internal :8084. It deliberately does not receive the OAuth approval hash.
   ledger-admin:
+    restart: unless-stopped
     build:
       context: .
       args:
@@ -107,12 +112,14 @@ services:
 
   # Static operator UI on internal :8085; holds no configuration or secrets.
   ledger-frontend:
+    restart: unless-stopped
     build:
       context: ./frontend
     networks:
       - ledger-internal
 
   postgres:
+    restart: unless-stopped
     image: pgvector/pgvector:pg16
     environment:
       POSTGRES_DB: ledger
