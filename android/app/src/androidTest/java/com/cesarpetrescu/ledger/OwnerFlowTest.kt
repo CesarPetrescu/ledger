@@ -159,10 +159,15 @@ class OwnerFlowTest {
             assertEquals(0, onBackground { Notifier.check(context) })
             Notifier.setEnabled(context, false)
             context.getSystemService(android.app.NotificationManager::class.java).cancelAll()
-            // Tapping it opens the entry.
-            activity.onActivity { it.startActivity(android.content.Intent(it, MainActivity::class.java).putExtra(MainActivity.ROUTE, "entry-view/70")
-                .addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)) }
-            awaitText("Pricing claims unverified")
+            // Tapping it opens the entry, but only for the server it came from.
+            val tapped = { origin: String -> activity.onActivity { it.startActivity(android.content.Intent(it, MainActivity::class.java)
+                .putExtra(MainActivity.ROUTE, "entry-view/70").putExtra(MainActivity.ORIGIN, origin)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)) } }
+            tapped("https://other.example")
+            ui.waitForIdle()
+            ui.onNodeWithText("Entry").assertDoesNotExist()
+            tapped("https://localhost:8443")
+            awaitText("Entry")
             // The system Back key, not a touch: a notification can briefly cover the top bar.
             androidx.test.espresso.Espresso.pressBack()
             awaitText("Confirm the fixture pricing")

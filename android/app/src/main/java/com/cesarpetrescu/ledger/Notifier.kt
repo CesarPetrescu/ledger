@@ -71,8 +71,10 @@ object Notifier {
 
     /**
      * Asks the server once and posts notifications for anything new. Blocks on
-     * the network, so never call it on the main thread. Returns how many it posted.
+     * the network, so never call it on the main thread. Returns how many it
+     * posted. One check at a time, so overlapping runs cannot race the history.
      */
+    @Synchronized
     fun check(context: Context): Int {
         if (!enabled(context)) return 0
         // Without permission to show them, keep what was seen so items announce once it returns.
@@ -99,7 +101,7 @@ object Notifier {
                 .setContentText(nudge.text)
                 .setStyle(android.app.Notification.BigTextStyle().bigText(nudge.text))
                 .setAutoCancel(true)
-                .setContentIntent(open(context, "entry-view/${segment(nudge.entryId)}", nudge.key.hashCode()))
+                .setContentIntent(open(context, "entry-view/${segment(nudge.entryId)}", nudge.key.hashCode(), api.origin))
                 .build())
         }
         if (news.size > MAX_SHOWN) manager.notify(CHANNEL.hashCode(), android.app.Notification.Builder(context, CHANNEL)
@@ -107,7 +109,7 @@ object Notifier {
             .setContentTitle("${news.size - MAX_SHOWN} more need you")
             .setContentText("Open the Inbox to see them all.")
             .setAutoCancel(true)
-            .setContentIntent(open(context, "inbox", CHANNEL.hashCode()))
+            .setContentIntent(open(context, "inbox", CHANNEL.hashCode(), api.origin))
             .build())
         return news.size
     }
@@ -126,12 +128,19 @@ object Notifier {
         return out
     }
 
-    fun allowed(context: Context) = Build.VERSION.SDK_INT < 33 ||
-        context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+    /** Whether a notification would actually show: permission, app switch, and channel. */
+    fun allowed(context: Context): Boolean {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val permitted = Build.VERSION.SDK_INT < 33 || context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        val channel = manager.getNotificationChannel(CHANNEL)
+        return permitted && manager.areNotificationsEnabled() && (channel == null || channel.importance != NotificationManager.IMPORTANCE_NONE)
+    }
 
-    private fun open(context: Context, route: String, requestCode: Int): PendingIntent =
+    // The server rides along: an entry ID means nothing on another server.
+    private fun open(context: Context, route: String, requestCode: Int, origin: String): PendingIntent =
         PendingIntent.getActivity(context, requestCode, Intent(context, MainActivity::class.java)
             .putExtra(MainActivity.ROUTE, route)
+            .putExtra(MainActivity.ORIGIN, origin)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 }
@@ -145,5 +154,6 @@ class InboxCheckJob : JobService() {
         return true
     }
 
-    override fun onStopJob(params: JobParameters) = true
+    // Periodic: the next run comes anyway, so no retry that could overlap this one.
+    override fun onStopJob(params: JobParameters) = false
 }

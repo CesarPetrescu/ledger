@@ -40,19 +40,25 @@ import java.time.format.DateTimeFormatter
 
 class MainActivity : ComponentActivity() {
     companion object {
-        /** A screen to open, from a notification. */
+        /** A screen to open, from a notification, and the server it belongs to. */
         const val ROUTE = "route"
+        const val ORIGIN = "origin"
     }
-    private val opened = mutableStateOf<String?>(null)
+    private val opened = mutableStateOf<Pair<String, String>?>(null)
+
+    private fun requested(intent: android.content.Intent?): Pair<String, String>? {
+        val route = intent?.getStringExtra(ROUTE) ?: return null
+        return route to intent.getStringExtra(ORIGIN).orEmpty()
+    }
 
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
-        opened.value = intent.getStringExtra(ROUTE)
+        opened.value = requested(intent)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (savedInstanceState == null) opened.value = intent?.getStringExtra(ROUTE)
+        if (savedInstanceState == null) opened.value = requested(intent)
         enableEdgeToEdge()
         setContent {
             val model: LedgerModel = viewModel()
@@ -87,14 +93,16 @@ fun isDark() = MaterialTheme.colorScheme.background.luminance() < 0.5f
 val LocalEditingEnabled = compositionLocalOf { true }
 
 @Composable
-fun LedgerApp(model: LedgerModel = viewModel(), opened: MutableState<String?>? = null) {
+fun LedgerApp(model: LedgerModel = viewModel(), opened: MutableState<Pair<String, String>?>? = null) {
     // A notification opens its entry (or the inbox) once the session is ready.
-    val requested = opened?.value
-    LaunchedEffect(requested, model.api, model.starting, model.busy) {
+    val request = opened?.value
+    LaunchedEffect(request, model.api, model.starting, model.busy) {
         // Navigation is ignored while an action runs; wait for it instead of dropping the request.
-        if (requested == null || model.starting || model.api == null || model.busy) return@LaunchedEffect
+        if (request == null || model.starting || model.api == null || model.busy) return@LaunchedEffect
         opened.value = null
-        if (!Regex("inbox|entry-view/[0-9]+").matches(requested)) return@LaunchedEffect
+        val (requested, origin) = request
+        // A notification from another server's session must not open this server's entry.
+        if (origin != model.api?.origin || !Regex("inbox|entry-view/[0-9]+").matches(requested)) return@LaunchedEffect
         model.tab("inbox")
         if (requested != "inbox") model.go(requested)
     }
