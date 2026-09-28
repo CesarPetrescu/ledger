@@ -12,7 +12,7 @@ const PAGE_SIZE = 50
 
 /** Agents: what each one did lately, how to connect one, and the apps with access. */
 export function AgentsPage() {
-  const agents = useResource(api.listAgents, 'agents', 'entry entry_meta entry_owner_state handoff_message')
+  const agents = useResource(api.listAgents, 'agents', 'project entry entry_meta entry_owner_state handoff_message')
   return (
     <>
       <header className="page-head">
