@@ -450,7 +450,8 @@ function CalendarWorkspace({ connection, onDisconnected }: { connection: Calenda
 async function ledgerDates(first: string, last: string) {
   const [due, waking, projects] = await Promise.all([
     everyEntry({ kind: 'todo', status: 'open', due_from: first, due_before: last }),
-    everyEntry({ snoozed: '1', wakes_before: last }),
+    // By wake date, so an item stays on its day once that day has come.
+    everyEntry({ wakes_from: first, wakes_before: last }),
     api.listProjects(),
   ])
   return {

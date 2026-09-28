@@ -110,7 +110,7 @@ describe('calendar views', () => {
     const { calls } = mockApi({
       'GET /admin/api/session': authenticatedSession,
       'GET /admin/api/calendar/connection': { body: { connected: false, selected_calendars: 0 } },
-      'GET /admin/api/entries': (_init, url) => ({ body: { entries: url.searchParams.get('snoozed') ? [] : [todo], sources: [], tags: [] } }),
+      'GET /admin/api/entries': (_init, url) => ({ body: { entries: url.searchParams.get('wakes_from') ? [] : [todo], sources: [], tags: [] } }),
       'GET /admin/api/projects': { body: { projects: [{ slug: 'atlas', name: 'Atlas', tier: 'focus', hours_wk: 4, type: '', description: '', goal: '', deadline: day(0), needs_me: '', automate: '', stack: '', updated_at: '' }] } },
       'GET /admin/api/entries/50': { body: { ...todo, repeats: [], repeats_total: 0 } },
       'GET /admin/api/entries/50/history': { body: { history: [] } },

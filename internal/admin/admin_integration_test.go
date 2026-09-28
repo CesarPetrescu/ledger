@@ -1797,15 +1797,11 @@ func TestEntriesCanKeepOnlyOverdueOnes(t *testing.T) {
 	if _, _, err := db.SetOwnerState(ctx, lateID, store.OwnerPatch{SnoozeDays: ptr(2)}); err != nil {
 		t.Fatal(err)
 	}
-	res = request(t, server, http.MethodGet, "/admin/api/entries?snoozed=1", "", authed(s, false))
-	if body := res.Body.String(); res.Code != http.StatusOK || !strings.Contains(body, late) || strings.Contains(body, dueToday) {
-		t.Fatalf("snoozed = %d %s", res.Code, body)
-	}
-	// Waking in two days: inside a three-day view, outside a two-day one.
-	for days, want := range map[int]bool{3: true, 2: false} {
-		res = request(t, server, http.MethodGet, "/admin/api/entries?snoozed=1&wakes_before="+today.AddDate(0, 0, days).Format(time.DateOnly), "", authed(s, false))
+	// By wake date, whether or not the day has come: today's view has none, the day after tomorrow's has it.
+	for from, want := range map[int]bool{0: false, 2: true} {
+		res = request(t, server, http.MethodGet, "/admin/api/entries?wakes_from="+today.AddDate(0, 0, from).Format(time.DateOnly)+"&wakes_before="+today.AddDate(0, 0, from+1).Format(time.DateOnly), "", authed(s, false))
 		if strings.Contains(res.Body.String(), late) != want {
-			t.Fatalf("wakes_before +%d = %s", days, res.Body.String())
+			t.Fatalf("wakes on +%d = %s", from, res.Body.String())
 		}
 	}
 }
