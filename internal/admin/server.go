@@ -523,7 +523,7 @@ func entryFilter(query url.Values) (store.EntryFilter, error) {
 	}
 	// due_before=YYYY-MM-DD with the asker's today keeps what is overdue;
 	// with due_from, a calendar's range.
-	for name, target := range map[string]**time.Time{"due_before": &f.DueBefore, "due_from": &f.DueFrom} {
+	for name, target := range map[string]**time.Time{"due_before": &f.DueBefore, "due_from": &f.DueFrom, "wakes_before": &f.WakesBefore} {
 		if day := query.Get(name); day != "" {
 			due, err := time.Parse(time.DateOnly, day)
 			if err != nil {

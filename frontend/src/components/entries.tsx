@@ -384,7 +384,7 @@ function ActivityRun({ items, hideProject, onTag, onChanged }: { items: Folded[]
       {rest.length > 0 && !expanded && (
         <li className="entry-run-more">
           <button type="button" className="link-button" onClick={() => setExpanded(true)}>
-            +{rest.length} more from {first.entry.source} on {first.entry.project_name}
+            +{rest.length} more from {writerName(first.entry.source)} on {first.entry.project_name}
           </button>
         </li>
       )}

@@ -163,8 +163,9 @@ export interface EntryFilter {
   /** YYYY-MM-DD bounds on the due date: from (inclusive), before (exclusive). */
   due_from?: string
   due_before?: string
-  /** "1" keeps entries snoozed past today. */
+  /** "1" keeps entries snoozed past today; wakes_before (YYYY-MM-DD) bounds when they wake. */
   snoozed?: string
+  wakes_before?: string
 }
 
 export interface EntryTablePage {

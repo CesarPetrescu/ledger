@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { api, describeError, type CalendarConnection, type CalendarEvent, type CalendarEventInput, type CalendarSource } from '../api'
+import { api, describeError, type CalendarConnection, type EntryFilter, type TableEntry, type CalendarEvent, type CalendarEventInput, type CalendarSource } from '../api'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { EntrySplit, useEntrySelection } from '../components/EntryPanel'
 import { titleOf } from '../components/entries'
@@ -320,8 +320,8 @@ function CalendarWorkspace({ connection, onDisconnected }: { connection: Calenda
       out.push({ key: `d:${project.slug}`, date: project.deadline, time: 'Deadline', sort: `0${project.name}`, title: project.name, detail: 'Project deadline', kind: 'deadline', open: () => navigate(`/projects/${encodeURIComponent(project.slug)}`) })
     }
     return out.filter((item) => item.date >= first && item.date < last)
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- openEvent and open only read state at click time
-  }, [events.data, ledger.data, first, last])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- openEvent only reads state at click time
+  }, [events.data, ledger.data, first, last, entrySelection.selected])
 
   const saveSelection = async () => {
     setSavingSelection(true)
@@ -443,16 +443,33 @@ function CalendarWorkspace({ connection, onDisconnected }: { connection: Calenda
 /** Todos due, snoozed items waking, and project deadlines between two days. */
 async function ledgerDates(first: string, last: string) {
   const [due, waking, projects] = await Promise.all([
-    api.listEntries({ kind: 'todo', status: 'open', due_from: first, due_before: last }),
-    api.listEntries({ snoozed: '1' }),
+    everyEntry({ kind: 'todo', status: 'open', due_from: first, due_before: last }),
+    everyEntry({ snoozed: '1', wakes_before: last }),
     api.listProjects(),
   ])
   return {
-    due: due.entries,
-    waking: waking.entries.filter((entry) => (entry.owner.snoozed_until ?? '') >= first && (entry.owner.snoozed_until ?? '') < last),
-    // Only a real date counts; some deadlines are words like "daily".
-    deadlines: projects.filter((project) => /^\d{4}-\d{2}-\d{2}$/.test(project.deadline) && project.deadline >= first && project.deadline < last),
+    due,
+    waking: waking.filter((entry) => (entry.owner.snoozed_until ?? '') >= first && (entry.owner.snoozed_until ?? '') < last),
+    // Only a real date counts; some deadlines are words like "daily", or impossible days like 31 September.
+    deadlines: projects.filter((project) => realDate(project.deadline) && project.deadline >= first && project.deadline < last),
   }
+}
+
+/** Every page of a filtered entry list; the filters bound it to the view's days. */
+async function everyEntry(filter: EntryFilter) {
+  const out: TableEntry[] = []
+  let before: string | undefined
+  for (;;) {
+    const result = await api.listEntries(filter, before)
+    out.push(...result.entries)
+    // A cursor that does not move would page forever.
+    if (!result.next_before || result.next_before === before) return out
+    before = result.next_before
+  }
+}
+
+function realDate(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) && dateKey(localDate(value)) === value
 }
 
 export function CalendarPage() {

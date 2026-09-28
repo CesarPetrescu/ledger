@@ -1801,4 +1801,11 @@ func TestEntriesCanKeepOnlyOverdueOnes(t *testing.T) {
 	if body := res.Body.String(); res.Code != http.StatusOK || !strings.Contains(body, late) || strings.Contains(body, dueToday) {
 		t.Fatalf("snoozed = %d %s", res.Code, body)
 	}
+	// Waking in two days: inside a three-day view, outside a two-day one.
+	for days, want := range map[int]bool{3: true, 2: false} {
+		res = request(t, server, http.MethodGet, "/admin/api/entries?snoozed=1&wakes_before="+today.AddDate(0, 0, days).Format(time.DateOnly), "", authed(s, false))
+		if strings.Contains(res.Body.String(), late) != want {
+			t.Fatalf("wakes_before +%d = %s", days, res.Body.String())
+		}
+	}
 }
