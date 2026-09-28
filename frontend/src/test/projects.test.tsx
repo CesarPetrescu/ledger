@@ -81,6 +81,17 @@ describe('project browser', () => {
     expect(calls.find((call) => call.path === '/admin/api/projects/atlas')?.url.searchParams.get('entries')).toBe('1')
   })
 
+  it('keeps the add form on a project page when the project list fails to load', async () => {
+    mockApi({
+      ...projectBase,
+      'GET /admin/api/projects': { status: 500, body: { error: 'hidden' } },
+      'GET /admin/api/projects/atlas': { body: atlasDetail },
+    })
+    renderApp('/admin/projects/atlas')
+    await screen.findByRole('heading', { name: 'Atlas', level: 1 })
+    expect(await screen.findByText('Add an entry')).toBeInTheDocument()
+  })
+
   it('creates a project through the form and shows server validation errors', async () => {
     const { calls } = mockApi({
       ...projectBase,

@@ -473,8 +473,9 @@ export function EntriesView({ view, initialProject = '', initialQuery = '', init
       {(view === 'activity' || view === 'decisions') && (
         <label className="check"><input type="checkbox" checked={!filter.hide_routine} onChange={(event) => set('hide_routine', event.target.checked ? '' : '1')} /> Show routine entries</label>
       )}
-      {view !== 'reading' && (projects.data?.length ?? 0) > 0 && (
-        <AddRow key={view} projects={fixedProject ? (projects.data ?? []).filter((item) => item.slug === fixedProject) : projects.data ?? []} initialProject={fixedProject ?? initialProject}
+      {/* A project page adds to its own project, whether or not the project list loaded. */}
+      {view !== 'reading' && (fixedProject || (projects.data?.length ?? 0) > 0) && (
+        <AddRow key={view} projects={fixedProject ? [{ slug: fixedProject, name: fixedProject }] : projects.data ?? []} initialProject={fixedProject ?? initialProject}
           defaultKind={view === 'todos' ? 'todo' : view === 'decisions' ? 'decision' : 'note'} fixed={Boolean(fixedProject)} onAdded={table.reload} />
       )}
       {table.loading && <Loading label="Loading entries…" />}
