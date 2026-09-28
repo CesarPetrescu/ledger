@@ -39,8 +39,33 @@ import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 
 class MainActivity : ComponentActivity() {
+    companion object {
+        /** A screen to open, from a notification, and the server it belongs to. */
+        const val ROUTE = "route"
+        const val ORIGIN = "origin"
+    }
+    private val opened = mutableStateOf<Pair<String, String>?>(null)
+
+    private fun requested(intent: android.content.Intent?): Pair<String, String>? {
+        val route = intent?.getStringExtra(ROUTE) ?: return null
+        return route to intent.getStringExtra(ORIGIN).orEmpty()
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        opened.value = requested(intent)
+    }
+
+    // A route not yet opened (the app was starting or busy) survives a rotation.
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        opened.value?.let { (route, origin) -> outState.putString(ROUTE, route); outState.putString(ORIGIN, origin) }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        opened.value = if (savedInstanceState == null) requested(intent)
+            else savedInstanceState.getString(ROUTE)?.let { it to savedInstanceState.getString(ORIGIN).orEmpty() }
         enableEdgeToEdge()
         setContent {
             val model: LedgerModel = viewModel()
@@ -50,7 +75,7 @@ class MainActivity : ComponentActivity() {
                 enableEdgeToEdge(bars, bars)
                 onDispose {}
             }
-            MaterialTheme(colorScheme = if (dark) DarkColors else LightColors) { LedgerApp(model) }
+            MaterialTheme(colorScheme = if (dark) DarkColors else LightColors) { LedgerApp(model, opened) }
         }
     }
 }
@@ -75,7 +100,19 @@ fun isDark() = MaterialTheme.colorScheme.background.luminance() < 0.5f
 val LocalEditingEnabled = compositionLocalOf { true }
 
 @Composable
-fun LedgerApp(model: LedgerModel = viewModel()) {
+fun LedgerApp(model: LedgerModel = viewModel(), opened: MutableState<Pair<String, String>?>? = null) {
+    // A notification opens its entry (or the inbox) once the session is ready.
+    val request = opened?.value
+    LaunchedEffect(request, model.api, model.starting, model.busy) {
+        // Navigation is ignored while an action runs; wait for it instead of dropping the request.
+        if (request == null || model.starting || model.api == null || model.busy) return@LaunchedEffect
+        opened.value = null
+        val (requested, origin) = request
+        // A notification from another server's session must not open this server's entry.
+        if (origin != model.api?.origin || !Regex("inbox|entry-view/[0-9]+").matches(requested)) return@LaunchedEffect
+        model.tab("inbox")
+        if (requested != "inbox") model.go(requested)
+    }
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(model.notice, model.undoId) {
         val message = model.notice ?: return@LaunchedEffect

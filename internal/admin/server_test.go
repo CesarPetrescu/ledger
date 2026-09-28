@@ -77,6 +77,7 @@ func TestEveryEndpointExceptLoginDeniesUnauthenticatedRequests(t *testing.T) {
 		{http.MethodPost, "/admin/api/entries/1/labels", `{"set":{"title":"x"}}`},
 		{http.MethodGet, "/admin/api/entries/1", ""},
 		{http.MethodGet, "/admin/api/agents", ""},
+		{http.MethodPost, "/admin/api/reading/read-all", ""},
 		{http.MethodGet, "/admin/api/inbox", ""},
 		{http.MethodDelete, "/admin/api/entries/1", ""},
 		{http.MethodGet, "/admin/api/projects/atlas/deletion", ""},

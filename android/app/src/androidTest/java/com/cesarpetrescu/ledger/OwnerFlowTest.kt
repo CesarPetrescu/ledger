@@ -74,6 +74,15 @@ class OwnerFlowTest {
         }
         ui.onNodeWithText(text).assertIsDisplayed()
     }
+    /** Runs network work off the main thread, as the system job does. */
+    private fun <T> onBackground(block: () -> T): T {
+        var result: Result<T>? = null
+        val thread = Thread { result = runCatching(block) }
+        thread.start()
+        thread.join(30_000)
+        return result!!.getOrThrow()
+    }
+
     private fun recreate(activity: ActivityScenario<MainActivity>) {
         ui.waitForIdle()
         activity.recreate()
@@ -133,6 +142,55 @@ class OwnerFlowTest {
             tap("Sign in")
             awaitText("Confirm the fixture pricing")
             recreate(activity)
+            awaitText("Confirm the fixture pricing")
+            if (android.os.Build.VERSION.SDK_INT >= 33) {
+                // Denied for good, Android shows no dialog: Turn on keeps the wish and opens Android's settings.
+                val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+                val shell = { command: String -> android.os.ParcelFileDescriptor.AutoCloseInputStream(automation.executeShellCommand(command)).use { it.readBytes() } }
+                val resumed = { var ours = false
+                    InstrumentationRegistry.getInstrumentation().runOnMainSync { ours = ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).isNotEmpty() }
+                    ours }
+                val until = { done: () -> Boolean -> val deadline = System.currentTimeMillis() + 10_000
+                    while (!done() && System.currentTimeMillis() < deadline) Thread.sleep(100)
+                    assertTrue(done()) }
+                val fixed = "${context.packageName} android.permission.POST_NOTIFICATIONS user-fixed"
+                shell("pm set-permission-flags $fixed")
+                tap("Turn on")
+                until { Notifier.enabled(context) }
+                until { !resumed() }
+                shell("input keyevent KEYCODE_BACK")
+                until { resumed() }
+                Notifier.setEnabled(context, false)
+                shell("pm clear-permission-flags $fixed")
+                awaitText("Confirm the fixture pricing")
+            }
+            // Notifications: the first check only learns what is there; a new ask is announced once.
+            if (android.os.Build.VERSION.SDK_INT >= 33) InstrumentationRegistry.getInstrumentation().uiAutomation
+                .grantRuntimePermission(context.packageName, android.Manifest.permission.POST_NOTIFICATIONS)
+            Notifier.setEnabled(context, true, schedule = false)
+            assertEquals(0, onBackground { Notifier.check(context) })
+            context.getSharedPreferences("notify", Context.MODE_PRIVATE).edit().remove("seen").commit()
+            assertEquals(1, onBackground { Notifier.check(context) })
+            // Posting is asynchronous; give the system a moment to list it.
+            val manager = context.getSystemService(android.app.NotificationManager::class.java)
+            val shown = { manager.activeNotifications.any { it.notification.extras.getString(android.app.Notification.EXTRA_TITLE) == "claude-code asks you" } }
+            val deadline = System.currentTimeMillis() + 5_000
+            while (!shown() && System.currentTimeMillis() < deadline) Thread.sleep(100)
+            assertTrue(shown())
+            assertEquals(0, onBackground { Notifier.check(context) })
+            Notifier.setEnabled(context, false)
+            context.getSystemService(android.app.NotificationManager::class.java).cancelAll()
+            // Tapping it opens the entry, but only for the server it came from.
+            val tapped = { origin: String -> activity.onActivity { it.startActivity(android.content.Intent(it, MainActivity::class.java)
+                .putExtra(MainActivity.ROUTE, "entry-view/70").putExtra(MainActivity.ORIGIN, origin)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)) } }
+            tapped("https://other.example")
+            ui.waitForIdle()
+            ui.onNodeWithText("Entry").assertDoesNotExist()
+            tapped("https://localhost:8443")
+            awaitText("Entry")
+            // The system Back key, not a touch: a notification can briefly cover the top bar.
+            androidx.test.espresso.Espresso.pressBack()
             awaitText("Confirm the fixture pricing")
             tap("Projects")
             tap("Atlas")

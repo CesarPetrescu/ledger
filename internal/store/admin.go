@@ -125,6 +125,8 @@ type EntryFilter struct {
 	ID int64
 	// RepeatsOf keeps the repeats folded under this entry; zero means any.
 	RepeatsOf int64
+	// DueBefore keeps entries due before this day; nil means any.
+	DueBefore *time.Time
 }
 
 // ListEntries returns matching entries from every project, newest first,
@@ -158,8 +160,9 @@ AND ($11='' OR (COALESCE(m.link,'')<>'' AND ($11='all' OR ($11='unread' AND o.re
 AND (NOT ($12 OR $10) OR o.snoozed_until IS NULL OR o.snoozed_until<=current_date)
 AND ($13='' OR (e.kind='status' AND m.state=$13))
 AND ($14::bigint=0 OR e.id=$14) AND ($15::bigint=0 OR m.duplicate_of=$15)
+AND ($16::date IS NULL OR m.due<$16)
 ORDER BY e.created_at DESC,e.id DESC LIMIT $8`, f.ProjectSlug, f.Kind, f.Source, f.Tag, f.Status, f.Query, f.Before, limit,
-		f.HideRoutine, f.NeedsYou, f.Reading, f.Awake, f.State, f.ID, f.RepeatsOf)
+		f.HideRoutine, f.NeedsYou, f.Reading, f.Awake, f.State, f.ID, f.RepeatsOf, f.DueBefore)
 	if err != nil {
 		return nil, err
 	}

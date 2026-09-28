@@ -419,6 +419,27 @@ function ActivityRun({ items, hideProject, onTag, onChanged }: { items: Folded[]
   )
 }
 
+/** Marks everything the unread reading list shows as read, with one Undo. */
+function MarkAllRead({ filter, onChanged }: { filter: EntryFilter; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false)
+  const toast = useToast()
+  const undo = useUndo()
+  const run = async () => {
+    setBusy(true)
+    try {
+      const result = await api.markAllRead(filter)
+      if (result.action_id) undo(`Marked ${result.count} read.`, result.action_id)
+      else toast('Nothing left to read.')
+      onChanged()
+    } catch (failure) {
+      toast(describeError(failure), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return <p className="mark-all"><button type="button" className="btn btn-small" disabled={busy} onClick={() => void run()}>{busy ? 'Marking…' : 'Mark all read'}</button> <span className="muted small">Marks every unread item shown here, across all pages. You can undo it.</span></p>
+}
+
 /**
  * One filterable, paged entry list. With fixedProject it lists that project
  * only (a project page), without a project filter or project links.
@@ -489,6 +510,7 @@ export function EntriesView({ view, initialProject = '', initialQuery = '', init
         <label><span className="visually-hidden">Filter by agent</span><select value={filter.source ?? ''} onChange={(event) => set('source', event.target.value)}><option value="">Any agent</option>{[...new Set([...(filter.source ? [filter.source] : []), ...(table.data?.sources ?? [])])].map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
         <label><span className="visually-hidden">Filter by tag</span><select value={filter.tag ?? ''} onChange={(event) => set('tag', event.target.value)}><option value="">Any tag</option>{[...new Set([...(filter.tag ? [filter.tag] : []), ...(table.data?.tags ?? [])])].map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
       </div>
+      {view === 'reading' && effective.reading === 'unread' && count > 0 && <MarkAllRead filter={effective} onChanged={refreshAll} />}
       {(view === 'activity' || view === 'decisions') && (
         <label className="check"><input type="checkbox" checked={!filter.hide_routine} onChange={(event) => set('hide_routine', event.target.checked ? '' : '1')} /> Show routine entries</label>
       )}

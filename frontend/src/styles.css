@@ -898,6 +898,7 @@ label > textarea {
 .why-here::before { content: 'Why: '; color: var(--text-faint); font-weight: 650; }
 .entry-page-note.why-here::before { content: none; }
 .legend-button { font-size: 0.8rem; }
+.mark-all { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0 0 16px; }
 .entry-page-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0; }
 .dialog-wide { width: min(620px, calc(100vw - 32px)); }
 .label-legend { display: grid; gap: 10px; margin: 0; }

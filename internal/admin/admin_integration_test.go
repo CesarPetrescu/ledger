@@ -1675,3 +1675,117 @@ func TestLabellingStatusSaysWhyItIsPaused(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+func TestMarkAllReadIsOneUndoableAction(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
+	_, s := login(t, server, "correct horse", "")
+	for _, p := range []store.Project{{Slug: "atlas", Name: "Atlas", Tier: "focus"}, {Slug: "beacon", Name: "Beacon", Tier: "park"}} {
+		if _, err := db.UpsertProject(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	news := func(slug, title string) int64 {
+		e, _ := db.AppendEntry(ctx, slug, "note", title, "claude-code", "c")
+		if err := db.SaveEntryMeta(ctx, e.ID, store.EntryMeta{Title: title, Link: "https://example.com/" + strconv.FormatInt(e.ID, 10)}); err != nil {
+			t.Fatal(err)
+		}
+		return e.ID
+	}
+	first, second, other := news("atlas", "One"), news("atlas", "Two"), news("beacon", "Three")
+	already := news("atlas", "Already read")
+	if _, _, err := db.SetOwnerState(ctx, already, store.OwnerPatch{Read: ptr(true)}); err != nil {
+		t.Fatal(err)
+	}
+	readCount := func() int {
+		var n int
+		_ = db.Pool.QueryRow(ctx, `SELECT count(*) FROM entry_owner_state WHERE read_at IS NOT NULL`).Scan(&n)
+		return n
+	}
+	res := request(t, server, http.MethodPost, "/admin/api/reading/read-all?project=atlas", "", authed(s, true))
+	var out struct {
+		Count    int    `json:"count"`
+		ActionID string `json:"action_id"`
+	}
+	if res.Code != http.StatusOK || json.Unmarshal(res.Body.Bytes(), &out) != nil || out.Count != 2 || out.ActionID == "" || readCount() != 3 {
+		t.Fatalf("read all = %d %s read=%d", res.Code, res.Body.String(), readCount())
+	}
+	var label string
+	if err := db.Pool.QueryRow(ctx, `SELECT label FROM owner_action WHERE id=$1`, out.ActionID).Scan(&label); err != nil || label != "Marked 2 read" {
+		t.Fatalf("label = %q %v", label, err)
+	}
+	// Nothing left to mark: no write and no action.
+	if res := request(t, server, http.MethodPost, "/admin/api/reading/read-all?project=atlas", "", authed(s, true)); res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"count":0`) || strings.Contains(res.Body.String(), "action_id") {
+		t.Fatalf("second read all = %d %s", res.Code, res.Body.String())
+	}
+	// One of them changes afterwards: undo restores the other and leaves it.
+	if _, _, err := db.SetOwnerState(ctx, second, store.OwnerPatch{Starred: ptr(true)}); err != nil {
+		t.Fatal(err)
+	}
+	if res := request(t, server, http.MethodPost, "/admin/api/actions/"+out.ActionID+"/undo", "", authed(s, true)); res.Code != http.StatusOK {
+		t.Fatalf("undo = %d %s", res.Code, res.Body.String())
+	}
+	var firstRead, secondRead, otherRead bool
+	if err := db.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM entry_owner_state WHERE entry_id=$1 AND read_at IS NOT NULL),
+ EXISTS (SELECT 1 FROM entry_owner_state WHERE entry_id=$2 AND read_at IS NOT NULL),
+ EXISTS (SELECT 1 FROM entry_owner_state WHERE entry_id=$3 AND read_at IS NOT NULL)`, first, second, other).Scan(&firstRead, &secondRead, &otherRead); err != nil {
+		t.Fatal(err)
+	}
+	if firstRead || !secondRead || otherRead {
+		t.Fatalf("after undo: first=%v second=%v other=%v", firstRead, secondRead, otherRead)
+	}
+	if res := request(t, server, http.MethodPost, "/admin/api/actions/"+out.ActionID+"/undo", "", authed(s, true)); res.Code != http.StatusConflict {
+		t.Fatalf("second undo = %d %s", res.Code, res.Body.String())
+	}
+}
+
+func TestEntriesCanLeaveOutSnoozedOnes(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
+	_, s := login(t, server, "correct horse", "")
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	awake, _ := db.AppendEntry(ctx, "atlas", "todo", "Due soon", "codex", "c")
+	snoozed, _ := db.AppendEntry(ctx, "atlas", "todo", "Snoozed", "codex", "c")
+	if _, _, err := db.SetOwnerState(ctx, snoozed.ID, store.OwnerPatch{SnoozeDays: ptr(3)}); err != nil {
+		t.Fatal(err)
+	}
+	res := request(t, server, http.MethodGet, "/admin/api/entries?kind=todo&status=open&awake=1", "", authed(s, false))
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"id":"`+strconv.FormatInt(awake.ID, 10)+`"`) || strings.Contains(res.Body.String(), `"id":"`+strconv.FormatInt(snoozed.ID, 10)+`"`) {
+		t.Fatalf("awake = %d %s", res.Code, res.Body.String())
+	}
+	if res := request(t, server, http.MethodGet, "/admin/api/entries?awake=2", "", authed(s, false)); res.Code != http.StatusBadRequest {
+		t.Fatalf("bad awake = %d", res.Code)
+	}
+}
+
+func TestEntriesCanKeepOnlyOverdueOnes(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
+	_, s := login(t, server, "correct horse", "")
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	todo := func(body, due string) string {
+		e, err := db.AppendEntry(ctx, "atlas", "todo", body, "codex", "c")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := db.SaveEntryMeta(ctx, e.ID, store.EntryMeta{Title: body, Due: due}); err != nil {
+			t.Fatal(err)
+		}
+		return `"id":"` + strconv.FormatInt(e.ID, 10) + `"`
+	}
+	today := time.Now()
+	late := todo("Late", today.AddDate(0, 0, -1).Format(time.DateOnly))
+	dueToday := todo("Today", today.Format(time.DateOnly))
+	undated := todo("Undated", "")
+	res := request(t, server, http.MethodGet, "/admin/api/entries?kind=todo&status=open&due_before="+today.Format(time.DateOnly), "", authed(s, false))
+	if body := res.Body.String(); res.Code != http.StatusOK || !strings.Contains(body, late) || strings.Contains(body, dueToday) || strings.Contains(body, undated) {
+		t.Fatalf("overdue = %d %s", res.Code, body)
+	}
+	if res := request(t, server, http.MethodGet, "/admin/api/entries?due_before=soon", "", authed(s, false)); res.Code != http.StatusBadRequest {
+		t.Fatalf("bad due_before = %d", res.Code)
+	}
+}

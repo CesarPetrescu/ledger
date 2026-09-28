@@ -1,13 +1,20 @@
 package com.cesarpetrescu.ledger
 
+import android.Manifest
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.provider.Settings as AndroidSettings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -33,12 +40,69 @@ fun Settings(model: LedgerModel) {
     Page {
         item { SummaryCard("Ledger ${BuildConfig.VERSION_NAME}", "Owner console", model.api?.origin ?: "") }
         item { ThemeChoice(model) }
+        item { NotificationsChoice(model) }
         item { SummaryCard("Connected apps", body = "Review ChatGPT, Claude, CLI, and other apps. Revoke access when needed.") { model.go("clients") } }
         item { SummaryCard("Approve a device", body = "Enter the code shown by the Ledger CLI.") { model.go("device") } }
         item { SummaryCard("Calendars", body = "Connect Nextcloud and choose visible calendars.") { model.go("calendar-settings") } }
         item { OutlinedButton(onClick = { openBrowser(context, "https://github.com/CesarPetrescu/ledger/releases/latest", model) }) { Text("Check for updates") } }
         item { ConfirmButton("Sign out", "Sign out and revoke this phone's owner session?", !model.busy, model::logout) }
         item { ConfirmButton("Forget this phone", "Remove the saved session from this phone without contacting the server. Use this if the server is unreachable. The server session remains valid until it expires.", !model.busy, model::forget) }
+    }
+}
+
+/** Turns notifications on or off, asking Android for permission when it must. */
+@Composable
+fun rememberNotificationSwitch(model: LedgerModel, changed: (Boolean) -> Unit): (Boolean) -> Unit {
+    val context = LocalContext.current
+    // Opted in, but Android keeps them from showing: keep what was seen so nothing is lost; only Android's settings can allow them.
+    val blocked = {
+        if (!Notifier.enabled(context)) Notifier.setEnabled(context, true)
+        model.notice = "Turn on Ledger's notifications in Android settings to see them."
+        context.startActivity(Intent(AndroidSettings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(AndroidSettings.EXTRA_APP_PACKAGE, context.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+    val rationale = { (context as? Activity)?.shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS) == true }
+    var deniedBefore by rememberSaveable { mutableStateOf(false) }
+    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        when {
+            granted -> { Notifier.setEnabled(context, true); changed(true) }
+            // Not denied before and still no reason to explain: Android showed no dialog, after
+            // repeated denials or by policy. Asking again would do nothing.
+            !deniedBefore && !rationale() -> blocked()
+            else -> model.notice = "Notifications stay off. Allow them for Ledger in Android settings to turn them on."
+        }
+    }
+    return { want ->
+        when {
+            !want -> { Notifier.setEnabled(context, false); changed(false) }
+            Notifier.permissionMissing(context) -> { deniedBefore = rationale(); ask.launch(Manifest.permission.POST_NOTIFICATIONS) }
+            else -> {
+                // Already on but blocked in Android: keep what was seen so nothing is lost.
+                if (!Notifier.enabled(context)) Notifier.setEnabled(context, true)
+                changed(Notifier.allowed(context))
+                // Permitted, but switched off for Ledger or its channel: that is an Android setting.
+                if (!Notifier.allowed(context)) blocked()
+            }
+        }
+    }
+}
+
+@Composable
+fun NotificationsChoice(model: LedgerModel) {
+    val context = LocalContext.current
+    var on by remember { mutableStateOf(Notifier.enabled(context) && Notifier.allowed(context)) }
+    // Back from Android's notification settings, show what they now allow.
+    LifecycleResumeEffect(Unit) {
+        on = Notifier.enabled(context) && Notifier.allowed(context)
+        onPauseOrDispose {}
+    }
+    val toggle = rememberNotificationSwitch(model) { on = it }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text("Notifications", style = MaterialTheme.typography.titleSmall)
+            Text("Tell me when an agent asks something or a todo becomes overdue. Your phone asks your own server about every 15 minutes; nothing goes through Google.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Switch(checked = on, onCheckedChange = toggle)
     }
 }
 

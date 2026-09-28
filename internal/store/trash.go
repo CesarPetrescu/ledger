@@ -430,6 +430,11 @@ func (db *DB) UndoAction(ctx context.Context, actionID int64) error {
 		Before         *ownerRow `json:"before"`
 		After          ownerRow  `json:"after"`
 		TrashID        int64     `json:"trash_id"`
+		Entries        []struct {
+			EntryID int64     `json:"entry_id"`
+			Before  *ownerRow `json:"before"`
+			After   ownerRow  `json:"after"`
+		} `json:"entries"`
 	}
 	if err := json.Unmarshal(raw, &undo); err != nil {
 		return err
@@ -475,33 +480,29 @@ func (db *DB) UndoAction(ctx context.Context, actionID int64) error {
 			return err
 		}
 	case "owner":
-		var exists bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM entry WHERE id=$1 FOR UPDATE)`, undo.EntryID).Scan(&exists); err != nil {
+		gone, changed, err := restoreOwner(ctx, tx, undo.EntryID, undo.Before, undo.After)
+		switch {
+		case err != nil:
 			return err
-		}
-		if !exists {
+		case gone:
 			return &UndoConflict{"The entry was deleted since. Restore it from Trash first."}
-		}
-		var current ownerRow
-		err := tx.QueryRow(ctx, `SELECT read_at,starred,handled_at,to_char(snoozed_until,'YYYY-MM-DD'),updated_at FROM entry_owner_state WHERE entry_id=$1 FOR UPDATE`, undo.EntryID).
-			Scan(&current.ReadAt, &current.Starred, &current.HandledAt, &current.SnoozedUntil, &current.UpdatedAt)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-		if !sameTime(current.ReadAt, undo.After.ReadAt) || current.Starred != undo.After.Starred ||
-			!sameTime(current.HandledAt, undo.After.HandledAt) || !sameDate(current.SnoozedUntil, undo.After.SnoozedUntil) ||
-			!sameTime(current.UpdatedAt, undo.After.UpdatedAt) {
+		case changed:
 			return &UndoConflict{"This entry's read, star, handled, or snooze state changed since."}
 		}
-		// Restoring the earlier revision exactly lets the action before it be undone too.
-		if undo.Before == nil {
-			_, err = tx.Exec(ctx, `DELETE FROM entry_owner_state WHERE entry_id=$1`, undo.EntryID)
-		} else {
-			_, err = tx.Exec(ctx, `UPDATE entry_owner_state SET read_at=$2,starred=$3,handled_at=$4,snoozed_until=$5::date,updated_at=COALESCE($6,now()) WHERE entry_id=$1`,
-				undo.EntryID, undo.Before.ReadAt, undo.Before.Starred, undo.Before.HandledAt, undo.Before.SnoozedUntil, undo.Before.UpdatedAt)
+	case "read_all":
+		// Entries changed or deleted since keep their state; the rest go back.
+		restored := 0
+		for _, item := range undo.Entries {
+			gone, changed, err := restoreOwner(ctx, tx, item.EntryID, item.Before, item.After)
+			if err != nil {
+				return err
+			}
+			if !gone && !changed {
+				restored++
+			}
 		}
-		if err != nil {
-			return err
+		if restored == 0 {
+			return &UndoConflict{"Every one of them was changed or deleted since."}
 		}
 	case "trash":
 		if err := restore(ctx, tx, undo.TrashID); err != nil {
@@ -515,6 +516,34 @@ func (db *DB) UndoAction(ctx context.Context, actionID int64) error {
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// restoreOwner puts an entry's triage state back to before, unless the entry
+// is gone or its state is no longer after.
+func restoreOwner(ctx context.Context, tx pgx.Tx, entryID int64, before *ownerRow, after ownerRow) (gone, changed bool, err error) {
+	var exists bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM entry WHERE id=$1 FOR UPDATE)`, entryID).Scan(&exists); err != nil || !exists {
+		return !exists, false, err
+	}
+	var current ownerRow
+	err = tx.QueryRow(ctx, `SELECT read_at,starred,handled_at,to_char(snoozed_until,'YYYY-MM-DD'),updated_at FROM entry_owner_state WHERE entry_id=$1 FOR UPDATE`, entryID).
+		Scan(&current.ReadAt, &current.Starred, &current.HandledAt, &current.SnoozedUntil, &current.UpdatedAt)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return false, false, err
+	}
+	if !sameTime(current.ReadAt, after.ReadAt) || current.Starred != after.Starred ||
+		!sameTime(current.HandledAt, after.HandledAt) || !sameDate(current.SnoozedUntil, after.SnoozedUntil) ||
+		!sameTime(current.UpdatedAt, after.UpdatedAt) {
+		return false, true, nil
+	}
+	// Restoring the earlier revision exactly lets the action before it be undone too.
+	if before == nil {
+		_, err = tx.Exec(ctx, `DELETE FROM entry_owner_state WHERE entry_id=$1`, entryID)
+	} else {
+		_, err = tx.Exec(ctx, `UPDATE entry_owner_state SET read_at=$2,starred=$3,handled_at=$4,snoozed_until=$5::date,updated_at=COALESCE($6,now()) WHERE entry_id=$1`,
+			entryID, before.ReadAt, before.Starred, before.HandledAt, before.SnoozedUntil, before.UpdatedAt)
+	}
+	return false, false, err
 }
 
 func sameTime(a, b *time.Time) bool {

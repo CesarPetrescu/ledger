@@ -151,6 +151,25 @@ fun whyHere(entry: JSONObject, today: LocalDate = LocalDate.now(), now: OffsetDa
     return "An open todo from $source, added ${ago(entry.text("created_at"), now)} ago."
 }
 
+/** Offers notifications once, until turned on or dismissed. */
+@Composable
+private fun NotificationPrompt(model: LedgerModel) {
+    val context = LocalContext.current
+    var hidden by remember { mutableStateOf(Notifier.enabled(context) || Notifier.promptDismissed(context)) }
+    val toggle = rememberNotificationSwitch(model) { if (it) hidden = true }
+    if (hidden) return
+    OutlinedCard(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Get a notification when an agent asks you something?", style = MaterialTheme.typography.titleSmall)
+            Text("Also when a todo becomes overdue. Your phone checks your own server about every 15 minutes.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { toggle(true) }) { Text("Turn on") }
+                TextButton(onClick = { Notifier.dismissPrompt(context); hidden = true }) { Text("Not now") }
+            }
+        }
+    }
+}
+
 /** Route that opens a project on a tab, optionally with a search. */
 fun projectRoute(slug: String, tab: String = "activity", q: String = "") = "project/${segment(slug)}/${segment(tab)}/${segment(q)}"
 
@@ -503,6 +522,7 @@ fun InboxScreen(model: LedgerModel) {
                         LegendButton()
                     }
                     AiStatus(data.optJSONObject("metadata"))
+                    NotificationPrompt(model)
                 }
                 item { SectionHeader("Needs you · ${asks.size}") }
                 if (asks.isEmpty()) item { Box(Modifier.padding(horizontal = 20.dp)) { Empty("Nothing is waiting on you.") } }
@@ -665,6 +685,10 @@ fun ReadingScreen(model: LedgerModel) {
     val pager = rememberPager(model, query)
     Column {
         FilterChips(listOf("unread" to "Unread", "starred" to "Starred", "all" to "All"), filter) { filter = it }
+        if (filter == "unread" && pager.entries.isNotEmpty()) TextButton(onClick = {
+            // Everything unread, not just this page; one Undo puts it all back.
+            model.undoable("Marked everything read") { it.request("POST", "/reading/read-all?reading=unread") }
+        }, enabled = !model.busy, modifier = Modifier.padding(horizontal = 12.dp)) { Text("Mark all read") }
         PagedEntries(model, pager, query, empty = if (filter == "unread") "Nothing left to read." else "Nothing here yet.") { entries ->
             items(foldRepeats(entries), key = { it.entry.text("id") }) { f -> EntryItem(model, f.entry, "reading", f.repeats) { e, r -> sheet.entry = e; sheet.repeats = r } }
         }

@@ -99,6 +99,7 @@ func NewServer(config Config, db *store.DB) *Server {
 	s.mux.HandleFunc("GET /admin/api/entries/{id}/related", s.relatedEntries)
 	s.mux.HandleFunc("POST /admin/api/entries/{id}/owner", s.setOwnerState)
 	s.mux.HandleFunc("POST /admin/api/entries/{id}/labels", s.setLabels)
+	s.mux.HandleFunc("POST /admin/api/reading/read-all", s.markAllRead)
 	s.mux.HandleFunc("GET /admin/api/inbox", s.inbox)
 	s.mux.HandleFunc("DELETE /admin/api/entries/{id}", s.trashEntry)
 	s.mux.HandleFunc("GET /admin/api/projects/{slug}/deletion", s.projectDeletionPreview)
@@ -510,6 +511,22 @@ func entryFilter(query url.Values) (store.EntryFilter, error) {
 	if f.State != "" && !slices.Contains([]string{"done", "in_progress", "blocked"}, f.State) {
 		return f, errors.New("state must be done, in_progress, or blocked")
 	}
+	// awake=1 leaves out entries snoozed past today, as the inbox does.
+	switch query.Get("awake") {
+	case "", "0":
+	case "1":
+		f.Awake = true
+	default:
+		return f, errors.New("awake must be 0 or 1")
+	}
+	// due_before=YYYY-MM-DD with the asker's today keeps what is overdue.
+	if day := query.Get("due_before"); day != "" {
+		due, err := time.Parse(time.DateOnly, day)
+		if err != nil {
+			return f, errors.New("due_before must be a date like 2026-01-31")
+		}
+		f.DueBefore = &due
+	}
 	return f, nil
 }
 
@@ -749,6 +766,26 @@ func (s *Server) setLabels(w http.ResponseWriter, r *http.Request) {
 	default:
 		s.internalError(w, r, err)
 	}
+}
+
+// markAllRead marks every unread reading entry matching the table filters
+// in the query string as read, as one undoable action.
+func (s *Server) markAllRead(w http.ResponseWriter, r *http.Request) {
+	filter, err := entryFilter(r.URL.Query())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	count, actionID, err := s.db.MarkAllRead(r.Context(), filter)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	body := map[string]any{"count": count}
+	if count > 0 {
+		body = withAction(body, actionID)
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 // inboxTodos is how many open todos the inbox shows, most urgent first.
