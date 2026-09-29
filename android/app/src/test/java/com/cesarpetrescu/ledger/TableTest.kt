@@ -51,6 +51,21 @@ class TableTest {
         assertEquals(6, days.values.sumOf { it.size })
     }
 
+    @Test fun onlyWebAndEmailLinksOpen() {
+        assertEquals(true, safeLink("https://example.com"))
+        assertEquals(true, safeLink("mailto:a@example.com"))
+        assertEquals(false, safeLink("javascript:alert(1)"))
+        assertEquals(false, safeLink("intent://evil#Intent;end"))
+        assertEquals(false, safeLink("file:///sdcard/x"))
+        assertEquals(false, safeLink(null))
+    }
+
+    @Test fun oversizedMarkdownIsNotFormatted() {
+        assertEquals(true, parseBounded("# Plan\n\n- [x] done\n\n| a | b |\n|---|---|\n| 1 | 2 |") != null)
+        assertEquals(null, parseBounded("x\n\n".repeat(20_000)))
+        assertEquals(null, parseBounded(">".repeat(40) + " deep"))
+    }
+
     @Test fun onlyAgentsAskYou() {
         val ask = { source: String -> JSONObject().put("source", source).put("meta", JSONObject().put("ask", "Pick one")) }
         assertEquals(true, asksYou(ask("codex")))

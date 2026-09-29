@@ -10,7 +10,7 @@ TOKEN = 'a' * 43
 CSRF = 'b' * 43
 PROJECT = dict(slug='atlas', name='Atlas', tier='focus', hours_wk=8, goal='Ship the next milestone', description='A fictional test project', type='', deadline='', needs_me='', automate='', stack='')
 ENTRIES = []
-MESSAGES = [dict(id='1', handoff_id='1', body='Review the Atlas plan', target='', work_state='draft', delivery_state='unseen', source='owner', created_at='2026-09-06T10:00:00Z', files=[])]
+MESSAGES = [dict(id='1', handoff_id='1', body='# Atlas plan\n\n- [x] **Review** the plan\n\n<b>raw html</b>', target='', work_state='draft', delivery_state='unseen', source='owner', created_at='2026-09-06T10:00:00Z', files=[])]
 HANDOFF = dict(id='1', title='Atlas handoff', description='A fictional handoff', scope='Planning', project_slug='atlas', project_name='Atlas', updated_at='2026-09-06T10:00:00Z')
 TODO = dict(id='50', slug='atlas', project_name='Atlas', kind='todo', body='Write the fixture todo in full detail', source='codex', created_at='2026-09-06T09:00:00Z',
             meta=dict(title='Write the fixture todo', tags=['fixture'], priority='high', refs=[], origin='model', unsure=['category'],
