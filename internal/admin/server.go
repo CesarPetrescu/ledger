@@ -67,6 +67,7 @@ type Server struct {
 	failures *oauth.RateLimiter
 	events   *eventStream
 	calendar *calendarapi.Service
+	oauth    *oauth.Server
 }
 
 type sessionKey struct{}
@@ -76,6 +77,7 @@ func NewServer(config Config, db *store.DB) *Server {
 		panic("LEDGER_ADMIN_PASSWORD_HASH must be an Argon2id PHC string")
 	}
 	s := &Server{config: config, origin: publicOrigin(config.PublicURL), db: db, index: retrieval.NewClient(config.IndexURL), mux: http.NewServeMux(), requests: oauth.NewRateLimiter(), failures: oauth.NewRateLimiter(), events: newEventStream(db), calendar: config.Calendar}
+	s.oauth = oauth.NewServer(oauth.Config{PublicURL: strings.TrimRight(config.PublicURL, "/")}, db)
 	if config.InternalProxyCIDR != "" {
 		prefix, err := netip.ParsePrefix(config.InternalProxyCIDR)
 		if err != nil {
@@ -136,6 +138,9 @@ func NewServer(config Config, db *store.DB) *Server {
 	s.mux.HandleFunc("PUT /admin/api/calendar/events/{id}", s.updateCalendarEvent)
 	s.mux.HandleFunc("DELETE /admin/api/calendar/events/{id}", s.deleteCalendarEvent)
 	s.mux.HandleFunc("POST /admin/api/oauth/device", s.deviceRequest)
+	s.mux.HandleFunc("GET /admin/api/oauth/authorize", s.reviewAuthorization)
+	s.mux.HandleFunc("POST /admin/api/oauth/authorize", s.decideAuthorization)
+	s.mux.HandleFunc("PUT /admin/api/oauth/password", s.changeApprovalPassword)
 	s.mux.HandleFunc("GET /admin/api/oauth/clients", s.listClients)
 	s.mux.HandleFunc("POST /admin/api/oauth/revoke", s.revokeClient)
 	s.mux.HandleFunc("GET /admin/api/events", func(w http.ResponseWriter, r *http.Request) { s.events.serve(s.origin, w, r) })
@@ -257,19 +262,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	failureKey := "login-failure:" + ip
-	if s.failures.Blocked(failureKey, 4, 15*time.Minute) {
-		w.Header().Set("Retry-After", "900")
-		writeError(w, http.StatusTooManyRequests, "too many failed logins")
-		return
-	}
-	if !oauth.VerifyPassword(s.config.PasswordHash, input.Password) {
-		if !s.failures.Allow(failureKey, 4, 15*time.Minute) {
-			w.Header().Set("Retry-After", "900")
-			writeError(w, http.StatusTooManyRequests, "too many failed logins")
-			return
-		}
-		writeError(w, http.StatusUnauthorized, "invalid credentials")
+	if !s.verifyOwnerPassword(w, r, input.Password) {
 		return
 	}
 	ctx := r.Context()
@@ -290,6 +283,30 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: session.ID, Path: "/admin", HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode, Expires: session.ExpiresAt, MaxAge: int(time.Until(session.ExpiresAt).Seconds())})
 	writeJSON(w, http.StatusOK, map[string]any{"csrf_token": session.CSRFToken, "expires_at": session.ExpiresAt})
+}
+
+func (s *Server) verifyOwnerPassword(w http.ResponseWriter, r *http.Request, password string) bool {
+	failureKey := "login-failure:" + oauth.RealIP(r, s.trusted)
+	if s.failures.Blocked(failureKey, 4, 15*time.Minute) {
+		w.Header().Set("Retry-After", "900")
+		writeError(w, http.StatusTooManyRequests, "too many failed logins")
+		return false
+	}
+	if !oauth.VerifyPassword(s.config.PasswordHash, password) {
+		if !s.failures.Allow(failureKey, 4, 15*time.Minute) {
+			w.Header().Set("Retry-After", "900")
+			writeError(w, http.StatusTooManyRequests, "too many failed logins")
+			return false
+		}
+		// A wrong confirmation password does not invalidate the existing session.
+		status, message := http.StatusForbidden, "Password not accepted."
+		if r.URL.Path == "/admin/api/login" {
+			status, message = http.StatusUnauthorized, "invalid credentials"
+		}
+		writeError(w, status, message)
+		return false
+	}
+	return true
 }
 
 func clearSessionCookie(w http.ResponseWriter) {

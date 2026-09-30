@@ -1,12 +1,42 @@
 import { useState, type FormEvent } from 'react'
 import { api, describeError, type DeviceRequest } from '../api'
-import { Timestamp } from '../components/ui'
+import { ErrorState, Loading, Timestamp } from '../components/ui'
+import { useResource } from '../hooks/useResource'
 
 const permissions: Record<string, string> = {
   'ledger:read': 'Read project memory',
   'ledger:write': 'Add and update project memory',
   'calendar:read': 'Read selected calendars',
   'calendar:write': 'Change selected calendars',
+}
+
+export function AuthorizePage({ query }: { query: string }) {
+  const review = useResource(() => api.reviewAuthorization(query), query)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [destination, setDestination] = useState('')
+
+  async function decide(action: 'approve' | 'deny') {
+    if (busy) return
+    setBusy(true)
+    setError('')
+    try {
+      const result = await api.decideAuthorization(query, action)
+      setDestination(result.redirect_url)
+      window.location.assign(result.redirect_url)
+    } catch (failure) { setError(describeError(failure)); setBusy(false) }
+  }
+
+  if (review.loading) return <Loading label="Loading access request…" />
+  if (!review.data) return <ErrorState message={review.error || 'Could not load access request.'} onRetry={review.reload} />
+  return <section aria-labelledby="authorize-title">
+    <header className="page-head"><h1 id="authorize-title">Allow {review.data.client_name || 'this app'} to use Ledger?</h1>
+      <p className="muted">Approve with your Ledger owner login. Review the requested access before continuing.</p></header>
+    <ul>{review.data.scopes.map(scope => <li key={scope}>{permissions[scope] ?? scope}{scope === 'calendar:write' && <p>Create, update, and delete events in your selected calendars.</p>}</li>)}</ul>
+    {error && <p role="alert">{error}</p>}
+    {destination ? <p role="status">Decision saved. <a href={destination}>Return to the client</a></p> :
+      <div className="form-actions"><button className="btn" disabled={busy} onClick={() => void decide('deny')}>Deny</button><button className="btn btn-primary" disabled={busy || review.stale || review.refreshing} onClick={() => void decide('approve')}>Allow access</button></div>}
+  </section>
 }
 
 export function ConnectPage() {
