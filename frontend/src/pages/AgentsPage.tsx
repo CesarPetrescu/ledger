@@ -1,5 +1,5 @@
 import { Link } from '../router'
-import { useState } from 'react'
+import { useState, type FormEvent } from 'react'
 import { api, describeError, type AgentSummary, type Client } from '../api'
 import { titleOf } from '../components/entries'
 import { ConfirmDialog } from '../components/ConfirmDialog'
@@ -38,8 +38,51 @@ export function AgentsPage() {
       )}
       <ConnectGuide />
       <ConnectedApps />
+      <ApprovalPassword />
     </>
   )
+}
+
+function ApprovalPassword() {
+  const [ownerPassword, setOwnerPassword] = useState('')
+  const [password, setPassword] = useState('')
+  const [confirmation, setConfirmation] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [saved, setSaved] = useState(false)
+
+  async function save(event: FormEvent) {
+    event.preventDefault()
+    if (busy) return
+    setSaved(false)
+    setError('')
+    if (password !== confirmation) { setError('The new passwords do not match.'); return }
+    setBusy(true)
+    try {
+      await api.changeApprovalPassword(ownerPassword, password)
+      setOwnerPassword('')
+      setPassword('')
+      setConfirmation('')
+      setSaved(true)
+    } catch (failure) { setError(describeError(failure)) }
+    finally { setBusy(false) }
+  }
+
+  return <section className="connected-apps" aria-labelledby="password-title">
+    <h2 id="password-title" className="section-title">Approval password</h2>
+    <p className="muted">You can approve apps with your Ledger owner login. To set a new approval password, confirm your owner password below. You do not need the old approval password.</p>
+    <form onSubmit={event => void save(event)}>
+      <label htmlFor="approval-owner-password">Owner password</label>
+      <input id="approval-owner-password" type="password" autoComplete="current-password" value={ownerPassword} onChange={event => setOwnerPassword(event.target.value)} required maxLength={4096} disabled={busy} />
+      <label htmlFor="new-approval-password">New approval password</label>
+      <input id="new-approval-password" type="password" autoComplete="new-password" value={password} onChange={event => setPassword(event.target.value)} required minLength={12} maxLength={4096} disabled={busy} />
+      <label htmlFor="confirm-approval-password">Confirm new approval password</label>
+      <input id="confirm-approval-password" type="password" autoComplete="new-password" value={confirmation} onChange={event => setConfirmation(event.target.value)} required minLength={12} maxLength={4096} disabled={busy} />
+      {error && <p role="alert">{error}</p>}
+      {saved && <p role="status">Approval password changed.</p>}
+      <div className="form-actions"><button className="btn btn-primary" disabled={busy}>Change approval password</button></div>
+    </form>
+  </section>
 }
 
 function AgentCard({ agent }: { agent: AgentSummary }) {

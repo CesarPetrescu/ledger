@@ -21,7 +21,7 @@ func TestAuthorizeTemplateIsResponsiveAndExplainsPermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := body.String()
-	for _, want := range []string{"name=\"viewport\"", "Allow Desk app to use Ledger?", "Read project memory", "Add and update memory", "Read selected calendars", "Create, update, and delete events", "Allow access", "formnovalidate"} {
+	for _, want := range []string{"name=\"viewport\"", "Allow Desk app to use Ledger?", "Read project memory", "Add and update memory", "Read selected calendars", "Create, update, and delete events", "Allow access", "formnovalidate", "Continue with Ledger owner login"} {
 		if !strings.Contains(html, want) {
 			t.Errorf("authorization page missing %q", want)
 		}
