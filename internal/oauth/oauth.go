@@ -82,8 +82,12 @@ func PrivateNetworkHost(host string) bool {
 		if !ok {
 			continue
 		}
-		// a.192.168.10.59.nip.io and a-192-168-10-59.nip.io both resolve to 192.168.10.59.
+		// a.192.168.10.59.nip.io and a-192-168-10-59.nip.io both resolve to 192.168.10.59, and
+		// fd00--5.nip.io to fd00::5 (IPv6 is written with dashes for colons).
 		labels := strings.Split(name, ".")
+		if addr, err := netip.ParseAddr(strings.ReplaceAll(labels[len(labels)-1], "-", ":")); err == nil && addr.Is6() {
+			return addr.IsPrivate()
+		}
 		parts := strings.Split(labels[len(labels)-1], "-")
 		for _, candidate := range [][]string{labels, parts} {
 			if len(candidate) >= 4 {

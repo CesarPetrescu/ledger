@@ -73,6 +73,8 @@ func TestPlainHTTPRedirectsStayOnThePrivateNetwork(t *testing.T) {
 		"http://box.lan/cb",
 		"http://hub.home.arpa/cb",
 		"http://svc.internal/cb",
+		"http://fd00--5.nip.io:3100/cb",
+		"http://app.fd12-3456-789a--1.sslip.io/cb",
 	} {
 		if !ValidRedirectURI(uri) {
 			t.Errorf("private-network redirect refused: %s", uri)
@@ -87,6 +89,8 @@ func TestPlainHTTPRedirectsStayOnThePrivateNetwork(t *testing.T) {
 		"http://127.0.0.2/cb",
 		"http://169.254.169.254/cb",
 		"http://local.example.com/cb",
+		"http://2001-4860-4860--8888.sslip.io/cb",
+		"http://--1.nip.io/cb",
 		"myapp://oauth/cb",
 	} {
 		if ValidRedirectURI(uri) {
