@@ -34,7 +34,7 @@ func main() {
 			log.Fatal(err)
 		}
 		handler := admin.NewServer(admin.Config{
-			PublicURL:         config.Required("LEDGER_PUBLIC_URL"),
+			PublicURL:         config.PublicURL(),
 			PasswordHash:      config.Required("LEDGER_ADMIN_PASSWORD_HASH"),
 			InternalProxyCIDR: config.Required("LEDGER_INTERNAL_PROXY_CIDR"),
 			IndexURL:          config.Required("LEDGER_INDEX_URL"),

@@ -31,7 +31,7 @@ func main() {
 		db := config.OpenDB(ctx)
 		defer db.Close()
 		handler := webcors.AllowExact(
-			oauth.NewServer(oauth.Config{PublicURL: config.Required("LEDGER_PUBLIC_URL"), PasswordHash: config.Required("LEDGER_PASSWORD_HASH"), InternalProxyCIDR: config.Required("LEDGER_INTERNAL_PROXY_CIDR")}, db),
+			oauth.NewServer(oauth.Config{PublicURL: config.PublicURL(), PasswordHash: config.Required("LEDGER_PASSWORD_HASH"), InternalProxyCIDR: config.Required("LEDGER_INTERNAL_PROXY_CIDR")}, db),
 			"/oauth/register", "/oauth/device", "/oauth/token", "/oauth/revoke",
 		)
 		if err := config.Serve(":8082", handler); err != nil && err != http.ErrServerClosed {

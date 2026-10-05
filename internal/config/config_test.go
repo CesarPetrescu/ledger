@@ -38,3 +38,10 @@ func TestOpenDBAttemptsEndAtTheDeadline(t *testing.T) {
 	}()
 	openDB(context.Background(), "postgres://x@"+listener.Addr().String()+"/x", 300*time.Millisecond, 50*time.Millisecond)
 }
+
+func TestPublicURLDropsTrailingSlash(t *testing.T) {
+	t.Setenv("LEDGER_PUBLIC_URL", "https://ledger.example.com/")
+	if got := PublicURL(); got != "https://ledger.example.com" {
+		t.Fatalf("PublicURL = %q", got)
+	}
+}
