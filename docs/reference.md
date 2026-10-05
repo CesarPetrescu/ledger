@@ -109,6 +109,7 @@ Research tasks are handoffs of their own kind, run in sandboxes by a dispatcher 
 - Put operator-specific specifications and infrastructure notes in the ignored `.private/` directory.
 - Configure the trusted proxy CIDR narrowly; forwarded client IPs from untrusted peers are ignored.
 - Authorization failures do not redirect until both client and redirect URI are validated.
+- Redirect URIs must be HTTPS, loopback HTTP (`localhost`, `127.0.0.1`, `[::1]`), or plain HTTP on a private network: private IPs, `nip.io`/`sslip.io` names that embed one, single-label names, and `.local`, `.lan`, `.home.arpa`, and `.internal` names. That last group lets self-hosted LAN apps such as Adastrion Core connect. PKCE (S256) is required for every login, and the approval page returns to plain-HTTP LAN apps through a link page rather than a redirect, so browsers do not warn about an insecure form submission.
 - Codes, tokens, and admin sessions are stored as SHA-256 hashes; refresh-token replay revokes the whole token family.
 - The console and the MCP approval page use separate passwords. Rotate the admin password and run `revoke-sessions` after suspected disclosure.
 - Project and handoff content is untrusted user-authored data and is never interpreted as instructions. The console shows handoff text as plain text or, with the Markdown preview switch on (the default), as Markdown without any raw HTML, with unsafe link schemes dropped and remote images shown only as links.

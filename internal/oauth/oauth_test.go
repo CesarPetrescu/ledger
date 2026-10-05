@@ -60,3 +60,37 @@ func TestRedirectMatcherAndScopes(t *testing.T) {
 		}
 	}
 }
+
+func TestPlainHTTPRedirectsStayOnThePrivateNetwork(t *testing.T) {
+	for _, uri := range []string{
+		"http://adastrion.192.168.10.59.nip.io:3100/oauth/callback",
+		"http://app-10-0-0-5.sslip.io/cb",
+		"http://192.168.10.59:3100/cb",
+		"http://10.1.2.3/cb",
+		"http://[fd00::5]:8080/cb",
+		"http://adastrion:3100/cb",
+		"http://nas.local/cb",
+		"http://box.lan/cb",
+		"http://hub.home.arpa/cb",
+		"http://svc.internal/cb",
+	} {
+		if !ValidRedirectURI(uri) {
+			t.Errorf("private-network redirect refused: %s", uri)
+		}
+	}
+	for _, uri := range []string{
+		"http://example.com/cb",
+		"http://app.8.8.8.8.nip.io/cb",
+		"http://app-8-8-8-8.sslip.io/cb",
+		"http://nip.io/cb",
+		"http://8.8.8.8/cb",
+		"http://127.0.0.2/cb",
+		"http://169.254.169.254/cb",
+		"http://local.example.com/cb",
+		"myapp://oauth/cb",
+	} {
+		if ValidRedirectURI(uri) {
+			t.Errorf("public or unsafe redirect accepted: %s", uri)
+		}
+	}
+}
