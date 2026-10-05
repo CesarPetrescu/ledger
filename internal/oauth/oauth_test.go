@@ -66,7 +66,6 @@ func TestPlainHTTPRedirectsStayOnThePrivateNetwork(t *testing.T) {
 		"http://192.168.10.59:3100/cb",
 		"http://10.1.2.3/cb",
 		"http://[fd00::5]:8080/cb",
-		"http://adastrion:3100/cb",
 		"http://nas.local/cb",
 		"http://box.lan/cb",
 		"http://hub.home.arpa/cb",
@@ -97,6 +96,14 @@ func TestPlainHTTPRedirectsStayOnThePrivateNetwork(t *testing.T) {
 		"http://0x/cb",
 		"http://0/cb",
 		"http://intranet.8/cb",
+		"http://ｅｘａｍｐｌｅ．ｃｏｍ/cb",
+		"http://ｅｘａｍｐｌｅ/cb",
+		"http://bücher/cb",
+		"http://adastrion:3100/cb",
+		"http://ai/cb",
+		"http://.lan/cb",
+		"http://ｂｏｘ．ｌａｎ/cb",
+		"http://intranet%2Ecom/cb",
 		"myapp://oauth/cb",
 	} {
 		if ValidRedirectURI(uri) {

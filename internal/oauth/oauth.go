@@ -68,42 +68,26 @@ func ValidRedirectURI(candidate string) bool {
 }
 
 // PrivateNetworkHost reports whether host names a machine on a private network, where a plain-http
-// redirect never crosses the internet: a private IP (RFC 1918, IPv6 unique-local), a single-label name,
-// or a name under a suffix reserved for local networks. Public wildcard-DNS names (nip.io, sslip.io) are
-// not trusted: the service, not the name's last labels, decides which address they resolve to. PKCE
-// still binds the code to the client that started the login, and the owner still approves every client.
+// redirect never crosses the internet: an exact private IP (RFC 1918, IPv6 unique-local) or a name under
+// a suffix reserved for local networks. Anything a public resolver could answer for (single-label names,
+// wildcard-DNS services such as nip.io) is refused. PKCE still binds the code to the client that started
+// the login, and the owner still approves every client.
 func PrivateNetworkHost(host string) bool {
 	host = strings.ToLower(strings.TrimSuffix(host, "."))
 	if addr, err := netip.ParseAddr(host); err == nil {
 		return addr.IsPrivate()
 	}
-	// Browsers read a host whose last label is a number (134744072, 0x08080808) as an IPv4 address,
-	// so such a host is never a local name, whatever its suffix rules below would say.
-	if numericLabel(host[strings.LastIndexByte(host, '.')+1:]) {
+	// Only plain ASCII names under a suffix reserved for local networks, so no public DNS can answer
+	// for them and no browser rewrites them (IDNA, percent-escapes, numeric IPv4 forms) into another host.
+	if strings.Trim(host, "abcdefghijklmnopqrstuvwxyz0123456789.-") != "" {
 		return false
 	}
-	if host != "" && !strings.Contains(host, ".") {
-		return true
-	}
 	for _, suffix := range []string{".local", ".lan", ".home.arpa", ".internal"} {
-		if strings.HasSuffix(host, suffix) {
+		if name, ok := strings.CutSuffix(host, suffix); ok && name != "" && !strings.HasSuffix(name, ".") {
 			return true
 		}
 	}
 	return false
-}
-
-// numericLabel reports whether a URL parser following the WHATWG URL standard treats label as a number:
-// decimal digits, or 0x/0X followed by hex digits (possibly none).
-func numericLabel(label string) bool {
-	digits := "0123456789"
-	if len(label) >= 2 && label[0] == '0' && (label[1] == 'x' || label[1] == 'X') {
-		label, digits = label[2:], "0123456789abcdefABCDEF"
-		if label == "" {
-			return true
-		}
-	}
-	return label != "" && strings.Trim(label, digits) == ""
 }
 
 func RedirectMatches(candidate string, registered []string) bool {
