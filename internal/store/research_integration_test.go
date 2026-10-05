@@ -188,6 +188,20 @@ func TestResearchSubmitGoesToReviewAndFeedbackReachesTheNextRun(t *testing.T) {
 	if err != nil || reply.WorkState != "done" {
 		t.Fatalf("owner reply = %#v, %v", reply, err)
 	}
+	// A reply with an attachment goes draft, upload, publish; publishing makes it a note the run sees.
+	attached, err := db.AppendHandoffMessage(ctx, store.HandoffMessage{HandoffID: task.ID, Body: "Use this benchmark sheet.", WorkState: "draft", Source: store.OwnerSource, ClientID: "owner"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.AddHandoffFile(ctx, attached.ID, "bench.csv", "text/csv", []byte("db,qps\n"), "owner", true); err != nil {
+		t.Fatal(err)
+	}
+	if published, err := db.UpdateHandoffMessage(ctx, attached.ID, "publish", "", store.OwnerSource, "owner", true); err != nil || published.WorkState != "done" {
+		t.Fatalf("publish attached reply = %#v, %v", published, err)
+	}
+	if _, err := db.UpdateHandoffMessage(ctx, attached.ID, "reopen", "", store.OwnerSource, "owner", true); !errors.Is(err, store.ErrHandoffForbidden) {
+		t.Fatalf("reopen a note = %v", err)
+	}
 	if _, err := db.UpdateHandoffMessage(ctx, task.MessageID, "release", "", store.OwnerSource, "owner", true); err != nil {
 		t.Fatal(err)
 	}
@@ -196,12 +210,13 @@ func TestResearchSubmitGoesToReviewAndFeedbackReachesTheNextRun(t *testing.T) {
 		t.Fatalf("next = %#v", next)
 	}
 	pack, _ := db.ResearchContext(ctx, task.ID)
-	var sawDeliverable, sawFeedback bool
+	var sawDeliverable, sawFeedback, sawAttached bool
 	for _, note := range pack.Thread {
 		sawDeliverable = sawDeliverable || note.From == "researcher" && strings.HasPrefix(note.Body, "# Findings")
 		sawFeedback = sawFeedback || note.From == "owner" && note.Body == "Add Milvus and cite benchmarks."
+		sawAttached = sawAttached || note.From == "owner" && note.Body == "Use this benchmark sheet."
 	}
-	if !sawDeliverable || !sawFeedback {
+	if !sawDeliverable || !sawFeedback || !sawAttached {
 		t.Fatalf("thread = %#v", pack.Thread)
 	}
 	if err := db.AskResearchOwner(ctx, task.ID, 2, "Which Milvus version?"); err != nil {

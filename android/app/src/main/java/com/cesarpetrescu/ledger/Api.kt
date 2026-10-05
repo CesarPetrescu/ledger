@@ -142,7 +142,9 @@ fun InputStream.readBounded(limit: Int): ByteArray {
 }
 
 /** In a research thread only the brief moves, and the owner's buttons are named for what they do to the task. */
-fun researchActions(work: String, phase: String, brief: Boolean): List<Pair<String, String>> = if (!brief) emptyList() else when (work) {
+fun researchActions(work: String, phase: String, brief: Boolean): List<Pair<String, String>> = if (!brief) {
+    if (work == "draft") listOf("publish" to "Publish") else emptyList()
+} else when (work) {
     "draft" -> listOf("publish" to "Queue")
     "in_progress" -> listOf("release" to "Stop and requeue")
     "blocked" -> when (phase) {

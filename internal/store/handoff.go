@@ -406,9 +406,11 @@ WHERE m.id=$1 AND ($2 OR h.kind='general') FOR UPDATE OF h`, id, admin).Scan(&st
 	if err != nil {
 		return HandoffMessage{}, err
 	}
-	// In a research thread only the brief moves, and only by the owner: the dispatcher claims it, the
-	// researcher blocks it, and the other messages are notes.
-	if briefID != 0 && action != "acknowledge" && (id != briefID || action == "claim" || action == "block" || action == "retarget") {
+	// In a research thread only the brief moves, and only by the owner: the dispatcher claims it and the
+	// researcher blocks it. The other messages are notes; an owner's draft reply (one with attachments)
+	// can only be published, which makes it a note too.
+	note := briefID != 0 && id != briefID
+	if briefID != 0 && action != "acknowledge" && (note && action != "publish" || !note && (action == "claim" || action == "block" || action == "retarget")) {
 		return HandoffMessage{}, ErrHandoffForbidden
 	}
 	err = tx.QueryRow(ctx, `SELECT work_state,client_id,target,seen_at,COALESCE(seen_source,''),COALESCE(seen_client_id,''),claimed_at,COALESCE(claimed_source,''),COALESCE(claimed_client_id,'') FROM handoff_message WHERE id=$1 FOR UPDATE`, id).
@@ -476,6 +478,9 @@ WHERE m.id=$1 AND ($2 OR h.kind='general') FOR UPDATE OF h`, id, admin).Scan(&st
 	default:
 		return HandoffMessage{}, ErrHandoffAction
 	}
+	if note && action == "publish" {
+		newState = "done"
+	}
 	var message HandoffMessage
 	err = tx.QueryRow(ctx, `UPDATE handoff_message SET target=$2,work_state=$3,seen_at=$4,seen_source=$5,seen_client_id=$6,claimed_at=$7,claimed_source=$8,claimed_client_id=$9,status_updated_at=now(),status_updated_source=$10,status_updated_client_id=$11
 WHERE id=$1 RETURNING id,handoff_id,body,target,work_state,source,client_id,seen_at,COALESCE(seen_source,''),COALESCE(seen_client_id,''),claimed_at,COALESCE(claimed_source,''),COALESCE(claimed_client_id,''),status_updated_at,status_updated_source,status_updated_client_id,created_at`,
@@ -484,7 +489,7 @@ WHERE id=$1 RETURNING id,handoff_id,body,target,work_state,source,client_id,seen
 	if err != nil {
 		return HandoffMessage{}, err
 	}
-	if briefID != 0 && newState != state.WorkState {
+	if briefID != 0 && !note && newState != state.WorkState {
 		// The run (if any) ends here: its token stops working once the brief leaves in_progress. Releasing
 		// a stopped task gives it a fresh set of attempts.
 		if _, err := tx.Exec(ctx, `UPDATE research_task SET lease_until=NULL,progress='',failures=CASE WHEN phase='dead' THEN 0 ELSE failures END,phase=NULL WHERE handoff_id=$1`, state.HandoffID); err != nil {

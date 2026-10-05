@@ -258,7 +258,7 @@ function actionNames(message: HandoffMessage, research?: ResearchStatus): Messag
   // In a research thread only the brief moves: the dispatcher claims it and the run blocks it, so the
   // owner's buttons are named for what they do to the task.
   if (research) {
-    if (message.id !== research.message_id) return []
+    if (message.id !== research.message_id) return message.work_state === 'draft' ? [{ action: 'publish', label: 'Publish' }] : []
     if (message.work_state === 'draft') return [{ action: 'publish', label: 'Queue' }]
     if (message.work_state === 'in_progress') return [{ action: 'release', label: 'Stop and requeue' }]
     if (message.work_state === 'blocked') {
