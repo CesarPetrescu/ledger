@@ -15,9 +15,17 @@ const (
 	ScopeWrite         = "ledger:write"
 	ScopeCalendarRead  = "calendar:read"
 	ScopeCalendarWrite = "calendar:write"
+	// ScopeResearchDispatch lets a dispatcher claim research tasks and hand each run its own token. It
+	// grants nothing on /mcp, and nothing asks for it by default.
+	ScopeResearchDispatch = "research:dispatch"
 )
 
-var SupportedScopes = []string{ScopeRead, ScopeWrite, ScopeCalendarRead, ScopeCalendarWrite}
+// MCPScopes are the scopes /mcp understands and the only ones advertised. SupportedScopes are all the
+// scopes this server issues: research:dispatch is granted only to a client that asks for it by name.
+var (
+	MCPScopes       = []string{ScopeRead, ScopeWrite, ScopeCalendarRead, ScopeCalendarWrite}
+	SupportedScopes = []string{ScopeRead, ScopeWrite, ScopeCalendarRead, ScopeCalendarWrite, ScopeResearchDispatch}
+)
 
 func PKCEChallenge(verifier string) string {
 	sum := sha256.Sum256([]byte(verifier))

@@ -38,6 +38,7 @@ type Handoff struct {
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
 	ArchivedAt    *time.Time `json:"archived_at,omitempty"`
+	Kind          string     `json:"kind"`
 	DraftCount    int        `json:"draft_count"`
 	ReadyCount    int        `json:"ready_count"`
 	ProgressCount int        `json:"in_progress_count"`
@@ -82,6 +83,7 @@ type HandoffFile struct {
 type HandoffDetail struct {
 	Handoff    Handoff          `json:"handoff"`
 	Messages   []HandoffMessage `json:"messages"`
+	Research   *ResearchTask    `json:"research,omitempty"`
 	NextBefore *int64           `json:"-"`
 }
 
@@ -112,31 +114,54 @@ func validateHandoffAttribution(source, clientID string) error {
 
 func scanHandoff(row pgx.Row) (Handoff, error) {
 	var h Handoff
-	err := row.Scan(&h.ID, &h.ProjectSlug, &h.ProjectName, &h.Title, &h.Description, &h.Scope, &h.Source, &h.ClientID, &h.CreatedAt, &h.UpdatedAt, &h.ArchivedAt)
+	err := row.Scan(&h.ID, &h.ProjectSlug, &h.ProjectName, &h.Title, &h.Description, &h.Scope, &h.Source, &h.ClientID, &h.CreatedAt, &h.UpdatedAt, &h.ArchivedAt, &h.Kind)
 	return h, err
 }
 
-const handoffColumns = `h.id,COALESCE(h.project_slug,''),COALESCE(p.name,''),h.title,h.description,h.scope,h.source,h.client_id,h.created_at,h.updated_at,h.archived_at`
+const handoffColumns = `h.id,COALESCE(h.project_slug,''),COALESCE(p.name,''),h.title,h.description,h.scope,h.source,h.client_id,h.created_at,h.updated_at,h.archived_at,h.kind`
 
-func (db *DB) CreateHandoff(ctx context.Context, h Handoff, message HandoffMessage) (HandoffDetail, error) {
+func validateNewHandoff(h Handoff, message HandoffMessage) error {
 	if err := ValidateHandoff(h.Title, h.Description, h.Scope); err != nil {
-		return HandoffDetail{}, err
+		return err
 	}
 	if h.ProjectSlug != "" {
 		if err := ValidateProjectSlug(h.ProjectSlug); err != nil {
-			return HandoffDetail{}, err
+			return err
 		}
 	}
 	if err := validateHandoffAttribution(h.Source, h.ClientID); err != nil {
-		return HandoffDetail{}, err
+		return err
 	}
 	if message.WorkState != "draft" && message.WorkState != "ready" {
-		return HandoffDetail{}, fmt.Errorf("new message work_state must be draft or ready")
+		return fmt.Errorf("new message work_state must be draft or ready")
 	}
 	if err := ValidateHandoffMessage(message.Body, message.Target, message.WorkState); err != nil {
-		return HandoffDetail{}, err
+		return err
 	}
-	if err := validateHandoffAttribution(message.Source, message.ClientID); err != nil {
+	return validateHandoffAttribution(message.Source, message.ClientID)
+}
+
+// insertHandoff writes a validated handoff (h.Kind, default general) and its first message.
+func insertHandoff(ctx context.Context, tx pgx.Tx, h Handoff, message HandoffMessage) (Handoff, HandoffMessage, error) {
+	var project any
+	if h.ProjectSlug != "" {
+		project = h.ProjectSlug
+	}
+	if h.Kind == "" {
+		h.Kind = "general"
+	}
+	h, err := scanHandoff(tx.QueryRow(ctx, `INSERT INTO handoff(project_slug,title,description,scope,source,client_id,kind)
+VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id,COALESCE(project_slug,''),'',title,description,scope,source,client_id,created_at,updated_at,archived_at,kind`, project, h.Title, h.Description, h.Scope, h.Source, h.ClientID, h.Kind))
+	if err != nil {
+		return Handoff{}, HandoffMessage{}, err
+	}
+	message.HandoffID = h.ID
+	message, err = insertHandoffMessage(ctx, tx, message)
+	return h, message, err
+}
+
+func (db *DB) CreateHandoff(ctx context.Context, h Handoff, message HandoffMessage) (HandoffDetail, error) {
+	if err := validateNewHandoff(h, message); err != nil {
 		return HandoffDetail{}, err
 	}
 	tx, err := db.Pool.Begin(ctx)
@@ -144,17 +169,7 @@ func (db *DB) CreateHandoff(ctx context.Context, h Handoff, message HandoffMessa
 		return HandoffDetail{}, err
 	}
 	defer tx.Rollback(ctx)
-	var project any
-	if h.ProjectSlug != "" {
-		project = h.ProjectSlug
-	}
-	h, err = scanHandoff(tx.QueryRow(ctx, `INSERT INTO handoff(project_slug,title,description,scope,source,client_id)
-VALUES($1,$2,$3,$4,$5,$6) RETURNING id,COALESCE(project_slug,''),'',title,description,scope,source,client_id,created_at,updated_at,archived_at`, project, h.Title, h.Description, h.Scope, h.Source, h.ClientID))
-	if err != nil {
-		return HandoffDetail{}, err
-	}
-	message.HandoffID = h.ID
-	message, err = insertHandoffMessage(ctx, tx, message)
+	h, message, err = insertHandoff(ctx, tx, h, message)
 	if err != nil {
 		return HandoffDetail{}, err
 	}
@@ -179,7 +194,9 @@ RETURNING id,handoff_id,body,target,work_state,source,client_id,seen_at,COALESCE
 	return message, err
 }
 
-func (db *DB) AppendHandoffMessage(ctx context.Context, message HandoffMessage) (HandoffMessage, error) {
+// AppendHandoffMessage adds a message. Research threads are owner-only, and a reply there is a note
+// (done) rather than new work: the brief alone carries the task's state.
+func (db *DB) AppendHandoffMessage(ctx context.Context, message HandoffMessage, admin bool) (HandoffMessage, error) {
 	if message.WorkState != "draft" && message.WorkState != "ready" {
 		return HandoffMessage{}, fmt.Errorf("new message work_state must be draft or ready")
 	}
@@ -194,14 +211,21 @@ func (db *DB) AppendHandoffMessage(ctx context.Context, message HandoffMessage) 
 		return HandoffMessage{}, err
 	}
 	defer tx.Rollback(ctx)
-	if err := tx.QueryRow(ctx, `SELECT id FROM handoff WHERE id=$1 FOR UPDATE`, message.HandoffID).Scan(&message.HandoffID); err != nil {
+	var kind string
+	if err := tx.QueryRow(ctx, `SELECT id,kind FROM handoff WHERE id=$1 AND ($2 OR kind='general') FOR UPDATE`, message.HandoffID, admin).Scan(&message.HandoffID, &kind); err != nil {
 		return HandoffMessage{}, err
+	}
+	if kind == "research" && message.WorkState == "ready" {
+		message.WorkState = "done"
 	}
 	message, err = insertHandoffMessage(ctx, tx, message)
 	if err != nil {
 		return HandoffMessage{}, err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE handoff SET updated_at=now(),archived_at=NULL WHERE id=$1`, message.HandoffID); err != nil {
+	// New work reactivates the handoff; a research note on a finished task leaves it archived.
+	if _, err := tx.Exec(ctx, `UPDATE handoff SET updated_at=now(),archived_at=CASE
+WHEN EXISTS (SELECT 1 FROM handoff_message WHERE handoff_id=$1 AND work_state<>'done') THEN NULL
+ELSE COALESCE(archived_at,now()) END WHERE id=$1`, message.HandoffID); err != nil {
 		return HandoffMessage{}, err
 	}
 	return message, tx.Commit(ctx)
@@ -230,6 +254,7 @@ AND EXISTS (SELECT 1 FROM handoff_message vm WHERE vm.handoff_id=h.id
   AND ($7 OR vm.work_state<>'draft' OR vm.client_id=$6)
 AND (($5<>'')::boolean AND lower(vm.target)=lower($5) OR $5='' AND ($8 OR vm.target='' OR vm.claimed_client_id=$6 OR strpos(lower($9),lower(vm.target))>0 OR strpos(lower(vm.target),lower($9))>0)))
 AND ($10::timestamptz IS NULL OR (h.updated_at,h.id)<($10,$11::bigint))
+AND ($7 OR h.kind='general')
 GROUP BY h.id,p.name ORDER BY h.updated_at DESC,h.id DESC LIMIT $12`,
 		archive, filter.ProjectSlug, filter.WorkState, strings.TrimSpace(filter.Query), filter.Target, filter.CallerClientID, filter.Admin, filter.IncludeAll || filter.Admin, filter.CallerName, filter.BeforeUpdated, filter.BeforeID, filter.Limit)
 	if err != nil {
@@ -239,7 +264,7 @@ GROUP BY h.id,p.name ORDER BY h.updated_at DESC,h.id DESC LIMIT $12`,
 	out := []Handoff{}
 	for rows.Next() {
 		var h Handoff
-		if err := rows.Scan(&h.ID, &h.ProjectSlug, &h.ProjectName, &h.Title, &h.Description, &h.Scope, &h.Source, &h.ClientID, &h.CreatedAt, &h.UpdatedAt, &h.ArchivedAt, &h.DraftCount, &h.ReadyCount, &h.ProgressCount, &h.BlockedCount, &h.DoneCount); err != nil {
+		if err := rows.Scan(&h.ID, &h.ProjectSlug, &h.ProjectName, &h.Title, &h.Description, &h.Scope, &h.Source, &h.ClientID, &h.CreatedAt, &h.UpdatedAt, &h.ArchivedAt, &h.Kind, &h.DraftCount, &h.ReadyCount, &h.ProgressCount, &h.BlockedCount, &h.DoneCount); err != nil {
 			return nil, err
 		}
 		out = append(out, h)
@@ -251,9 +276,17 @@ func (db *DB) GetHandoff(ctx context.Context, id int64, limit int, before *int64
 	if limit < 1 {
 		limit = 20
 	}
-	h, err := scanHandoff(db.Pool.QueryRow(ctx, `SELECT `+handoffColumns+` FROM handoff h LEFT JOIN project p ON p.slug=h.project_slug WHERE h.id=$1`, id))
+	h, err := scanHandoff(db.Pool.QueryRow(ctx, `SELECT `+handoffColumns+` FROM handoff h LEFT JOIN project p ON p.slug=h.project_slug WHERE h.id=$1 AND ($2 OR h.kind='general')`, id, admin))
 	if err != nil {
 		return HandoffDetail{}, err
+	}
+	var research *ResearchTask
+	if h.Kind == "research" {
+		task, err := db.ResearchTask(ctx, id)
+		if err != nil {
+			return HandoffDetail{}, err
+		}
+		research = &task
 	}
 	err = db.Pool.QueryRow(ctx, `SELECT
 count(*) FILTER (WHERE work_state='draft'),
@@ -296,7 +329,7 @@ ORDER BY id DESC LIMIT $5`, id, admin, viewerClientID, before, limit+1)
 	if err := addFilesToMessages(ctx, db.Pool, messages); err != nil {
 		return HandoffDetail{}, err
 	}
-	return HandoffDetail{Handoff: h, Messages: messages, NextBefore: next}, nil
+	return HandoffDetail{Handoff: h, Messages: messages, Research: research, NextBefore: next}, nil
 }
 
 type handoffRowsQuerier interface {
@@ -344,7 +377,7 @@ func (db *DB) UpdateHandoff(ctx context.Context, h Handoff) (Handoff, error) {
 	}
 	return scanHandoff(db.Pool.QueryRow(ctx, `UPDATE handoff h SET project_slug=$2,title=$3,description=$4,scope=$5,updated_at=now()
 FROM (SELECT 1) x LEFT JOIN project p ON p.slug=$2 WHERE h.id=$1
-RETURNING h.id,COALESCE(h.project_slug,''),COALESCE(p.name,''),h.title,h.description,h.scope,h.source,h.client_id,h.created_at,h.updated_at,h.archived_at`, h.ID, project, h.Title, h.Description, h.Scope))
+RETURNING h.id,COALESCE(h.project_slug,''),COALESCE(p.name,''),h.title,h.description,h.scope,h.source,h.client_id,h.created_at,h.updated_at,h.archived_at,h.kind`, h.ID, project, h.Title, h.Description, h.Scope))
 }
 
 type messageState struct {
@@ -370,9 +403,19 @@ func (db *DB) UpdateHandoffMessage(ctx context.Context, id int64, action, target
 	}
 	defer tx.Rollback(ctx)
 	var state messageState
-	err = tx.QueryRow(ctx, `SELECT h.id FROM handoff h JOIN handoff_message m ON m.handoff_id=h.id WHERE m.id=$1 FOR UPDATE OF h`, id).Scan(&state.HandoffID)
+	var briefID int64
+	var phase string
+	err = tx.QueryRow(ctx, `SELECT h.id,COALESCE(t.message_id,0),COALESCE(t.phase,'') FROM handoff h JOIN handoff_message m ON m.handoff_id=h.id LEFT JOIN research_task t ON t.handoff_id=h.id
+WHERE m.id=$1 AND ($2 OR h.kind='general') FOR UPDATE OF h`, id, admin).Scan(&state.HandoffID, &briefID, &phase)
 	if err != nil {
 		return HandoffMessage{}, err
+	}
+	// In a research thread only the brief moves, and only by the owner: the dispatcher claims it and the
+	// researcher blocks it. The other messages are notes; an owner's draft reply (one with attachments)
+	// can only be published, which makes it a note too.
+	note := briefID != 0 && id != briefID
+	if briefID != 0 && action != "acknowledge" && (note && action != "publish" || !note && (action == "claim" || action == "block" || action == "retarget")) {
+		return HandoffMessage{}, ErrHandoffForbidden
 	}
 	err = tx.QueryRow(ctx, `SELECT work_state,client_id,target,seen_at,COALESCE(seen_source,''),COALESCE(seen_client_id,''),claimed_at,COALESCE(claimed_source,''),COALESCE(claimed_client_id,'') FROM handoff_message WHERE id=$1 FOR UPDATE`, id).
 		Scan(&state.WorkState, &state.AuthorClientID, &state.Target, &state.SeenAt, &state.SeenSource, &state.SeenClientID, &state.ClaimedAt, &state.ClaimedSource, &state.ClaimedClientID)
@@ -417,6 +460,10 @@ func (db *DB) UpdateHandoffMessage(ctx context.Context, id int64, action, target
 		if (state.WorkState != "in_progress" && state.WorkState != "blocked") || !claimant {
 			return HandoffMessage{}, ErrHandoffForbidden
 		}
+		// Accepting a research task needs a result to accept: not a run in progress, a question, or a stop.
+		if briefID != 0 && (state.WorkState != "blocked" || phase != "review") {
+			return HandoffMessage{}, ErrHandoffConflict
+		}
 		newState = "done"
 	case "release":
 		if (state.WorkState != "in_progress" && state.WorkState != "blocked") || !claimant {
@@ -439,6 +486,9 @@ func (db *DB) UpdateHandoffMessage(ctx context.Context, id int64, action, target
 	default:
 		return HandoffMessage{}, ErrHandoffAction
 	}
+	if note && action == "publish" {
+		newState = "done"
+	}
 	var message HandoffMessage
 	err = tx.QueryRow(ctx, `UPDATE handoff_message SET target=$2,work_state=$3,seen_at=$4,seen_source=$5,seen_client_id=$6,claimed_at=$7,claimed_source=$8,claimed_client_id=$9,status_updated_at=now(),status_updated_source=$10,status_updated_client_id=$11
 WHERE id=$1 RETURNING id,handoff_id,body,target,work_state,source,client_id,seen_at,COALESCE(seen_source,''),COALESCE(seen_client_id,''),claimed_at,COALESCE(claimed_source,''),COALESCE(claimed_client_id,''),status_updated_at,status_updated_source,status_updated_client_id,created_at`,
@@ -446,6 +496,20 @@ WHERE id=$1 RETURNING id,handoff_id,body,target,work_state,source,client_id,seen
 		Scan(&message.ID, &message.HandoffID, &message.Body, &message.Target, &message.WorkState, &message.Source, &message.ClientID, &message.SeenAt, &message.SeenSource, &message.SeenClientID, &message.ClaimedAt, &message.ClaimedSource, &message.ClaimedClientID, &message.StatusUpdatedAt, &message.StatusUpdatedSource, &message.StatusUpdatedClientID, &message.CreatedAt)
 	if err != nil {
 		return HandoffMessage{}, err
+	}
+	if briefID != 0 && !note && newState != state.WorkState {
+		// The run (if any) ends here: its token stops working once the brief leaves in_progress. Releasing
+		// a dead task gives it a fresh set of attempts. The owner stopping a run is a decision, not a failed
+		// attempt, so it is noted rather than counted.
+		var attempt int
+		if err := tx.QueryRow(ctx, `UPDATE research_task SET lease_until=NULL,progress='',failures=CASE WHEN phase='dead' THEN 0 ELSE failures END,phase=NULL WHERE handoff_id=$1 RETURNING attempt`, state.HandoffID).Scan(&attempt); err != nil {
+			return HandoffMessage{}, err
+		}
+		if state.WorkState == "in_progress" {
+			if err := researchNote(ctx, tx, state.HandoffID, fmt.Sprintf("Run %d stopped by the owner.", attempt)); err != nil {
+				return HandoffMessage{}, err
+			}
+		}
 	}
 	messages := []HandoffMessage{message}
 	if err := addFilesToMessages(ctx, tx, messages); err != nil {
@@ -507,7 +571,7 @@ func (db *DB) AddHandoffFile(ctx context.Context, messageID int64, filename, med
 	defer tx.Rollback(ctx)
 	var handoffID int64
 	var state, author string
-	if err := tx.QueryRow(ctx, `SELECT h.id FROM handoff h JOIN handoff_message m ON m.handoff_id=h.id WHERE m.id=$1 FOR UPDATE OF h`, messageID).Scan(&handoffID); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT h.id FROM handoff h JOIN handoff_message m ON m.handoff_id=h.id WHERE m.id=$1 AND ($2 OR h.kind='general') FOR UPDATE OF h`, messageID, admin).Scan(&handoffID); err != nil {
 		return HandoffFile{}, err
 	}
 	if err := tx.QueryRow(ctx, `SELECT work_state,client_id FROM handoff_message WHERE id=$1 FOR UPDATE`, messageID).Scan(&state, &author); err != nil {
@@ -527,11 +591,7 @@ func (db *DB) AddHandoffFile(ctx context.Context, messageID int64, filename, med
 	if count >= MaxHandoffFiles || total+int64(len(data)) > MaxHandoffMessageBytes {
 		return HandoffFile{}, ErrHandoffFileLimit
 	}
-	sum := sha256.Sum256(data)
-	var file HandoffFile
-	err = tx.QueryRow(ctx, `INSERT INTO handoff_file(message_id,filename,media_type,size_bytes,sha256,data) VALUES($1,$2,$3,$4,$5,$6)
-RETURNING id,message_id,filename,media_type,size_bytes,encode(sha256,'hex'),created_at`, messageID, filename, mediaType, len(data), sum[:], data).
-		Scan(&file.ID, &file.MessageID, &file.Filename, &file.MediaType, &file.SizeBytes, &file.SHA256, &file.CreatedAt)
+	file, err := insertHandoffFile(ctx, tx, messageID, filename, mediaType, data)
 	if err != nil {
 		return HandoffFile{}, err
 	}
@@ -542,11 +602,21 @@ RETURNING id,message_id,filename,media_type,size_bytes,encode(sha256,'hex'),crea
 	return file, tx.Commit(ctx)
 }
 
+// insertHandoffFile stores one already validated file on a message.
+func insertHandoffFile(ctx context.Context, tx pgx.Tx, messageID int64, filename, mediaType string, data []byte) (HandoffFile, error) {
+	sum := sha256.Sum256(data)
+	var file HandoffFile
+	err := tx.QueryRow(ctx, `INSERT INTO handoff_file(message_id,filename,media_type,size_bytes,sha256,data) VALUES($1,$2,$3,$4,$5,$6)
+RETURNING id,message_id,filename,media_type,size_bytes,encode(sha256,'hex'),created_at`, messageID, filename, mediaType, len(data), sum[:], data).
+		Scan(&file.ID, &file.MessageID, &file.Filename, &file.MediaType, &file.SizeBytes, &file.SHA256, &file.CreatedAt)
+	return file, err
+}
+
 func (db *DB) GetHandoffFile(ctx context.Context, id int64, viewerClientID string, admin bool) (HandoffFile, error) {
 	var file HandoffFile
 	err := db.Pool.QueryRow(ctx, `SELECT f.id,f.message_id,m.handoff_id,h.title,f.filename,f.media_type,f.size_bytes,encode(f.sha256,'hex'),f.created_at,f.data
 FROM handoff_file f JOIN handoff_message m ON m.id=f.message_id JOIN handoff h ON h.id=m.handoff_id
-WHERE f.id=$1 AND ($2 OR m.work_state<>'draft' OR m.client_id=$3)`, id, admin, viewerClientID).
+WHERE f.id=$1 AND ($2 OR (h.kind='general' AND (m.work_state<>'draft' OR m.client_id=$3)))`, id, admin, viewerClientID).
 		Scan(&file.ID, &file.MessageID, &file.HandoffID, &file.HandoffTitle, &file.Filename, &file.MediaType, &file.SizeBytes, &file.SHA256, &file.CreatedAt, &file.Data)
 	return file, err
 }

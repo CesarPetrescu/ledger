@@ -292,6 +292,30 @@ function ProjectStatus({ slug, summary }: { slug: string; summary: ProjectSummar
   )
 }
 
+// ResearchShare is the owner's switch for letting research sandboxes, which browse the open web, see this
+// project's summary in their task context.
+function ResearchShare({ project, onChange }: { project: Project; onChange: (visible: boolean) => void }) {
+  const [busy, setBusy] = useState(false)
+  const toast = useToast()
+  const change = async (visible: boolean) => {
+    setBusy(true)
+    try {
+      onChange((await api.setProjectResearch(project.slug, visible)).research_visible)
+      toast(visible ? 'Research runs now see this project.' : 'Research runs no longer see this project.')
+    } catch (failure) {
+      toast(describeError(failure), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <label className="check research-share">
+      <input type="checkbox" checked={project.research_visible} disabled={busy} onChange={(event) => void change(event.target.checked)} />
+      <span><strong>Share with research runs</strong><span className="muted small">Research sandboxes browse the open web. When this is on, their task context includes this project's type, goal, description, and stack.</span></span>
+    </label>
+  )
+}
+
 function ProjectDetail({ slug, view, summary, onRetrySummary, onSaved }: { slug: string; view: ProjectView; summary: ProjectSummary | undefined; onRetrySummary?: (() => void) | undefined; onSaved: (project: Project) => void }) {
   const detail = useResource(() => api.getProject(slug), `project:${slug}`, 'project')
   const [editing, setEditing] = useState(false)
@@ -358,6 +382,8 @@ function ProjectDetail({ slug, view, summary, onRetrySummary, onSaved }: { slug:
           {view === 'handoffs' ? <ProjectHandoffs slug={slug} />
             : view === 'files' ? <ProjectFiles slug={slug} />
             : view === 'details' ? (
+              <>
+              <ResearchShare project={project} onChange={(visible) => detail.update((current) => ({ ...current, research_visible: visible }))} />
               <ul className="meta-grid" aria-label="Project details">
                 {META_FIELDS.map((field) => (
                   <li key={field.key}>
@@ -366,6 +392,7 @@ function ProjectDetail({ slug, view, summary, onRetrySummary, onSaved }: { slug:
                   </li>
                 ))}
               </ul>
+              </>
             ) : <EntrySplit><EntriesView key={view} view={view} fixedProject={slug} /></EntrySplit>}
         </>
       )}

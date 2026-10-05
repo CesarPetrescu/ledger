@@ -61,6 +61,7 @@ export const atlas: Project = {
   needs_me: 'Review the migration',
   automate: 'Nightly reindex',
   stack: 'Go, PostgreSQL',
+  research_visible: false,
   updated_at: '2026-09-03T10:00:00Z',
   last_entry_at: '2026-09-03T12:00:00Z',
 }
@@ -77,6 +78,7 @@ export const beacon: Project = {
   needs_me: '',
   automate: '',
   stack: '',
+  research_visible: false,
   updated_at: '2026-08-01T10:00:00Z',
 }
 

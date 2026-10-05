@@ -1666,3 +1666,26 @@ label > textarea {
 .markdown-toggle input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .message-preview { padding: 14px 16px; border: 1px dashed var(--border-strong); background: var(--surface-soft); }
 .message-preview .eyebrow { margin: 0 0 8px; }
+
+/* Research tasks: the status panel on a research handoff, its list tag, and the project's share switch. */
+.research-panel {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 12px 16px;
+  margin: 0 0 16px;
+}
+.research-panel[data-phase="review"], .research-panel[data-phase="question"] { border-left-color: var(--warning); }
+.research-panel[data-phase="dead"] { border-left-color: var(--danger); }
+.research-panel h2 { margin: 2px 0 4px; font-size: 1.05rem; }
+.research-panel p { margin: 0 0 8px; }
+.research-facts { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 0; }
+.research-facts div { display: flex; gap: 6px; }
+.research-facts dt { color: var(--text-muted); }
+.research-facts dd { margin: 0; }
+.research-error { overflow-wrap: anywhere; color: var(--danger); }
+.research-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.research-badge { margin-right: 6px; vertical-align: 1px; }
+.research-share { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 16px; }
+.research-share > span { display: flex; flex-direction: column; gap: 2px; }

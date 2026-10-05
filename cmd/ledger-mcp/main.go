@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	calendarapi "github.com/cesarpetrescu/ledger/internal/calendar"
 	"github.com/cesarpetrescu/ledger/internal/config"
@@ -35,6 +36,7 @@ func main() {
 			log.Fatal(err)
 		}
 		server := mcpserver.NewServerWithSpeech(db, config.Required("LEDGER_INDEX_URL"), calendar, speech)
+		go mcpserver.SweepResearch(ctx, db, 15*time.Second)
 		handler := webcors.AllowExact(mcpserver.HTTPHandler(server, db, publicURL), "/mcp")
 		if err := config.Serve(":8081", handler); err != nil && err != http.ErrServerClosed {
 			log.Fatal(err)

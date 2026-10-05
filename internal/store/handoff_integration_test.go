@@ -53,7 +53,7 @@ func TestHandoffLifecycleRoutingAndFiles(t *testing.T) {
 		t.Fatalf("completed handoff = %#v, %v", done.Handoff, err)
 	}
 
-	draft, err := db.AppendHandoffMessage(ctx, store.HandoffMessage{HandoffID: detail.Handoff.ID, Body: "Follow-up with files", Target: "Codex", WorkState: "draft", Source: "claude", ClientID: "claude-client"})
+	draft, err := db.AppendHandoffMessage(ctx, store.HandoffMessage{HandoffID: detail.Handoff.ID, Body: "Follow-up with files", Target: "Codex", WorkState: "draft", Source: "claude", ClientID: "claude-client"}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestConcurrentAppendAndCompletionKeepHandoffActive(t *testing.T) {
 
 	appendDone := make(chan error, 1)
 	go func() {
-		_, err := db.AppendHandoffMessage(ctx, store.HandoffMessage{HandoffID: detail.Handoff.ID, Body: "New active work", WorkState: "ready", Source: "author", ClientID: "author-client"})
+		_, err := db.AppendHandoffMessage(ctx, store.HandoffMessage{HandoffID: detail.Handoff.ID, Body: "New active work", WorkState: "ready", Source: "author", ClientID: "author-client"}, false)
 		appendDone <- err
 	}()
 	waitForBlocked(1)
@@ -192,7 +192,7 @@ func TestConcurrentCompletionsArchiveHandoff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := db.AppendHandoffMessage(ctx, store.HandoffMessage{HandoffID: detail.Handoff.ID, Body: "Second task", WorkState: "ready", Source: "author", ClientID: "author-client"})
+	second, err := db.AppendHandoffMessage(ctx, store.HandoffMessage{HandoffID: detail.Handoff.ID, Body: "Second task", WorkState: "ready", Source: "author", ClientID: "author-client"}, false)
 	if err != nil {
 		t.Fatal(err)
 	}

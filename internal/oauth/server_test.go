@@ -14,14 +14,14 @@ import (
 func TestAuthorizeTemplateIsResponsiveAndExplainsPermissions(t *testing.T) {
 	var body bytes.Buffer
 	err := authorizeTemplate.Execute(&body, map[string]any{
-		"Name": "Desk app", "Read": true, "Write": true, "CalendarRead": true, "CalendarWrite": true,
+		"Name": "Desk app", "Read": true, "Write": true, "CalendarRead": true, "CalendarWrite": true, "ResearchDispatch": true,
 		"Fields": map[string]string{"client_id": "client-1"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	html := body.String()
-	for _, want := range []string{"name=\"viewport\"", "Allow Desk app to use Ledger?", "Read project memory", "Add and update memory", "Read selected calendars", "Create, update, and delete events", "Allow access", "formnovalidate", "Continue with Ledger owner login"} {
+	for _, want := range []string{"name=\"viewport\"", "Allow Desk app to use Ledger?", "Read project memory", "Add and update memory", "Read selected calendars", "Create, update, and delete events", "Run research tasks", "Allow access", "formnovalidate", "Continue with Ledger owner login"} {
 		if !strings.Contains(html, want) {
 			t.Errorf("authorization page missing %q", want)
 		}
@@ -135,5 +135,18 @@ func TestTrailingSlashGivesOneIssuer(t *testing.T) {
 	_ = json.Unmarshal(res.Body.Bytes(), &got)
 	if got["issuer"] != "https://ledger.example.com" || got["token_endpoint"] != "https://ledger.example.com/oauth/token" {
 		t.Fatalf("metadata = %v", got)
+	}
+}
+
+func TestDispatchScopeIsAcceptedButNeverAdvertisedOrDefault(t *testing.T) {
+	// A client that requests every advertised scope must not end up able to run research.
+	if scopes, ok := ParseScopes("research:dispatch"); !ok || len(scopes) != 1 {
+		t.Fatalf("research:dispatch = %v, %v", scopes, ok)
+	}
+	if scopes, _ := ParseScopes(""); HasScope(scopes, ScopeResearchDispatch) {
+		t.Fatal("default scope includes research:dispatch")
+	}
+	if HasScope(MCPScopes, ScopeResearchDispatch) {
+		t.Fatal("research:dispatch is advertised")
 	}
 }

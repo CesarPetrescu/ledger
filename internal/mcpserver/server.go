@@ -187,6 +187,7 @@ func NewServerWithSpeech(db *store.DB, indexURL string, calendar *calendarapi.Se
 	addGlassTools(server, db)
 	addSpeechTool(server, speech)
 	addHandoffTools(server, db)
+	addResearchCreateTool(server, db)
 
 	mcp.AddTool(server, &mcp.Tool{Name: "list_calendars", OutputSchema: outputSchema[calendarList](), Description: "List the Nextcloud calendars explicitly selected by the owner. " + CalendarDescriptionSuffix, Annotations: calendarRead},
 		func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
@@ -354,7 +355,28 @@ func boolPointer(value bool) *bool { return &value }
 
 func HTTPHandler(server *mcp.Server, db *store.DB, publicURL string) http.Handler {
 	transport := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{Stateless: true, MaxRequestBodyBytes: 36 << 20})
-	protected := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	dispatch := NewDispatchServer(db, publicURL)
+	dispatchTransport := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return dispatch }, &mcp.StreamableHTTPOptions{Stateless: true, MaxRequestBodyBytes: 1 << 20})
+	mux := http.NewServeMux()
+	metadata := func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "max-age=3600")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"resource": publicURL + "/mcp", "authorization_servers": []string{publicURL},
+			"scopes_supported": oauth.MCPScopes, "bearer_methods_supported": []string{"header"},
+		})
+	}
+	mux.HandleFunc("GET /.well-known/oauth-protected-resource", metadata)
+	mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", metadata)
+	mux.Handle("/mcp", oauthProtected(db, publicURL, transport, ""))
+	mux.Handle("/mcp/dispatch", oauthProtected(db, publicURL, dispatchTransport, oauth.ScopeResearchDispatch))
+	mux.Handle("/mcp/research", researchHandler(db))
+	return mux
+}
+
+// oauthProtected serves next to holders of a live OAuth access token, which must carry scope when set.
+func oauthProtected(db *store.DB, publicURL string, next http.Handler, scope string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, ok := bearerToken(r.Header)
 		if !ok {
 			unauthorized(w, publicURL)
@@ -365,21 +387,13 @@ func HTTPHandler(server *mcp.Server, db *store.DB, publicURL string) http.Handle
 			unauthorized(w, publicURL)
 			return
 		}
-		transport.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), identityKey{}, identity{ClientID: clientID, Scopes: scopes})))
+		if scope != "" && !oauth.HasScope(scopes, scope) {
+			w.Header().Set("WWW-Authenticate", `Bearer error="insufficient_scope", scope="`+scope+`"`)
+			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), identityKey{}, identity{ClientID: clientID, Scopes: scopes})))
 	})
-	mux := http.NewServeMux()
-	metadata := func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "max-age=3600")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"resource": publicURL + "/mcp", "authorization_servers": []string{publicURL},
-			"scopes_supported": oauth.SupportedScopes, "bearer_methods_supported": []string{"header"},
-		})
-	}
-	mux.HandleFunc("GET /.well-known/oauth-protected-resource", metadata)
-	mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", metadata)
-	mux.Handle("/mcp", protected)
-	return mux
 }
 
 func bearerToken(header http.Header) (string, bool) {
