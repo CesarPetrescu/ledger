@@ -52,7 +52,7 @@ func TestAuthorizationPageCSPAllowsOnlyCallbackOrigin(t *testing.T) {
 		{"https://*.example.com/callback", ""},
 		{"https://example.com;form-action*/callback", ""},
 		{"http://app.example.com/callback", ""},
-		{"http://adastrion.192.168.10.59.nip.io:3100/callback", " http://adastrion.192.168.10.59.nip.io:3100"},
+		{"http://192.168.10.59:3100/callback", " http://192.168.10.59:3100"},
 	} {
 		res := httptest.NewRecorder()
 		authorizationPageHeaders(res, test.redirect)
@@ -153,11 +153,11 @@ func TestDispatchScopeIsAcceptedButNeverAdvertisedOrDefault(t *testing.T) {
 }
 
 func TestApprovalReturnsToLANAppsThroughAPageNotARedirect(t *testing.T) {
-	lan := "http://adastrion.192.168.10.59.nip.io:3100/oauth/callback?code=abc&state=xyz&iss=https%3A%2F%2Fledger.example.com"
+	lan := "http://192.168.10.59:3100/oauth/callback?code=abc&state=xyz&iss=https%3A%2F%2Fledger.example.com"
 	res := httptest.NewRecorder()
 	returnToClient(res, httptest.NewRequest(http.MethodPost, "/oauth/authorize", nil), lan)
 	body := res.Body.String()
-	escaped := "http://adastrion.192.168.10.59.nip.io:3100/oauth/callback?code=abc&amp;state=xyz&amp;iss=https%3A%2F%2Fledger.example.com"
+	escaped := "http://192.168.10.59:3100/oauth/callback?code=abc&amp;state=xyz&amp;iss=https%3A%2F%2Fledger.example.com"
 	if res.Code != http.StatusOK || !strings.Contains(body, `content="0;url=`+escaped+`"`) || !strings.Contains(body, `href="`+escaped+`"`) || strings.Contains(body, "ZgotmplZ") {
 		t.Fatalf("LAN return = %d %s", res.Code, body)
 	}

@@ -68,35 +68,14 @@ func ValidRedirectURI(candidate string) bool {
 }
 
 // PrivateNetworkHost reports whether host names a machine on a private network, where a plain-http
-// redirect never crosses the internet: a private IP (RFC 1918, IPv6 unique-local), a wildcard-DNS name
-// that embeds one (nip.io, sslip.io), a single-label name, or a name under a suffix kept for local
-// networks. Self-hosted apps on a LAN, such as Adastrion Core, return there. PKCE still binds the code
-// to the client that started the login, and the owner still approves every client.
+// redirect never crosses the internet: a private IP (RFC 1918, IPv6 unique-local), a single-label name,
+// or a name under a suffix reserved for local networks. Public wildcard-DNS names (nip.io, sslip.io) are
+// not trusted: the service, not the name's last labels, decides which address they resolve to. PKCE
+// still binds the code to the client that started the login, and the owner still approves every client.
 func PrivateNetworkHost(host string) bool {
 	host = strings.ToLower(strings.TrimSuffix(host, "."))
 	if addr, err := netip.ParseAddr(host); err == nil {
 		return addr.IsPrivate()
-	}
-	for _, suffix := range []string{".nip.io", ".sslip.io"} {
-		name, ok := strings.CutSuffix(host, suffix)
-		if !ok {
-			continue
-		}
-		// a.192.168.10.59.nip.io and a-192-168-10-59.nip.io both resolve to 192.168.10.59, and
-		// fd00--5.nip.io to fd00::5 (IPv6 is written with dashes for colons).
-		labels := strings.Split(name, ".")
-		if addr, err := netip.ParseAddr(strings.ReplaceAll(labels[len(labels)-1], "-", ":")); err == nil && addr.Is6() {
-			return addr.IsPrivate()
-		}
-		parts := strings.Split(labels[len(labels)-1], "-")
-		for _, candidate := range [][]string{labels, parts} {
-			if len(candidate) >= 4 {
-				if addr, err := netip.ParseAddr(strings.Join(candidate[len(candidate)-4:], ".")); err == nil {
-					return addr.IsPrivate()
-				}
-			}
-		}
-		return false
 	}
 	// Browsers read a host whose last label is a number (134744072, 0x08080808) as an IPv4 address,
 	// so such a host is never a local name, whatever its suffix rules below would say.

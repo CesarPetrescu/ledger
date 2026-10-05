@@ -429,7 +429,7 @@ func TestLANAppRegistersApprovesAndExchanges(t *testing.T) {
 	db, _ := testdb.Open(t)
 	password, _ := HashPassword("secret")
 	server := NewServer(Config{PublicURL: "https://ledger.example.com", PasswordHash: password}, db)
-	callback := "http://adastrion.192.168.10.59.nip.io:3100/oauth/callback"
+	callback := "http://192.168.10.59:3100/oauth/callback"
 	register := httptest.NewRequest(http.MethodPost, "/oauth/register", strings.NewReader(`{"redirect_uris":["`+callback+`"],"client_name":"Adastrion Core"}`))
 	register.Header.Set("Content-Type", "application/json")
 	registered := httptest.NewRecorder()
@@ -448,7 +448,7 @@ func TestLANAppRegistersApprovesAndExchanges(t *testing.T) {
 	}
 	page := httptest.NewRecorder()
 	server.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/oauth/authorize?"+form.Encode(), nil))
-	if page.Code != http.StatusOK || !strings.Contains(page.Header().Get("Content-Security-Policy"), "form-action 'self' http://adastrion.192.168.10.59.nip.io:3100;") {
+	if page.Code != http.StatusOK || !strings.Contains(page.Header().Get("Content-Security-Policy"), "form-action 'self' http://192.168.10.59:3100;") {
 		t.Fatalf("authorization page = %d, CSP %q", page.Code, page.Header().Get("Content-Security-Policy"))
 	}
 	approve := httptest.NewRequest(http.MethodPost, "/oauth/authorize", strings.NewReader(form.Encode()))

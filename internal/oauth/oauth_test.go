@@ -63,8 +63,6 @@ func TestRedirectMatcherAndScopes(t *testing.T) {
 
 func TestPlainHTTPRedirectsStayOnThePrivateNetwork(t *testing.T) {
 	for _, uri := range []string{
-		"http://adastrion.192.168.10.59.nip.io:3100/oauth/callback",
-		"http://app-10-0-0-5.sslip.io/cb",
 		"http://192.168.10.59:3100/cb",
 		"http://10.1.2.3/cb",
 		"http://[fd00::5]:8080/cb",
@@ -73,8 +71,6 @@ func TestPlainHTTPRedirectsStayOnThePrivateNetwork(t *testing.T) {
 		"http://box.lan/cb",
 		"http://hub.home.arpa/cb",
 		"http://svc.internal/cb",
-		"http://fd00--5.nip.io:3100/cb",
-		"http://app.fd12-3456-789a--1.sslip.io/cb",
 	} {
 		if !ValidRedirectURI(uri) {
 			t.Errorf("private-network redirect refused: %s", uri)
@@ -82,6 +78,9 @@ func TestPlainHTTPRedirectsStayOnThePrivateNetwork(t *testing.T) {
 	}
 	for _, uri := range []string{
 		"http://example.com/cb",
+		"http://adastrion.192.168.10.59.nip.io:3100/cb",
+		"http://8.8.8.8.10.0.0.1.nip.io/cb",
+		"http://fd00--5.nip.io:3100/cb",
 		"http://app.8.8.8.8.nip.io/cb",
 		"http://app-8-8-8-8.sslip.io/cb",
 		"http://nip.io/cb",
