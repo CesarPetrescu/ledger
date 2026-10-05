@@ -310,7 +310,7 @@ function ResearchPanel({ research }: { research: ResearchStatus }) {
 
 function HandoffThread({ id }: { id: string }) {
   const [markdown, setMarkdown] = useMarkdownPreview()
-  const detail = useResource(() => api.getHandoff(id), `handoff:${id}`, 'handoff handoff_message handoff_file')
+  const detail = useResource(() => api.getHandoff(id), `handoff:${id}`, 'handoff handoff_message handoff_file research_task')
   const [busy, setBusy] = useState('')
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [clipboard] = useState(() => navigator.clipboard)

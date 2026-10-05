@@ -23,6 +23,9 @@ CREATE TABLE research_task (
   checkpoint_at timestamptz
 );
 CREATE INDEX research_task_lease_idx ON research_task(lease_until) WHERE lease_until IS NOT NULL;
+-- Heartbeats and checkpoints change only this row; the console's research panel follows them live.
+CREATE TRIGGER research_task_admin_event AFTER INSERT OR UPDATE OR DELETE ON research_task
+  FOR EACH STATEMENT EXECUTE FUNCTION notify_admin_event('research_task');
 
 -- A run's bearer token, stored hashed. It works only while its task is in progress under the same attempt
 -- with a live lease, so it dies with the run without any revocation step.

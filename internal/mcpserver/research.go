@@ -71,13 +71,33 @@ func NewResearchServer(db *store.DB) *mcp.Server {
 	read := &mcp.ToolAnnotations{ReadOnlyHint: true}
 	write := &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: boolPointer(false)}
 
-	mcp.AddTool(server, &mcp.Tool{Name: "get_task", OutputSchema: outputSchema[store.ResearchContext](), Description: "Get this run's task: the spec (objective, acceptance checklist, deliverable, eval_cmd, budget), attempt counters, the last checkpoint (resume from it when present), the project summary if the owner shared it, and this task's thread: earlier runs, questions, owner answers, and review feedback. " + ResearchDescriptionSuffix, Annotations: read},
+	mcp.AddTool(server, &mcp.Tool{Name: "get_task", OutputSchema: outputSchema[store.ResearchContext](), Description: "Get this run's task: the spec (objective, acceptance checklist, deliverable, eval_cmd, budget), attempt counters, the last checkpoint (resume from it when present), files attached to the brief, the project summary if the owner shared it, and this task's thread: earlier runs, questions, owner answers, and review feedback, with their files. Open files with read_file. " + ResearchDescriptionSuffix, Annotations: read},
 		func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
 			pack, err := db.ResearchContext(ctx, researchRunFrom(ctx).ID)
 			if err != nil {
 				return researchError(err)
 			}
 			return nil, pack, nil
+		})
+
+	type readFileInput struct {
+		FileID string `json:"file_id" jsonschema:"file ID from get_task (files on the brief or on a thread note)"`
+	}
+	mcp.AddTool(server, &mcp.Tool{Name: "read_file", OutputSchema: outputSchema[handoffFileResource](), Description: "Read one file attached to this task's brief or thread as embedded MCP resource content. " + ResearchDescriptionSuffix, Annotations: read},
+		func(ctx context.Context, _ *mcp.CallToolRequest, input readFileInput) (*mcp.CallToolResult, any, error) {
+			fileID, err := strconv.ParseInt(input.FileID, 10, 64)
+			if err != nil || fileID < 1 {
+				return nil, nil, fmt.Errorf("file_id must be a positive integer string")
+			}
+			file, err := db.ResearchFile(ctx, researchRunFrom(ctx).ID, fileID)
+			if store.IsNotFound(err) {
+				return handoffResultError(err)
+			}
+			if err != nil {
+				return nil, nil, err
+			}
+			uri := "ledger://research-file/" + input.FileID
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.EmbeddedResource{Resource: &mcp.ResourceContents{URI: uri, MIMEType: file.MediaType, Blob: file.Data}}}}, handoffFileResource{ID: input.FileID, Filename: file.Filename, URI: uri}, nil
 		})
 
 	type heartbeatInput struct {

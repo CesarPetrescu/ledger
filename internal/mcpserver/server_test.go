@@ -205,11 +205,12 @@ func TestResearchAndDispatchToolsAreExact(t *testing.T) {
 		samples map[string]any
 	}{
 		"research": {NewResearchServer(nil), map[string]any{
-			"get_task":   store.ResearchContext{Task: task, Project: &store.ResearchProject{Slug: "atlas", Name: "Atlas"}, Thread: []store.ResearchNote{{From: "owner", Body: "Use 2026 data", At: now}}},
+			"get_task":   store.ResearchContext{Task: task, Files: []store.HandoffFile{}, Project: &store.ResearchProject{Slug: "atlas", Name: "Atlas"}, Thread: []store.ResearchNote{{From: "owner", Body: "Use 2026 data", At: now, Files: []store.HandoffFile{{ID: 5, MessageID: 6, Filename: "bench.csv", CreatedAt: now}}}}},
 			"heartbeat":  leaseOutput{LeaseUntil: now},
 			"checkpoint": leaseOutput{LeaseUntil: now},
 			"submit":     submitOutput{MessageID: "12", State: "blocked", Phase: "review"},
 			"ask_owner":  stateOutput{State: "blocked", Phase: "question"},
+			"read_file":  handoffFileResource{ID: "5", Filename: "bench.csv", URI: "ledger://research-file/5"},
 		}},
 		"dispatch": {NewDispatchServer(nil, "https://ledger.example.com"), map[string]any{
 			"claim_research_task":  dispatchClaim{Claimed: true, Task: &task, Token: "t", Endpoint: "https://ledger.example.com/mcp/research"},

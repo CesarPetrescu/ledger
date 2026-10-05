@@ -572,15 +572,17 @@ type ResearchProject struct {
 }
 
 type ResearchNote struct {
-	From string    `json:"from"`
-	Body string    `json:"body"`
-	At   time.Time `json:"at"`
+	From  string        `json:"from"`
+	Body  string        `json:"body"`
+	At    time.Time     `json:"at"`
+	Files []HandoffFile `json:"files"`
 }
 
 // ResearchContext is what get_task hands a run: the task, the project only where the owner shared it
 // with research, and this task's own thread (earlier runs, questions, answers, and review feedback).
 type ResearchContext struct {
 	Task    ResearchTask     `json:"task"`
+	Files   []HandoffFile    `json:"files"`
 	Project *ResearchProject `json:"project,omitempty"`
 	Thread  []ResearchNote   `json:"thread"`
 }
@@ -592,7 +594,12 @@ func (db *DB) ResearchContext(ctx context.Context, id int64) (ResearchContext, e
 	if err != nil {
 		return ResearchContext{}, err
 	}
-	out := ResearchContext{Task: task, Thread: []ResearchNote{}}
+	out := ResearchContext{Task: task, Files: []HandoffFile{}, Thread: []ResearchNote{}}
+	brief := []HandoffMessage{{ID: task.MessageID, HandoffID: id}}
+	if err := addFilesToMessages(ctx, db.Pool, brief); err != nil {
+		return ResearchContext{}, err
+	}
+	out.Files = brief[0].Files
 	if task.ProjectSlug != "" {
 		var p ResearchProject
 		err := db.Pool.QueryRow(ctx, `SELECT slug,name,research_visible,CASE WHEN research_visible THEN type ELSE '' END,CASE WHEN research_visible THEN goal ELSE '' END,
@@ -624,6 +631,9 @@ WHERE handoff_id=$1 AND id<>$2 AND work_state<>'draft' ORDER BY id DESC LIMIT $3
 		return ResearchContext{}, err
 	}
 	slices.Reverse(messages)
+	if err := addFilesToMessages(ctx, db.Pool, messages); err != nil {
+		return ResearchContext{}, err
+	}
 	for _, m := range messages {
 		from := "agent"
 		switch {
@@ -638,9 +648,18 @@ WHERE handoff_id=$1 AND id<>$2 AND work_state<>'draft' ORDER BY id DESC LIMIT $3
 		if runes := []rune(body); len(runes) > researchNoteRunes {
 			body = string(runes[:researchNoteRunes]) + "…"
 		}
-		out.Thread = append(out.Thread, ResearchNote{From: from, Body: body, At: m.CreatedAt})
+		out.Thread = append(out.Thread, ResearchNote{From: from, Body: body, At: m.CreatedAt, Files: m.Files})
 	}
 	return out, nil
+}
+
+// ResearchFile returns one attachment from this task's own thread, for the run's read_file tool.
+func (db *DB) ResearchFile(ctx context.Context, id, fileID int64) (HandoffFile, error) {
+	var file HandoffFile
+	err := db.Pool.QueryRow(ctx, `SELECT f.id,f.message_id,m.handoff_id,f.filename,f.media_type,f.size_bytes,encode(f.sha256,'hex'),f.created_at,f.data
+FROM handoff_file f JOIN handoff_message m ON m.id=f.message_id WHERE f.id=$1 AND m.handoff_id=$2 AND m.work_state<>'draft'`, fileID, id).
+		Scan(&file.ID, &file.MessageID, &file.HandoffID, &file.Filename, &file.MediaType, &file.SizeBytes, &file.SHA256, &file.CreatedAt, &file.Data)
+	return file, err
 }
 
 // SetProjectResearchVisible is the owner's switch for sharing a project's summary with research runs.

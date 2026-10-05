@@ -82,6 +82,7 @@ The run connects with `Authorization: Bearer $LEDGER_RESEARCH_TOKEN`. This endpo
 | Tool | What it does |
 |---|---|
 | `get_task` | Returns the spec, attempt counters, last checkpoint, the project summary (only if the owner turned on **Share with research runs** for that project), and this task's thread |
+| `read_file` | Reads a file attached to this task's brief or thread, such as an owner's attachment or an earlier run's deliverable files |
 | `heartbeat` | Renews the lease, with an optional one-line `progress` |
 | `checkpoint` | Saves compact resumable `state` and renews the lease |
 | `submit` | Sends the Markdown `deliverable` and up to 10 `files` (25 MiB in total, base64) for review. Ends the run |

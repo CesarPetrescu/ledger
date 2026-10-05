@@ -78,6 +78,23 @@ func TestResearchTokensAreConfinedToTheirOwnTask(t *testing.T) {
 		t.Fatalf("agent get_handoff on research = %#v, %v", hidden, err)
 	}
 
+	// The owner attaches a file to each task's thread; a run may read its own task's file only.
+	attach := func(task store.ResearchTask, name string) string {
+		reply, err := db.AppendHandoffMessage(ctx, store.HandoffMessage{HandoffID: task.ID, Body: "See " + name, WorkState: "draft", Source: store.OwnerSource, ClientID: "owner"}, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		file, err := db.AddHandoffFile(ctx, reply.ID, name, "text/csv", []byte(name+" data"), "owner", true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.UpdateHandoffMessage(ctx, reply.ID, "publish", "", store.OwnerSource, "owner", true); err != nil {
+			t.Fatal(err)
+		}
+		return strconv.FormatInt(file.ID, 10)
+	}
+	mineFile, otherFile := attach(created["Mine"], "mine.csv"), attach(created["Someone else's"], "other.csv")
+
 	if status := rawStatus(t, server.URL+"/mcp/dispatch", "agent-token"); status != http.StatusForbidden {
 		t.Fatalf("agent token on /mcp/dispatch = %d", status)
 	}
@@ -105,12 +122,28 @@ func TestResearchTokensAreConfinedToTheirOwnTask(t *testing.T) {
 	for _, tool := range tools.Tools {
 		names = append(names, tool.Name)
 	}
-	if strings.Join(names, ",") != "ask_owner,checkpoint,get_task,heartbeat,submit" {
+	if strings.Join(names, ",") != "ask_owner,checkpoint,get_task,heartbeat,read_file,submit" {
 		t.Fatalf("research tools = %v", names)
 	}
 	pack := callTool[store.ResearchContext](t, run, "get_task", map[string]any{})
 	if pack.Task.ID != created["Mine"].ID || pack.Task.Attempt != 1 || pack.Task.Title != "Mine" {
 		t.Fatalf("get_task = %#v", pack.Task)
+	}
+	var listedFile string
+	for _, note := range pack.Thread {
+		for _, file := range note.Files {
+			listedFile = strconv.FormatInt(file.ID, 10)
+		}
+	}
+	if listedFile != mineFile {
+		t.Fatalf("thread files = %#v, want %s", pack.Thread, mineFile)
+	}
+	read, err := run.CallTool(ctx, &mcp.CallToolParams{Name: "read_file", Arguments: map[string]any{"file_id": mineFile}})
+	if err != nil || read.IsError || string(read.Content[0].(*mcp.EmbeddedResource).Resource.Blob) != "mine.csv data" {
+		t.Fatalf("read own file = %#v, %v", read, err)
+	}
+	if other, err := run.CallTool(ctx, &mcp.CallToolParams{Name: "read_file", Arguments: map[string]any{"file_id": otherFile}}); err != nil || !other.IsError {
+		t.Fatalf("read another task's file = %#v, %v", other, err)
 	}
 	callTool[leaseOutput](t, run, "checkpoint", map[string]any{"state": "two sources read"})
 	callTool[leaseOutput](t, dispatcher, "renew_research_lease", map[string]any{"task_id": strconv.FormatInt(claim.Task.ID, 10), "attempt": 1})
@@ -131,7 +164,7 @@ func TestResearchTokensAreConfinedToTheirOwnTask(t *testing.T) {
 		t.Fatalf("end after submit = %#v", ended)
 	}
 	var files int
-	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM handoff_file f JOIN handoff_message m ON m.id=f.message_id WHERE m.handoff_id=$1`, created["Mine"].ID).Scan(&files); err != nil || files != 1 {
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM handoff_file f JOIN handoff_message m ON m.id=f.message_id WHERE m.handoff_id=$1`, created["Mine"].ID).Scan(&files); err != nil || files != 2 {
 		t.Fatalf("submitted files = %d, %v", files, err)
 	}
 }
