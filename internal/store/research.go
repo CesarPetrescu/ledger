@@ -587,7 +587,7 @@ type ResearchContext struct {
 	Thread  []ResearchNote   `json:"thread"`
 }
 
-const researchThreadMessages, researchNoteRunes = 30, 8000
+const researchThreadMessages = 30
 
 func (db *DB) ResearchContext(ctx context.Context, id int64) (ResearchContext, error) {
 	task, err := db.ResearchTask(ctx, id)
@@ -644,11 +644,8 @@ WHERE handoff_id=$1 AND id<>$2 AND work_state<>'draft' ORDER BY id DESC LIMIT $3
 		case strings.HasPrefix(m.ClientID, "research:"):
 			from = "researcher"
 		}
-		body := m.Body
-		if runes := []rune(body); len(runes) > researchNoteRunes {
-			body = string(runes[:researchNoteRunes]) + "…"
-		}
-		out.Thread = append(out.Thread, ResearchNote{From: from, Body: body, At: m.CreatedAt, Files: m.Files})
+		// Whole bodies: a run sent back for revision needs the full earlier deliverable.
+		out.Thread = append(out.Thread, ResearchNote{From: from, Body: m.Body, At: m.CreatedAt, Files: m.Files})
 	}
 	return out, nil
 }

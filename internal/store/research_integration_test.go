@@ -166,7 +166,8 @@ func TestResearchSubmitGoesToReviewAndFeedbackReachesTheNextRun(t *testing.T) {
 	db, ctx := researchDB(t)
 	task := newResearch(t, db, ctx, "Survey", 3)
 	c := claim(t, db, ctx)
-	message, err := db.SubmitResearch(ctx, task.ID, 1, "# Findings\n\nqdrant, pgvector, lancedb", []store.ResearchFile{{Filename: "table.csv", MediaType: "text/csv", Data: []byte("a,b\n")}})
+	long := "# Findings\n\nqdrant, pgvector, lancedb\n\n" + strings.Repeat("Benchmark detail. ", 1000)
+	message, err := db.SubmitResearch(ctx, task.ID, 1, long, []store.ResearchFile{{Filename: "table.csv", MediaType: "text/csv", Data: []byte("a,b\n")}})
 	if err != nil || len(message.Files) != 1 || message.WorkState != "done" || message.Source != "Researcher (run 1)" {
 		t.Fatalf("submit = %#v, %v", message, err)
 	}
@@ -212,7 +213,7 @@ func TestResearchSubmitGoesToReviewAndFeedbackReachesTheNextRun(t *testing.T) {
 	pack, _ := db.ResearchContext(ctx, task.ID)
 	var sawDeliverable, sawFeedback, sawAttached bool
 	for _, note := range pack.Thread {
-		sawDeliverable = sawDeliverable || note.From == "researcher" && strings.HasPrefix(note.Body, "# Findings")
+		sawDeliverable = sawDeliverable || note.From == "researcher" && note.Body == long
 		sawFeedback = sawFeedback || note.From == "owner" && note.Body == "Add Milvus and cite benchmarks."
 		sawAttached = sawAttached || note.From == "owner" && note.Body == "Use this benchmark sheet."
 	}

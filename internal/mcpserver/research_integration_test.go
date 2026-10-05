@@ -60,9 +60,9 @@ func TestResearchTokensAreConfinedToTheirOwnTask(t *testing.T) {
 	defer server.Close()
 
 	agent := connectMCP(t, server.URL+"/mcp", "agent-token", "claude-code")
-	created := map[string]store.ResearchTask{}
+	created := map[string]researchTaskOutput{}
 	for _, title := range []string{"Mine", "Someone else's"} {
-		task := callTool[store.ResearchTask](t, agent, "create_research_task", map[string]any{
+		task := callTool[researchTaskOutput](t, agent, "create_research_task", map[string]any{
 			"project_slug": "atlas", "title": title, "objective": "Compare vector databases", "acceptance": []string{"Three options"}, "budget": map[string]any{"minutes": 20},
 		})
 		if task.State != "ready" || task.Spec.Budget.Minutes != 20 {
@@ -79,8 +79,9 @@ func TestResearchTokensAreConfinedToTheirOwnTask(t *testing.T) {
 	}
 
 	// The owner attaches a file to each task's thread; a run may read its own task's file only.
-	attach := func(task store.ResearchTask, name string) string {
-		reply, err := db.AppendHandoffMessage(ctx, store.HandoffMessage{HandoffID: task.ID, Body: "See " + name, WorkState: "draft", Source: store.OwnerSource, ClientID: "owner"}, true)
+	attach := func(task researchTaskOutput, name string) string {
+		id, _ := strconv.ParseInt(task.ID, 10, 64)
+		reply, err := db.AppendHandoffMessage(ctx, store.HandoffMessage{HandoffID: id, Body: "See " + name, WorkState: "draft", Source: store.OwnerSource, ClientID: "owner"}, true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -125,14 +126,14 @@ func TestResearchTokensAreConfinedToTheirOwnTask(t *testing.T) {
 	if strings.Join(names, ",") != "ask_owner,checkpoint,get_task,heartbeat,read_file,submit" {
 		t.Fatalf("research tools = %v", names)
 	}
-	pack := callTool[store.ResearchContext](t, run, "get_task", map[string]any{})
+	pack := callTool[researchContextOutput](t, run, "get_task", map[string]any{})
 	if pack.Task.ID != created["Mine"].ID || pack.Task.Attempt != 1 || pack.Task.Title != "Mine" {
 		t.Fatalf("get_task = %#v", pack.Task)
 	}
 	var listedFile string
 	for _, note := range pack.Thread {
 		for _, file := range note.Files {
-			listedFile = strconv.FormatInt(file.ID, 10)
+			listedFile = file.ID
 		}
 	}
 	if listedFile != mineFile {
@@ -146,7 +147,7 @@ func TestResearchTokensAreConfinedToTheirOwnTask(t *testing.T) {
 		t.Fatalf("read another task's file = %#v, %v", other, err)
 	}
 	callTool[leaseOutput](t, run, "checkpoint", map[string]any{"state": "two sources read"})
-	callTool[leaseOutput](t, dispatcher, "renew_research_lease", map[string]any{"task_id": strconv.FormatInt(claim.Task.ID, 10), "attempt": 1})
+	callTool[leaseOutput](t, dispatcher, "renew_research_lease", map[string]any{"task_id": claim.Task.ID, "attempt": 1})
 	submitted := callTool[submitOutput](t, run, "submit", map[string]any{"deliverable": "# Result", "files": []map[string]any{{"filename": "notes.txt", "content_base64": "aGk="}}})
 	if submitted.Phase != "review" {
 		t.Fatalf("submit = %#v", submitted)
@@ -155,16 +156,16 @@ func TestResearchTokensAreConfinedToTheirOwnTask(t *testing.T) {
 	if status := rawStatus(t, server.URL+"/mcp/research", claim.Token); status != http.StatusUnauthorized {
 		t.Fatalf("token after submit = %d", status)
 	}
-	lost, err := dispatcher.CallTool(ctx, &mcp.CallToolParams{Name: "renew_research_lease", Arguments: map[string]any{"task_id": strconv.FormatInt(claim.Task.ID, 10), "attempt": 1}})
+	lost, err := dispatcher.CallTool(ctx, &mcp.CallToolParams{Name: "renew_research_lease", Arguments: map[string]any{"task_id": claim.Task.ID, "attempt": 1}})
 	if err != nil || !lost.IsError || !strings.Contains(lost.Content[0].(*mcp.TextContent).Text, "lease_lost") {
 		t.Fatalf("renew after submit = %#v, %v", lost, err)
 	}
-	ended := callTool[store.ResearchTask](t, dispatcher, "end_research_run", map[string]any{"task_id": strconv.FormatInt(claim.Task.ID, 10), "attempt": 1, "error": "exit 0"})
+	ended := callTool[researchTaskOutput](t, dispatcher, "end_research_run", map[string]any{"task_id": claim.Task.ID, "attempt": 1, "error": "exit 0"})
 	if ended.Phase != "review" || ended.Failures != 0 {
 		t.Fatalf("end after submit = %#v", ended)
 	}
 	var files int
-	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM handoff_file f JOIN handoff_message m ON m.id=f.message_id WHERE m.handoff_id=$1`, created["Mine"].ID).Scan(&files); err != nil || files != 2 {
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM handoff_file f JOIN handoff_message m ON m.id=f.message_id WHERE m.handoff_id=$1::bigint`, created["Mine"].ID).Scan(&files); err != nil || files != 2 {
 		t.Fatalf("submitted files = %d, %v", files, err)
 	}
 }

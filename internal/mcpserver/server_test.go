@@ -75,7 +75,7 @@ func TestToolsListIsExactAndAnnotated(t *testing.T) {
 		"update_handoff_message": {handoffMessageOutput(store.HandoffMessage{SeenAt: &now, ClaimedAt: &now})},
 		"attach_handoff_file":    {handoffFileOutput(file)},
 		"read_handoff_file":      {map[string]string{"id": "9007199254740993", "filename": "note.txt", "uri": "ledger://handoff-file/9007199254740993"}},
-		"create_research_task":   {researchSample(now)},
+		"create_research_task":   {taskOutput(researchSample(now))},
 	}
 	for name, key := range map[string]string{"list_projects": "projects", "list_calendars": "calendars", "list_calendar_events": "events"} {
 		for i, value := range samples[name] {
@@ -200,12 +200,23 @@ func researchSample(now time.Time) store.ResearchTask {
 func TestResearchAndDispatchToolsAreExact(t *testing.T) {
 	now := time.Now().UTC()
 	task := researchSample(now)
+	task.DependsOn = []int64{9007199254740993}
+	out := taskOutput(task)
+	if encoded, _ := json.Marshal(out); !strings.Contains(string(encoded), `"id":"4"`) || !strings.Contains(string(encoded), `"message_id":"9"`) || !strings.Contains(string(encoded), `"depends_on":["9007199254740993"]`) {
+		t.Fatalf("task output IDs must be strings: %s", encoded)
+	}
+	schema := outputSchema[researchTaskOutput]()
+	for _, field := range []string{"id", "message_id"} {
+		if property := schema.Properties[field]; property == nil || property.Type != "string" {
+			t.Fatalf("schema %s = %#v, want a string", field, property)
+		}
+	}
 	for name, test := range map[string]struct {
 		server  *mcp.Server
 		samples map[string]any
 	}{
 		"research": {NewResearchServer(nil), map[string]any{
-			"get_task":   store.ResearchContext{Task: task, Files: []store.HandoffFile{}, Project: &store.ResearchProject{Slug: "atlas", Name: "Atlas"}, Thread: []store.ResearchNote{{From: "owner", Body: "Use 2026 data", At: now, Files: []store.HandoffFile{{ID: 5, MessageID: 6, Filename: "bench.csv", CreatedAt: now}}}}},
+			"get_task":   contextOutput(store.ResearchContext{Task: task, Files: []store.HandoffFile{}, Project: &store.ResearchProject{Slug: "atlas", Name: "Atlas"}, Thread: []store.ResearchNote{{From: "owner", Body: "Use 2026 data", At: now, Files: []store.HandoffFile{{ID: 9007199254740993, MessageID: 6, Filename: "bench.csv", CreatedAt: now}}}}}),
 			"heartbeat":  leaseOutput{LeaseUntil: now},
 			"checkpoint": leaseOutput{LeaseUntil: now},
 			"submit":     submitOutput{MessageID: "12", State: "blocked", Phase: "review"},
@@ -213,9 +224,9 @@ func TestResearchAndDispatchToolsAreExact(t *testing.T) {
 			"read_file":  handoffFileResource{ID: "5", Filename: "bench.csv", URI: "ledger://research-file/5"},
 		}},
 		"dispatch": {NewDispatchServer(nil, "https://ledger.example.com"), map[string]any{
-			"claim_research_task":  dispatchClaim{Claimed: true, Task: &task, Token: "t", Endpoint: "https://ledger.example.com/mcp/research"},
+			"claim_research_task":  dispatchClaim{Claimed: true, Task: &out, Token: "t", Endpoint: "https://ledger.example.com/mcp/research"},
 			"renew_research_lease": leaseOutput{LeaseUntil: now},
-			"end_research_run":     task,
+			"end_research_run":     out,
 		}},
 	} {
 		ctx := context.Background()

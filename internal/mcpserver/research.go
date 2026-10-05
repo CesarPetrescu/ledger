@@ -44,6 +44,62 @@ func researchError(err error) (*mcp.CallToolResult, any, error) {
 	return nil, nil, err
 }
 
+// MCP outputs carry IDs as strings, like every other Ledger tool, so a dispatcher can pass task.id and a
+// run can pass a file's id straight back into the tools that take them.
+type researchTaskOutput struct {
+	store.ResearchTask
+	ID        string   `json:"id"`
+	MessageID string   `json:"message_id"`
+	DependsOn []string `json:"depends_on"`
+}
+
+type researchFileOutput struct {
+	ID        string    `json:"id"`
+	Filename  string    `json:"filename"`
+	MediaType string    `json:"media_type"`
+	SizeBytes int64     `json:"size_bytes"`
+	SHA256    string    `json:"sha256"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type researchNoteOutput struct {
+	From  string               `json:"from"`
+	Body  string               `json:"body"`
+	At    time.Time            `json:"at"`
+	Files []researchFileOutput `json:"files"`
+}
+
+type researchContextOutput struct {
+	Task    researchTaskOutput     `json:"task"`
+	Files   []researchFileOutput   `json:"files"`
+	Project *store.ResearchProject `json:"project,omitempty"`
+	Thread  []researchNoteOutput   `json:"thread"`
+}
+
+func taskOutput(task store.ResearchTask) researchTaskOutput {
+	depends := make([]string, len(task.DependsOn))
+	for i, id := range task.DependsOn {
+		depends[i] = strconv.FormatInt(id, 10)
+	}
+	return researchTaskOutput{ResearchTask: task, ID: strconv.FormatInt(task.ID, 10), MessageID: strconv.FormatInt(task.MessageID, 10), DependsOn: depends}
+}
+
+func filesOutput(files []store.HandoffFile) []researchFileOutput {
+	out := make([]researchFileOutput, len(files))
+	for i, f := range files {
+		out[i] = researchFileOutput{ID: strconv.FormatInt(f.ID, 10), Filename: f.Filename, MediaType: f.MediaType, SizeBytes: f.SizeBytes, SHA256: f.SHA256, CreatedAt: f.CreatedAt}
+	}
+	return out
+}
+
+func contextOutput(pack store.ResearchContext) researchContextOutput {
+	thread := make([]researchNoteOutput, len(pack.Thread))
+	for i, note := range pack.Thread {
+		thread[i] = researchNoteOutput{From: note.From, Body: note.Body, At: note.At, Files: filesOutput(note.Files)}
+	}
+	return researchContextOutput{Task: taskOutput(pack.Task), Files: filesOutput(pack.Files), Project: pack.Project, Thread: thread}
+}
+
 type leaseOutput struct {
 	LeaseUntil time.Time `json:"lease_until"`
 }
@@ -71,13 +127,13 @@ func NewResearchServer(db *store.DB) *mcp.Server {
 	read := &mcp.ToolAnnotations{ReadOnlyHint: true}
 	write := &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: boolPointer(false)}
 
-	mcp.AddTool(server, &mcp.Tool{Name: "get_task", OutputSchema: outputSchema[store.ResearchContext](), Description: "Get this run's task: the spec (objective, acceptance checklist, deliverable, eval_cmd, budget), attempt counters, the last checkpoint (resume from it when present), files attached to the brief, the project summary if the owner shared it, and this task's thread: earlier runs, questions, owner answers, and review feedback, with their files. Open files with read_file. " + ResearchDescriptionSuffix, Annotations: read},
+	mcp.AddTool(server, &mcp.Tool{Name: "get_task", OutputSchema: outputSchema[researchContextOutput](), Description: "Get this run's task: the spec (objective, acceptance checklist, deliverable, eval_cmd, budget), attempt counters, the last checkpoint (resume from it when present), files attached to the brief, the project summary if the owner shared it, and this task's thread: earlier runs, questions, owner answers, and review feedback, with their files. Open files with read_file. " + ResearchDescriptionSuffix, Annotations: read},
 		func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
 			pack, err := db.ResearchContext(ctx, researchRunFrom(ctx).ID)
 			if err != nil {
 				return researchError(err)
 			}
-			return nil, pack, nil
+			return nil, contextOutput(pack), nil
 		})
 
 	type readFileInput struct {
@@ -164,7 +220,7 @@ func NewResearchServer(db *store.DB) *mcp.Server {
 
 type dispatchClaim struct {
 	Claimed  bool                `json:"claimed"`
-	Task     *store.ResearchTask `json:"task,omitempty"`
+	Task     *researchTaskOutput `json:"task,omitempty"`
 	Token    string              `json:"token,omitempty"`
 	Endpoint string              `json:"endpoint,omitempty"`
 }
@@ -198,7 +254,8 @@ func NewDispatchServer(db *store.DB, publicURL string) *mcp.Server {
 			if claim == nil {
 				return nil, dispatchClaim{}, nil
 			}
-			return nil, dispatchClaim{Claimed: true, Task: &claim.Task, Token: claim.Token, Endpoint: publicURL + "/mcp/research"}, nil
+			task := taskOutput(claim.Task)
+			return nil, dispatchClaim{Claimed: true, Task: &task, Token: claim.Token, Endpoint: publicURL + "/mcp/research"}, nil
 		})
 
 	type runInput struct {
@@ -223,7 +280,7 @@ func NewDispatchServer(db *store.DB, publicURL string) *mcp.Server {
 		Attempt int    `json:"attempt" jsonschema:"the attempt number from the claim"`
 		Error   string `json:"error,omitempty" jsonschema:"why the sandbox stopped, such as an exit code or crash summary, at most 2000 characters"`
 	}
-	mcp.AddTool(server, &mcp.Tool{Name: "end_research_run", OutputSchema: outputSchema[store.ResearchTask](), Description: "Report that a run's sandbox has exited. Call it on every exit. If the run had not submitted or asked the owner, it counts as a failed attempt and the task is queued again, or stopped once it is out of attempts.", Annotations: change},
+	mcp.AddTool(server, &mcp.Tool{Name: "end_research_run", OutputSchema: outputSchema[researchTaskOutput](), Description: "Report that a run's sandbox has exited. Call it on every exit. If the run had not submitted or asked the owner, it counts as a failed attempt and the task is queued again, or stopped once it is out of attempts.", Annotations: change},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input endInput) (*mcp.CallToolResult, any, error) {
 			taskID, err := parseTaskID(input.TaskID)
 			if err != nil {
@@ -233,7 +290,7 @@ func NewDispatchServer(db *store.DB, publicURL string) *mcp.Server {
 			if err != nil {
 				return researchError(err)
 			}
-			return nil, task, nil
+			return nil, taskOutput(task), nil
 		})
 	return server
 }
@@ -251,7 +308,7 @@ func addResearchCreateTool(server *mcp.Server, db *store.DB) {
 		DependsOn   []string             `json:"depends_on,omitempty" jsonschema:"research task IDs that must be accepted first"`
 		Draft       bool                 `json:"draft,omitempty" jsonschema:"create without queueing it; the owner queues it from the console"`
 	}
-	mcp.AddTool(server, &mcp.Tool{Name: "create_research_task", OutputSchema: outputSchema[store.ResearchTask](), Description: "Queue a research task for a sandboxed research run. The owner reviews the result in Ledger; research threads are not readable through this server. " + ResearchDescriptionSuffix, Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: boolPointer(false)}},
+	mcp.AddTool(server, &mcp.Tool{Name: "create_research_task", OutputSchema: outputSchema[researchTaskOutput](), Description: "Queue a research task for a sandboxed research run. The owner reviews the result in Ledger; research threads are not readable through this server. " + ResearchDescriptionSuffix, Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: boolPointer(false)}},
 		func(ctx context.Context, request *mcp.CallToolRequest, input createInput) (*mcp.CallToolResult, any, error) {
 			if !canWrite(ctx) {
 				return scopeError(), nil, nil
@@ -271,7 +328,7 @@ func addResearchCreateTool(server *mcp.Server, db *store.DB) {
 			if err != nil {
 				return nil, nil, err
 			}
-			return nil, task, nil
+			return nil, taskOutput(task), nil
 		})
 }
 
