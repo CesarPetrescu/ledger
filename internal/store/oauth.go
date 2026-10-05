@@ -15,6 +15,22 @@ import (
 
 var ErrInvalidGrant = errors.New("invalid_grant")
 
+// OAuthPasswordHash uses the setup password until the owner resets it in the console.
+func (db *DB) OAuthPasswordHash(ctx context.Context, fallback string) (string, error) {
+	var hash string
+	err := db.Pool.QueryRow(ctx, `SELECT password_hash FROM oauth_password WHERE singleton`).Scan(&hash)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fallback, nil
+	}
+	return hash, err
+}
+
+func (db *DB) SetOAuthPasswordHash(ctx context.Context, hash string) error {
+	_, err := db.Pool.Exec(ctx, `INSERT INTO oauth_password(singleton,password_hash) VALUES(true,$1)
+		ON CONFLICT(singleton) DO UPDATE SET password_hash=EXCLUDED.password_hash`, hash)
+	return err
+}
+
 type OAuthClient struct {
 	ClientID     string    `json:"client_id"`
 	Kind         string    `json:"kind"`

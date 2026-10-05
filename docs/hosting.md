@@ -44,6 +44,10 @@ docker run --rm -it ledger-admin-local hash-password
 
 Type each password at the prompt and send end-of-file. Paste the returned Argon2id PHC strings inside the existing single quotes for `LEDGER_PASSWORD_HASH` and `LEDGER_ADMIN_PASSWORD_HASH`. The quotes stop Compose from treating `$` in the hash as variable interpolation.
 
+The OAuth page also offers **Continue with Ledger owner login**. Sign in with your console password, review the client's permissions, then choose **Allow access** or **Deny**.
+
+If you forget the approval password, open **Agents → Approval password** in the console. Confirm your owner password and choose a new approval password of at least 12 characters. You do not need the old approval password. Ledger stores its Argon2id hash in PostgreSQL; it takes effect immediately and survives restarts. Once set in the console, this value takes precedence over `LEDGER_PASSWORD_HASH`. Include it in database backups. To restore the environment setting during server recovery, delete the singleton row from `oauth_password`.
+
 ### 3. Run
 
 ```sh
@@ -72,7 +76,7 @@ claude mcp add --transport http ledger https://ledger.example.com/mcp
 |----------|----------|---------|
 | `LEDGER_PUBLIC_URL` | yes | Externally reachable HTTPS origin, e.g. `https://ledger.example.com` |
 | `LEDGER_POSTGRES_PASSWORD` | yes | Random URL-safe PostgreSQL password |
-| `LEDGER_PASSWORD_HASH` | yes | Argon2id PHC hash for the OAuth approval page |
+| `LEDGER_PASSWORD_HASH` | yes | Initial Argon2id PHC hash for the OAuth approval page; a console reset overrides it in PostgreSQL |
 | `LEDGER_ADMIN_PASSWORD_HASH` | yes | Argon2id PHC hash for the operator console. Never reuse the approval password |
 | `LEDGER_CALENDAR_ENCRYPTION_KEY` | yes | Secret of at least 32 bytes used to encrypt stored Nextcloud credentials |
 | `LEDGER_TRUSTED_PROXY_CIDR` | yes | Only this upstream proxy network is trusted for client IP forwarding |

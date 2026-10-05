@@ -21,7 +21,7 @@ func TestAuthorizeTemplateIsResponsiveAndExplainsPermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := body.String()
-	for _, want := range []string{"name=\"viewport\"", "Allow Desk app to use Ledger?", "Read project memory", "Add and update memory", "Read selected calendars", "Create, update, and delete events", "Allow access", "formnovalidate"} {
+	for _, want := range []string{"name=\"viewport\"", "Allow Desk app to use Ledger?", "Read project memory", "Add and update memory", "Read selected calendars", "Create, update, and delete events", "Allow access", "formnovalidate", "Continue with Ledger owner login"} {
 		if !strings.Contains(html, want) {
 			t.Errorf("authorization page missing %q", want)
 		}
@@ -121,5 +121,19 @@ func TestCIMDFetchAddressPolicy(t *testing.T) {
 		if !publicCIMDIP(netip.MustParseAddr(raw)) {
 			t.Errorf("public CIMD destination rejected: %s", raw)
 		}
+	}
+}
+
+func TestTrailingSlashGivesOneIssuer(t *testing.T) {
+	// ledger-auth and the owner-approval path both build on NewServer; a configured
+	// trailing slash must not make their issuers differ.
+	server := NewServer(Config{PublicURL: "https://ledger.example.com/"}, nil)
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/oauth-authorization-server", nil)
+	res := httptest.NewRecorder()
+	server.ServeHTTP(res, req)
+	var got map[string]any
+	_ = json.Unmarshal(res.Body.Bytes(), &got)
+	if got["issuer"] != "https://ledger.example.com" || got["token_endpoint"] != "https://ledger.example.com/oauth/token" {
+		t.Fatalf("metadata = %v", got)
 	}
 }

@@ -9,13 +9,15 @@ const calendars: CalendarSource[] = [
   { id: 'personal', name: 'Personal', selected: false },
 ]
 
+// Dated today: the calendar opens on the current month, whenever the tests run.
+const todayAt = (hour: number) => { const date = new Date(); date.setHours(hour, 0, 0, 0); return date.toISOString() }
 const planning: CalendarEvent = {
   id: 'event-1',
   calendar_id: 'work',
   calendar_name: 'Work',
   title: 'Planning session',
-  start: '2026-09-05T09:00:00Z',
-  end: '2026-09-05T10:00:00Z',
+  start: todayAt(9),
+  end: todayAt(10),
   all_day: false,
   location: 'Studio',
   etag: '"v1"',

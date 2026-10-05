@@ -532,6 +532,9 @@ async function requestText(path: string): Promise<string> {
 }
 
 export const api = {
+  reviewAuthorization: (query: string) => request<{ client_name: string; scopes: string[] }>('GET', `/oauth/authorize?${query}`),
+  decideAuthorization: (query: string, action: 'approve' | 'deny') => request<{ redirect_url: string }>('POST', `/oauth/authorize?${query}`, { action }),
+  changeApprovalPassword: (current_password: string, new_password: string) => request<void>('PUT', '/oauth/password', { current_password, new_password }),
   lookupDevice: (user_code: string) => request<DeviceRequest>('POST', '/oauth/device', { user_code, action: 'lookup' }),
   decideDevice: (user_code: string, action: 'approve' | 'deny') => request<void>('POST', '/oauth/device', { user_code, action }),
   getSession: () => request<Session & { authenticated: boolean }>('GET', '/session'),

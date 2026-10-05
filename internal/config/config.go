@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cesarpetrescu/ledger/internal/store"
@@ -17,6 +18,12 @@ func Required(name string) string {
 		panic(fmt.Sprintf("required environment variable %s is unset", name))
 	}
 	return value
+}
+
+// PublicURL is LEDGER_PUBLIC_URL without a trailing slash, read the same way by
+// every service so their issuer, resource, and discovery URLs agree exactly.
+func PublicURL() string {
+	return strings.TrimRight(Required("LEDGER_PUBLIC_URL"), "/")
 }
 
 func Value(name, fallback string) string {
