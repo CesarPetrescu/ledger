@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -419,5 +420,53 @@ func TestPasswordRateLimitSeparatesProxyClientsAndRejectsDirectSpoofing(t *testi
 	}
 	if status := request("198.51.100.8:1234", "203.0.113.99"); status != http.StatusTooManyRequests {
 		t.Fatalf("direct authoritative-header spoof bypassed bucket: %d", status)
+	}
+}
+
+// A self-hosted app on the LAN (Adastrion Core) registers with its plain-http callback, is approved, is
+// sent back through a page rather than a redirect, and exchanges its code with PKCE.
+func TestLANAppRegistersApprovesAndExchanges(t *testing.T) {
+	db, _ := testdb.Open(t)
+	password, _ := HashPassword("secret")
+	server := NewServer(Config{PublicURL: "https://ledger.example.com", PasswordHash: password}, db)
+	callback := "http://192.168.10.59:3100/oauth/callback"
+	register := httptest.NewRequest(http.MethodPost, "/oauth/register", strings.NewReader(`{"redirect_uris":["`+callback+`"],"client_name":"Adastrion Core"}`))
+	register.Header.Set("Content-Type", "application/json")
+	registered := httptest.NewRecorder()
+	server.ServeHTTP(registered, register)
+	var client struct {
+		ClientID string `json:"client_id"`
+	}
+	if registered.Code != http.StatusCreated || json.Unmarshal(registered.Body.Bytes(), &client) != nil {
+		t.Fatalf("register = %d: %s", registered.Code, registered.Body.String())
+	}
+	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	form := url.Values{
+		"client_id": {client.ClientID}, "redirect_uri": {callback}, "response_type": {"code"},
+		"code_challenge": {PKCEChallenge(verifier)}, "code_challenge_method": {"S256"}, "scope": {"ledger:read ledger:write"},
+		"resource": {"https://ledger.example.com/mcp"}, "state": {"lan-state"}, "password": {"secret"}, "action": {"approve"},
+	}
+	page := httptest.NewRecorder()
+	server.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/oauth/authorize?"+form.Encode(), nil))
+	if page.Code != http.StatusOK || !strings.Contains(page.Header().Get("Content-Security-Policy"), "form-action 'self' http://192.168.10.59:3100;") {
+		t.Fatalf("authorization page = %d, CSP %q", page.Code, page.Header().Get("Content-Security-Policy"))
+	}
+	approve := httptest.NewRequest(http.MethodPost, "/oauth/authorize", strings.NewReader(form.Encode()))
+	approve.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	approved := httptest.NewRecorder()
+	server.ServeHTTP(approved, approve)
+	body := approved.Body.String()
+	start := strings.Index(body, `href="`)
+	if approved.Code != http.StatusOK || start < 0 {
+		t.Fatalf("approve = %d: %s", approved.Code, body)
+	}
+	link := html.UnescapeString(body[start+len(`href="`) : start+len(`href="`)+strings.IndexByte(body[start+len(`href="`):], '"')])
+	location, err := url.Parse(link)
+	if err != nil || !strings.HasPrefix(link, callback+"?") || location.Query().Get("state") != "lan-state" || location.Query().Get("code") == "" {
+		t.Fatalf("return link = %q, %v", link, err)
+	}
+	pair := exchange(t, server, url.Values{"grant_type": {"authorization_code"}, "client_id": {client.ClientID}, "code": {location.Query().Get("code")}, "redirect_uri": {callback}, "code_verifier": {verifier}}, http.StatusOK)
+	if pair.Scope != "ledger:read ledger:write" {
+		t.Fatalf("token scope = %q", pair.Scope)
 	}
 }

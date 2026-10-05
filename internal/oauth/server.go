@@ -294,7 +294,7 @@ func (s *Server) authorizePost(w http.ResponseWriter, r *http.Request) {
 		localErrorStatus(w, http.StatusInternalServerError, "Ledger could not complete this authorization. Please try again.")
 		return
 	}
-	http.Redirect(w, r, destination, http.StatusFound)
+	returnToClient(w, r, destination)
 }
 
 var ErrInvalidAuthorization = errors.New("invalid authorization request")
@@ -353,8 +353,22 @@ func authorizationURL(destination string, values map[string]string) string {
 }
 
 func redirectAuthorization(w http.ResponseWriter, r *http.Request, destination string, values map[string]string) {
-	http.Redirect(w, r, authorizationURL(destination, values), http.StatusFound)
+	returnToClient(w, r, authorizationURL(destination, values))
 }
+
+// returnToClient sends the browser back to the client after the approval form. A plain-http callback on
+// the private network gets a page that links there instead of a redirect: browsers warn when an https
+// form submission is redirected to http, but not when a page navigates there.
+func returnToClient(w http.ResponseWriter, r *http.Request, destination string) {
+	if callback, err := url.Parse(destination); err == nil && callback.Scheme == "http" && PrivateNetworkHost(callback.Hostname()) {
+		authorizationPageHeaders(w, "")
+		_ = returnTemplate.Execute(w, map[string]string{"URL": destination, "Host": callback.Host})
+		return
+	}
+	http.Redirect(w, r, destination, http.StatusFound)
+}
+
+var returnTemplate = template.Must(template.New("return").Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="0;url={{.URL}}"><title>Returning · Ledger</title>` + authorizationStyles + `</head><body><main class="page"><div class="brand">Ledger</div><section class="card"><p class="eyebrow">Done</p><h1>Returning to {{.Host}}</h1><p>If nothing happens, <a href="{{.URL}}">continue to the app</a>.</p></section></main></body></html>`))
 
 func localError(w http.ResponseWriter, message string) {
 	localErrorStatus(w, http.StatusBadRequest, message)

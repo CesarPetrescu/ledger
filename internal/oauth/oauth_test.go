@@ -60,3 +60,56 @@ func TestRedirectMatcherAndScopes(t *testing.T) {
 		}
 	}
 }
+
+func TestPlainHTTPRedirectsStayOnThePrivateNetwork(t *testing.T) {
+	for _, uri := range []string{
+		"http://192.168.10.59:3100/cb",
+		"http://10.1.2.3/cb",
+		"http://[fd00::5]:8080/cb",
+		"http://nas.local/cb",
+		"http://box.lan/cb",
+		"http://hub.home.arpa/cb",
+		"http://svc.internal/cb",
+	} {
+		if !ValidRedirectURI(uri) {
+			t.Errorf("private-network redirect refused: %s", uri)
+		}
+	}
+	for _, uri := range []string{
+		"http://example.com/cb",
+		"http://adastrion.192.168.10.59.nip.io:3100/cb",
+		"http://8.8.8.8.10.0.0.1.nip.io/cb",
+		"http://fd00--5.nip.io:3100/cb",
+		"http://app.8.8.8.8.nip.io/cb",
+		"http://app-8-8-8-8.sslip.io/cb",
+		"http://nip.io/cb",
+		"http://8.8.8.8/cb",
+		"http://127.0.0.2/cb",
+		"http://169.254.169.254/cb",
+		"http://local.example.com/cb",
+		"http://2001-4860-4860--8888.sslip.io/cb",
+		"http://--1.nip.io/cb",
+		"http://134744072/cb",
+		"http://0x08080808/cb",
+		"http://0X8080808/cb",
+		"http://010010004010/cb",
+		"http://0x/cb",
+		"http://0/cb",
+		"http://intranet.8/cb",
+		"http://ｅｘａｍｐｌｅ．ｃｏｍ/cb",
+		"http://ｅｘａｍｐｌｅ/cb",
+		"http://bücher/cb",
+		"http://adastrion:3100/cb",
+		"http://ai/cb",
+		"http://.lan/cb",
+		"http://ｂｏｘ．ｌａｎ/cb",
+		"http://box.İnternal/cb",
+		"http://box.\u212Aocal/cb",
+		"http://intranet%2Ecom/cb",
+		"myapp://oauth/cb",
+	} {
+		if ValidRedirectURI(uri) {
+			t.Errorf("public or unsafe redirect accepted: %s", uri)
+		}
+	}
+}

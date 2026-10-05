@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"net/netip"
 	"net/url"
 	"slices"
 	"sort"
@@ -63,7 +64,32 @@ func ValidRedirectURI(candidate string) bool {
 		return false
 	}
 	host := u.Hostname()
-	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+	return host == "localhost" || host == "127.0.0.1" || host == "::1" || PrivateNetworkHost(host)
+}
+
+// PrivateNetworkHost reports whether host names a machine on a private network, where a plain-http
+// redirect never crosses the internet: an exact private IP (RFC 1918, IPv6 unique-local) or a name under
+// a suffix reserved for local networks. Anything a public resolver could answer for (single-label names,
+// wildcard-DNS services such as nip.io) is refused. PKCE still binds the code to the client that started
+// the login, and the owner still approves every client.
+func PrivateNetworkHost(host string) bool {
+	host = strings.TrimSuffix(host, ".")
+	if addr, err := netip.ParseAddr(host); err == nil {
+		return addr.IsPrivate()
+	}
+	// Only plain ASCII names under a suffix reserved for local networks, so no public DNS can answer
+	// for them and no browser rewrites them (IDNA, percent-escapes, numeric IPv4 forms) into another host.
+	// Check before lowercasing: Unicode case mapping turns some non-ASCII letters (İ, K) into ASCII ones.
+	if strings.Trim(host, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-") != "" {
+		return false
+	}
+	host = strings.ToLower(host)
+	for _, suffix := range []string{".local", ".lan", ".home.arpa", ".internal"} {
+		if name, ok := strings.CutSuffix(host, suffix); ok && name != "" && !strings.HasSuffix(name, ".") {
+			return true
+		}
+	}
+	return false
 }
 
 func RedirectMatches(candidate string, registered []string) bool {
