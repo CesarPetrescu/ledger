@@ -103,6 +103,8 @@ func TestPlainHTTPRedirectsStayOnThePrivateNetwork(t *testing.T) {
 		"http://ai/cb",
 		"http://.lan/cb",
 		"http://ｂｏｘ．ｌａｎ/cb",
+		"http://box.İnternal/cb",
+		"http://box.\u212Aocal/cb",
 		"http://intranet%2Ecom/cb",
 		"myapp://oauth/cb",
 	} {

@@ -73,15 +73,17 @@ func ValidRedirectURI(candidate string) bool {
 // wildcard-DNS services such as nip.io) is refused. PKCE still binds the code to the client that started
 // the login, and the owner still approves every client.
 func PrivateNetworkHost(host string) bool {
-	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	host = strings.TrimSuffix(host, ".")
 	if addr, err := netip.ParseAddr(host); err == nil {
 		return addr.IsPrivate()
 	}
 	// Only plain ASCII names under a suffix reserved for local networks, so no public DNS can answer
 	// for them and no browser rewrites them (IDNA, percent-escapes, numeric IPv4 forms) into another host.
-	if strings.Trim(host, "abcdefghijklmnopqrstuvwxyz0123456789.-") != "" {
+	// Check before lowercasing: Unicode case mapping turns some non-ASCII letters (İ, K) into ASCII ones.
+	if strings.Trim(host, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-") != "" {
 		return false
 	}
+	host = strings.ToLower(host)
 	for _, suffix := range []string{".local", ".lan", ".home.arpa", ".internal"} {
 		if name, ok := strings.CutSuffix(host, suffix); ok && name != "" && !strings.HasSuffix(name, ".") {
 			return true
