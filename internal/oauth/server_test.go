@@ -123,3 +123,17 @@ func TestCIMDFetchAddressPolicy(t *testing.T) {
 		}
 	}
 }
+
+func TestTrailingSlashGivesOneIssuer(t *testing.T) {
+	// ledger-auth and the owner-approval path both build on NewServer; a configured
+	// trailing slash must not make their issuers differ.
+	server := NewServer(Config{PublicURL: "https://ledger.example.com/"}, nil)
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/oauth-authorization-server", nil)
+	res := httptest.NewRecorder()
+	server.ServeHTTP(res, req)
+	var got map[string]any
+	_ = json.Unmarshal(res.Body.Bytes(), &got)
+	if got["issuer"] != "https://ledger.example.com" || got["token_endpoint"] != "https://ledger.example.com/oauth/token" {
+		t.Fatalf("metadata = %v", got)
+	}
+}

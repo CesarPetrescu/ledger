@@ -41,6 +41,8 @@ type Server struct {
 }
 
 func NewServer(config Config, db *store.DB) *Server {
+	// One issuer for every service built on this: ledger-auth and the owner-approval path must agree exactly.
+	config.PublicURL = strings.TrimRight(config.PublicURL, "/")
 	client := config.HTTPClient
 	if client == nil {
 		client = defaultCIMDClient()
