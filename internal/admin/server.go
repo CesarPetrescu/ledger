@@ -340,7 +340,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	projects, err := s.db.ListProjects(ctx, "")
+	projects, err := s.ownerProjects(ctx, "")
 	if err != nil {
 		s.internalError(w, r, err)
 		return
@@ -365,7 +365,7 @@ func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "tier must be one of "+strings.Join(store.Tiers, ", "))
 		return
 	}
-	projects, err := s.db.ListProjects(r.Context(), tier)
+	projects, err := s.ownerProjects(r.Context(), tier)
 	if err != nil {
 		s.internalError(w, r, err)
 		return
@@ -474,6 +474,22 @@ type ownerProjectView struct {
 func (s *Server) ownerProject(ctx context.Context, project store.Project) (ownerProjectView, error) {
 	visible, err := s.db.ProjectResearchVisible(ctx, project.Slug)
 	return ownerProjectView{Project: project, ResearchVisible: visible}, err
+}
+
+func (s *Server) ownerProjects(ctx context.Context, tier string) ([]ownerProjectView, error) {
+	projects, err := s.db.ListProjects(ctx, tier)
+	if err != nil {
+		return nil, err
+	}
+	shared, err := s.db.ResearchVisibleProjects(ctx)
+	if err != nil {
+		return nil, err
+	}
+	views := make([]ownerProjectView, len(projects))
+	for i, project := range projects {
+		views[i] = ownerProjectView{Project: project, ResearchVisible: shared[project.Slug]}
+	}
+	return views, nil
 }
 
 // putProjectResearch switches whether research runs may see the project's summary.
