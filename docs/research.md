@@ -81,7 +81,7 @@ The run connects with `Authorization: Bearer $LEDGER_RESEARCH_TOKEN`. This endpo
 
 | Tool | What it does |
 |---|---|
-| `get_task` | Returns the spec, attempt counters, last checkpoint, the project summary (only if the owner turned on **Share with research runs** for that project), and this task's thread |
+| `get_task` | Returns the spec, attempt counters, last checkpoint, the project summary (only if the owner turned on **Share with research runs** for that project), and this task's thread, newest 30 messages first. Pass `before=next_before` for older ones |
 | `read_file` | Reads a file attached to this task's brief or thread, such as an owner's attachment or an earlier run's deliverable files |
 | `heartbeat` | Renews the lease, with an optional one-line `progress` |
 | `checkpoint` | Saves compact resumable `state` and renews the lease |

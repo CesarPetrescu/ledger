@@ -585,11 +585,14 @@ type ResearchContext struct {
 	Files   []HandoffFile    `json:"files"`
 	Project *ResearchProject `json:"project,omitempty"`
 	Thread  []ResearchNote   `json:"thread"`
+	// NextBefore pages back through older thread messages when there are more than one page holds.
+	NextBefore *int64 `json:"next_before,omitempty"`
 }
 
 const researchThreadMessages = 30
 
-func (db *DB) ResearchContext(ctx context.Context, id int64) (ResearchContext, error) {
+// ResearchContext returns the task with its newest thread messages, or those older than before.
+func (db *DB) ResearchContext(ctx context.Context, id int64, before *int64) (ResearchContext, error) {
 	task, err := db.ResearchTask(ctx, id)
 	if err != nil {
 		return ResearchContext{}, err
@@ -613,7 +616,7 @@ CASE WHEN research_visible THEN description ELSE '' END,CASE WHEN research_visib
 		}
 	}
 	rows, err := db.Pool.Query(ctx, `SELECT id,handoff_id,body,source,client_id,created_at FROM handoff_message
-WHERE handoff_id=$1 AND id<>$2 AND work_state<>'draft' ORDER BY id DESC LIMIT $3`, id, task.MessageID, researchThreadMessages)
+WHERE handoff_id=$1 AND id<>$2 AND work_state<>'draft' AND ($3::bigint IS NULL OR id<$3) ORDER BY id DESC LIMIT $4`, id, task.MessageID, before, researchThreadMessages+1)
 	if err != nil {
 		return ResearchContext{}, err
 	}
@@ -629,6 +632,11 @@ WHERE handoff_id=$1 AND id<>$2 AND work_state<>'draft' ORDER BY id DESC LIMIT $3
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return ResearchContext{}, err
+	}
+	if len(messages) > researchThreadMessages {
+		messages = messages[:researchThreadMessages]
+		oldest := messages[len(messages)-1].ID
+		out.NextBefore = &oldest
 	}
 	slices.Reverse(messages)
 	if err := addFilesToMessages(ctx, db.Pool, messages); err != nil {

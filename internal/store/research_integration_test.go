@@ -5,6 +5,7 @@ package store_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -92,7 +93,7 @@ func TestResearchRunThatDiesIsRetriedFromItsCheckpoint(t *testing.T) {
 	if second == nil || second.Task.Attempt != 2 || second.Token == first.Token {
 		t.Fatalf("second claim = %#v", second)
 	}
-	pack, err := db.ResearchContext(ctx, task.ID)
+	pack, err := db.ResearchContext(ctx, task.ID, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +117,7 @@ func TestResearchRunThatDiesIsRetriedFromItsCheckpoint(t *testing.T) {
 	if err := db.SetProjectResearchVisible(ctx, "atlas", true); err != nil {
 		t.Fatal(err)
 	}
-	if pack, _ = db.ResearchContext(ctx, task.ID); !pack.Project.Shared || pack.Project.Description != "Private roadmap" {
+	if pack, _ = db.ResearchContext(ctx, task.ID, nil); !pack.Project.Shared || pack.Project.Description != "Private roadmap" {
 		t.Fatalf("shared project = %#v", pack.Project)
 	}
 }
@@ -210,7 +211,7 @@ func TestResearchSubmitGoesToReviewAndFeedbackReachesTheNextRun(t *testing.T) {
 	if next == nil || next.Task.Attempt != 2 {
 		t.Fatalf("next = %#v", next)
 	}
-	pack, _ := db.ResearchContext(ctx, task.ID)
+	pack, _ := db.ResearchContext(ctx, task.ID, nil)
 	var sawDeliverable, sawFeedback, sawAttached bool
 	for _, note := range pack.Thread {
 		sawDeliverable = sawDeliverable || note.From == "researcher" && note.Body == long
@@ -293,6 +294,25 @@ func TestResearchWaitsForDependenciesAndIsHiddenFromAgents(t *testing.T) {
 	}
 	if _, err := db.UpdateHandoffMessage(ctx, second.MessageID, "claim", "", store.OwnerSource, "owner", true); !errors.Is(err, store.ErrHandoffForbidden) {
 		t.Fatalf("owner claim of a brief = %v", err)
+	}
+}
+
+// A long thread pages: the newest page first, then older pages until the first note.
+func TestResearchContextPagesThroughALongThread(t *testing.T) {
+	db, ctx := researchDB(t)
+	task := newResearch(t, db, ctx, "Long", 3)
+	for i := 1; i <= 45; i++ {
+		if _, err := db.AppendHandoffMessage(ctx, store.HandoffMessage{HandoffID: task.ID, Body: fmt.Sprintf("note %d", i), WorkState: "ready", Source: store.OwnerSource, ClientID: "owner"}, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := db.ResearchContext(ctx, task.ID, nil)
+	if err != nil || len(first.Thread) != 30 || first.Thread[29].Body != "note 45" || first.NextBefore == nil {
+		t.Fatalf("first page = %d notes, next %v, %v", len(first.Thread), first.NextBefore, err)
+	}
+	second, err := db.ResearchContext(ctx, task.ID, first.NextBefore)
+	if err != nil || len(second.Thread) != 15 || second.Thread[0].Body != "note 1" || second.Thread[14].Body != "note 15" || second.NextBefore != nil {
+		t.Fatalf("second page = %#v, %v", second.Thread, err)
 	}
 }
 

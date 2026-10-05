@@ -74,6 +74,8 @@ type researchContextOutput struct {
 	Files   []researchFileOutput   `json:"files"`
 	Project *store.ResearchProject `json:"project,omitempty"`
 	Thread  []researchNoteOutput   `json:"thread"`
+	// NextBefore, when present, fetches the next older page of the thread through get_task's before.
+	NextBefore string `json:"next_before,omitempty"`
 }
 
 func taskOutput(task store.ResearchTask) researchTaskOutput {
@@ -97,7 +99,11 @@ func contextOutput(pack store.ResearchContext) researchContextOutput {
 	for i, note := range pack.Thread {
 		thread[i] = researchNoteOutput{From: note.From, Body: note.Body, At: note.At, Files: filesOutput(note.Files)}
 	}
-	return researchContextOutput{Task: taskOutput(pack.Task), Files: filesOutput(pack.Files), Project: pack.Project, Thread: thread}
+	out := researchContextOutput{Task: taskOutput(pack.Task), Files: filesOutput(pack.Files), Project: pack.Project, Thread: thread}
+	if pack.NextBefore != nil {
+		out.NextBefore = strconv.FormatInt(*pack.NextBefore, 10)
+	}
+	return out
 }
 
 type leaseOutput struct {
@@ -127,9 +133,20 @@ func NewResearchServer(db *store.DB) *mcp.Server {
 	read := &mcp.ToolAnnotations{ReadOnlyHint: true}
 	write := &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: boolPointer(false)}
 
-	mcp.AddTool(server, &mcp.Tool{Name: "get_task", OutputSchema: outputSchema[researchContextOutput](), Description: "Get this run's task: the spec (objective, acceptance checklist, deliverable, eval_cmd, budget), attempt counters, the last checkpoint (resume from it when present), files attached to the brief, the project summary if the owner shared it, and this task's thread: earlier runs, questions, owner answers, and review feedback, with their files. Open files with read_file. " + ResearchDescriptionSuffix, Annotations: read},
-		func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
-			pack, err := db.ResearchContext(ctx, researchRunFrom(ctx).ID)
+	type getTaskInput struct {
+		Before string `json:"before,omitempty" jsonschema:"optional next_before from a previous get_task, for older thread messages"`
+	}
+	mcp.AddTool(server, &mcp.Tool{Name: "get_task", OutputSchema: outputSchema[researchContextOutput](), Description: "Get this run's task: the spec (objective, acceptance checklist, deliverable, eval_cmd, budget), attempt counters, the last checkpoint (resume from it when present), files attached to the brief, the project summary if the owner shared it, and this task's thread: earlier runs, questions, owner answers, and review feedback, with their files. The thread holds the newest 30 messages; when next_before is present, call again with before=next_before for older ones. Open files with read_file. " + ResearchDescriptionSuffix, Annotations: read},
+		func(ctx context.Context, _ *mcp.CallToolRequest, input getTaskInput) (*mcp.CallToolResult, any, error) {
+			var before *int64
+			if input.Before != "" {
+				value, err := strconv.ParseInt(input.Before, 10, 64)
+				if err != nil || value < 1 {
+					return nil, nil, fmt.Errorf("before must be the next_before value from a previous get_task")
+				}
+				before = &value
+			}
+			pack, err := db.ResearchContext(ctx, researchRunFrom(ctx).ID, before)
 			if err != nil {
 				return researchError(err)
 			}
