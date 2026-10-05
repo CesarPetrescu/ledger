@@ -98,6 +98,11 @@ func PrivateNetworkHost(host string) bool {
 		}
 		return false
 	}
+	// Browsers read a host whose last label is a number (134744072, 0x08080808) as an IPv4 address,
+	// so such a host is never a local name, whatever its suffix rules below would say.
+	if numericLabel(host[strings.LastIndexByte(host, '.')+1:]) {
+		return false
+	}
 	if host != "" && !strings.Contains(host, ".") {
 		return true
 	}
@@ -107,6 +112,19 @@ func PrivateNetworkHost(host string) bool {
 		}
 	}
 	return false
+}
+
+// numericLabel reports whether a URL parser following the WHATWG URL standard treats label as a number:
+// decimal digits, or 0x/0X followed by hex digits (possibly none).
+func numericLabel(label string) bool {
+	digits := "0123456789"
+	if len(label) >= 2 && label[0] == '0' && (label[1] == 'x' || label[1] == 'X') {
+		label, digits = label[2:], "0123456789abcdefABCDEF"
+		if label == "" {
+			return true
+		}
+	}
+	return label != "" && strings.Trim(label, digits) == ""
 }
 
 func RedirectMatches(candidate string, registered []string) bool {

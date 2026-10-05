@@ -91,6 +91,13 @@ func TestPlainHTTPRedirectsStayOnThePrivateNetwork(t *testing.T) {
 		"http://local.example.com/cb",
 		"http://2001-4860-4860--8888.sslip.io/cb",
 		"http://--1.nip.io/cb",
+		"http://134744072/cb",
+		"http://0x08080808/cb",
+		"http://0X8080808/cb",
+		"http://010010004010/cb",
+		"http://0x/cb",
+		"http://0/cb",
+		"http://intranet.8/cb",
 		"myapp://oauth/cb",
 	} {
 		if ValidRedirectURI(uri) {
