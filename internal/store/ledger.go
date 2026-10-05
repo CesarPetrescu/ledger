@@ -10,21 +10,19 @@ import (
 )
 
 type Project struct {
-	Slug        string `json:"slug"`
-	Name        string `json:"name"`
-	Tier        string `json:"tier"`
-	HoursWK     int    `json:"hours_wk"`
-	Type        string `json:"type"`
-	Description string `json:"description"`
-	Goal        string `json:"goal"`
-	Deadline    string `json:"deadline"`
-	NeedsMe     string `json:"needs_me"`
-	Automate    string `json:"automate"`
-	Stack       string `json:"stack"`
-	// ResearchVisible lets research runs see this project's summary. Only the owner sets it.
-	ResearchVisible bool       `json:"research_visible"`
-	UpdatedAt       time.Time  `json:"updated_at"`
-	LastEntryAt     *time.Time `json:"last_entry_at,omitempty"`
+	Slug        string     `json:"slug"`
+	Name        string     `json:"name"`
+	Tier        string     `json:"tier"`
+	HoursWK     int        `json:"hours_wk"`
+	Type        string     `json:"type"`
+	Description string     `json:"description"`
+	Goal        string     `json:"goal"`
+	Deadline    string     `json:"deadline"`
+	NeedsMe     string     `json:"needs_me"`
+	Automate    string     `json:"automate"`
+	Stack       string     `json:"stack"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	LastEntryAt *time.Time `json:"last_entry_at,omitempty"`
 }
 
 type Entry struct {
@@ -47,11 +45,11 @@ type ProjectWithEntries struct {
 
 var ErrInvalidEntryCursor = errors.New("invalid entry cursor")
 
-const projectColumns = `p.slug,p.name,p.tier,p.hours_wk,p.type,p.description,p.goal,p.deadline,p.needs_me,p.automate,p.stack,p.research_visible,p.updated_at`
+const projectColumns = `p.slug,p.name,p.tier,p.hours_wk,p.type,p.description,p.goal,p.deadline,p.needs_me,p.automate,p.stack,p.updated_at`
 
 func scanProject(row pgx.Row) (Project, error) {
 	var p Project
-	err := row.Scan(&p.Slug, &p.Name, &p.Tier, &p.HoursWK, &p.Type, &p.Description, &p.Goal, &p.Deadline, &p.NeedsMe, &p.Automate, &p.Stack, &p.ResearchVisible, &p.UpdatedAt)
+	err := row.Scan(&p.Slug, &p.Name, &p.Tier, &p.HoursWK, &p.Type, &p.Description, &p.Goal, &p.Deadline, &p.NeedsMe, &p.Automate, &p.Stack, &p.UpdatedAt)
 	return p, err
 }
 
@@ -62,7 +60,7 @@ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 ON CONFLICT(slug) DO UPDATE SET name=EXCLUDED.name,tier=EXCLUDED.tier,hours_wk=EXCLUDED.hours_wk,
  type=EXCLUDED.type,description=EXCLUDED.description,goal=EXCLUDED.goal,deadline=EXCLUDED.deadline,
  needs_me=EXCLUDED.needs_me,automate=EXCLUDED.automate,stack=EXCLUDED.stack,updated_at=now()
-RETURNING slug,name,tier,hours_wk,type,description,goal,deadline,needs_me,automate,stack,research_visible,updated_at`,
+RETURNING slug,name,tier,hours_wk,type,description,goal,deadline,needs_me,automate,stack,updated_at`,
 		p.Slug, p.Name, p.Tier, p.HoursWK, p.Type, p.Description, p.Goal, p.Deadline, p.NeedsMe, p.Automate, p.Stack))
 }
 
@@ -77,7 +75,7 @@ WHERE ($1='' OR p.tier=$1) GROUP BY p.slug ORDER BY p.slug`, tier)
 	projects := []Project{}
 	for rows.Next() {
 		var p Project
-		if err := rows.Scan(&p.Slug, &p.Name, &p.Tier, &p.HoursWK, &p.Type, &p.Description, &p.Goal, &p.Deadline, &p.NeedsMe, &p.Automate, &p.Stack, &p.ResearchVisible, &p.UpdatedAt, &p.LastEntryAt); err != nil {
+		if err := rows.Scan(&p.Slug, &p.Name, &p.Tier, &p.HoursWK, &p.Type, &p.Description, &p.Goal, &p.Deadline, &p.NeedsMe, &p.Automate, &p.Stack, &p.UpdatedAt, &p.LastEntryAt); err != nil {
 			return nil, err
 		}
 		projects = append(projects, p)

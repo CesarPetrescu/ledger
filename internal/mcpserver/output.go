@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"encoding/json"
 	"time"
 
 	calendarapi "github.com/cesarpetrescu/ledger/internal/calendar"
@@ -8,12 +9,41 @@ import (
 )
 
 // Keep handlers' error results unstructured while validating successful outputs.
+//
+// Output schemas allow additional properties. Clients cache a tool's output schema and check results
+// against it, so a schema that forbids unknown fields turns every field added later into a breaking
+// change for every client still holding the old schema.
 func outputSchema[T any]() *jsonschema.Schema {
 	schema, err := jsonschema.For[T](nil)
 	if err != nil {
 		panic(err)
 	}
+	allowAdditional(schema)
 	return schema
+}
+
+// allowAdditional drops "additionalProperties: false" throughout a schema; typed maps keep theirs.
+func allowAdditional(s *jsonschema.Schema) {
+	if s == nil {
+		return
+	}
+	if encoded, _ := json.Marshal(s.AdditionalProperties); string(encoded) == "false" {
+		s.AdditionalProperties = nil
+	}
+	children := []*jsonschema.Schema{s.Items, s.AdditionalProperties, s.AdditionalItems, s.Not}
+	children = append(children, s.PrefixItems...)
+	children = append(children, s.ItemsArray...)
+	children = append(children, s.AllOf...)
+	children = append(children, s.AnyOf...)
+	children = append(children, s.OneOf...)
+	for _, group := range []map[string]*jsonschema.Schema{s.Properties, s.PatternProperties, s.Defs, s.Definitions} {
+		for _, child := range group {
+			children = append(children, child)
+		}
+	}
+	for _, child := range children {
+		allowAdditional(child)
+	}
 }
 
 // These types describe the MCP projections, which differ from the stored rows.

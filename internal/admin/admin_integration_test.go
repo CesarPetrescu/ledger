@@ -1830,6 +1830,11 @@ func TestOwnerSharesAProjectWithResearchAndSeesRunStatus(t *testing.T) {
 	if res := request(t, server, http.MethodPut, "/admin/api/projects/atlas", `{"name":"Atlas","tier":"focus","hours_wk":9}`, authed(s, true)); res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"research_visible":true`) {
 		t.Fatalf("form save reset the switch: %d %s", res.Code, res.Body.String())
 	}
+	for _, path := range []string{"/admin/api/projects/atlas", "/admin/api/projects", "/admin/api/overview"} {
+		if res := request(t, server, http.MethodGet, path, "", authed(s, false)); res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"research_visible":true`) {
+			t.Errorf("%s lacks the switch: %d %s", path, res.Code, res.Body.String())
+		}
+	}
 
 	task, err := db.CreateResearchTask(ctx, store.NewResearchTask{ProjectSlug: "atlas", Title: "Survey", Source: "claude", ClientID: "c", Spec: store.ResearchSpec{Objective: "Compare", Acceptance: []string{"Cited"}}})
 	if err != nil {

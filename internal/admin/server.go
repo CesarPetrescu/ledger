@@ -340,7 +340,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	projects, err := s.db.ListProjects(ctx, "")
+	projects, err := s.ownerProjects(ctx, "")
 	if err != nil {
 		s.internalError(w, r, err)
 		return
@@ -365,7 +365,7 @@ func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "tier must be one of "+strings.Join(store.Tiers, ", "))
 		return
 	}
-	projects, err := s.db.ListProjects(r.Context(), tier)
+	projects, err := s.ownerProjects(r.Context(), tier)
 	if err != nil {
 		s.internalError(w, r, err)
 		return
@@ -410,7 +410,12 @@ func (s *Server) getProject(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	payload := map[string]any{"project": result.Project, "entries": entryResponses(result.Entries)}
+	project, err := s.ownerProject(r.Context(), result.Project)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	payload := map[string]any{"project": project, "entries": entryResponses(result.Entries)}
 	if nextBefore != nil {
 		payload["next_before"] = strconv.FormatInt(*nextBefore, 10)
 	}
@@ -451,7 +456,40 @@ func (s *Server) putProject(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, saved)
+	view, err := s.ownerProject(r.Context(), saved)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+// ownerProjectView is a project as the console sees it: with the research switch, which is kept out of
+// store.Project because that type is also an MCP output schema.
+type ownerProjectView struct {
+	store.Project
+	ResearchVisible bool `json:"research_visible"`
+}
+
+func (s *Server) ownerProject(ctx context.Context, project store.Project) (ownerProjectView, error) {
+	visible, err := s.db.ProjectResearchVisible(ctx, project.Slug)
+	return ownerProjectView{Project: project, ResearchVisible: visible}, err
+}
+
+func (s *Server) ownerProjects(ctx context.Context, tier string) ([]ownerProjectView, error) {
+	projects, err := s.db.ListProjects(ctx, tier)
+	if err != nil {
+		return nil, err
+	}
+	shared, err := s.db.ResearchVisibleProjects(ctx)
+	if err != nil {
+		return nil, err
+	}
+	views := make([]ownerProjectView, len(projects))
+	for i, project := range projects {
+		views[i] = ownerProjectView{Project: project, ResearchVisible: shared[project.Slug]}
+	}
+	return views, nil
 }
 
 // putProjectResearch switches whether research runs may see the project's summary.

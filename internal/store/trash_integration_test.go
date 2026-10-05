@@ -46,7 +46,10 @@ func TestOldTrashSnapshotsRestoreAcrossMigrations(t *testing.T) {
 		t.Fatalf("restore an old snapshot = %v", err)
 	}
 	restored, err := db.GetProject(ctx, "atlas", 5)
-	if err != nil || restored.Project.ResearchVisible || restored.Project.Description != "Search" || len(restored.Entries) != 1 || restored.Entries[0].Context != "" || restored.Entries[0].Body != "Use pgvector" {
+	if shared, _ := db.ProjectResearchVisible(ctx, "atlas"); shared {
+		t.Fatal("restored project is shared with research")
+	}
+	if err != nil || restored.Project.Description != "Search" || len(restored.Entries) != 1 || restored.Entries[0].Context != "" || restored.Entries[0].Body != "Use pgvector" {
 		t.Fatalf("restored = %#v, %v", restored, err)
 	}
 	var title, category, details string
