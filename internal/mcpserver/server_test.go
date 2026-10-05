@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -270,5 +271,45 @@ func TestResearchAndDispatchToolsAreExact(t *testing.T) {
 		}
 		session.Close()
 		serverSession.Close()
+	}
+}
+
+// Clients cache output schemas; a schema that forbids unknown fields makes every added field a breaking
+// change for them (a new project field broke cached clients' get_project once). No tool output may.
+func TestOutputSchemasAllowAddedFields(t *testing.T) {
+	servers := map[string]*mcp.Server{"mcp": NewServer(nil, ""), "research": NewResearchServer(nil), "dispatch": NewDispatchServer(nil, "")}
+	for name, server := range servers {
+		ctx := context.Background()
+		serverTransport, clientTransport := mcp.NewInMemoryTransports()
+		serverSession, err := server.Connect(ctx, serverTransport, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		session, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil).Connect(ctx, clientTransport, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := session.ListTools(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, tool := range result.Tools {
+			encoded, _ := json.Marshal(tool.OutputSchema)
+			if strings.Contains(string(encoded), `"additionalProperties":false`) {
+				t.Errorf("%s/%s output schema forbids added fields: %s", name, tool.Name, encoded)
+			}
+		}
+		session.Close()
+		serverSession.Close()
+	}
+	// The project an agent receives keeps its published fields; owner-only fields stay out of it.
+	project := outputSchema[store.ProjectWithEntries]().Properties["project"]
+	var fields []string
+	for field := range project.Properties {
+		fields = append(fields, field)
+	}
+	slices.Sort(fields)
+	if got := strings.Join(fields, ","); got != "automate,deadline,description,goal,hours_wk,last_entry_at,name,needs_me,slug,stack,tier,type,updated_at" {
+		t.Fatalf("project fields = %s", got)
 	}
 }

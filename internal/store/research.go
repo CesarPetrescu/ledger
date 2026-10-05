@@ -667,6 +667,14 @@ FROM handoff_file f JOIN handoff_message m ON m.id=f.message_id WHERE f.id=$1 AN
 	return file, err
 }
 
+// ProjectResearchVisible reads the owner's research switch. It stays out of Project, whose JSON is an MCP
+// output schema that clients cache: a new field there breaks every client holding the old schema.
+func (db *DB) ProjectResearchVisible(ctx context.Context, slug string) (bool, error) {
+	var visible bool
+	err := db.Pool.QueryRow(ctx, `SELECT research_visible FROM project WHERE slug=$1`, slug).Scan(&visible)
+	return visible, err
+}
+
 // SetProjectResearchVisible is the owner's switch for sharing a project's summary with research runs.
 func (db *DB) SetProjectResearchVisible(ctx context.Context, slug string, visible bool) error {
 	tag, err := db.Pool.Exec(ctx, `UPDATE project SET research_visible=$2 WHERE slug=$1`, slug, visible)

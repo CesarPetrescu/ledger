@@ -410,7 +410,12 @@ func (s *Server) getProject(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	payload := map[string]any{"project": result.Project, "entries": entryResponses(result.Entries)}
+	project, err := s.ownerProject(r.Context(), result.Project)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	payload := map[string]any{"project": project, "entries": entryResponses(result.Entries)}
 	if nextBefore != nil {
 		payload["next_before"] = strconv.FormatInt(*nextBefore, 10)
 	}
@@ -451,7 +456,24 @@ func (s *Server) putProject(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, saved)
+	view, err := s.ownerProject(r.Context(), saved)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+// ownerProjectView is a project as the console sees it: with the research switch, which is kept out of
+// store.Project because that type is also an MCP output schema.
+type ownerProjectView struct {
+	store.Project
+	ResearchVisible bool `json:"research_visible"`
+}
+
+func (s *Server) ownerProject(ctx context.Context, project store.Project) (ownerProjectView, error) {
+	visible, err := s.db.ProjectResearchVisible(ctx, project.Slug)
+	return ownerProjectView{Project: project, ResearchVisible: visible}, err
 }
 
 // putProjectResearch switches whether research runs may see the project's summary.
