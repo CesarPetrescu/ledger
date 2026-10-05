@@ -40,7 +40,47 @@ const detail: HandoffDetail = {
 
 const page: HandoffPage = { handoffs: [detail.handoff] }
 
+const research: HandoffDetail = {
+  handoff: { ...detail.handoff, id: '9', kind: 'research', title: 'Vector DB survey', ready_count: 0, blocked_count: 1, done_count: 3 },
+  messages: [
+    { ...detail.messages[0]!, id: '21', handoff_id: '9', body: '**Research task** · deliverable: report', work_state: 'blocked', target: '', files: [] },
+    { ...detail.messages[0]!, id: '22', handoff_id: '9', body: 'Run 1 started by Adastrion dispatcher.', source: 'ledger', work_state: 'done', target: '', files: [] },
+    { ...detail.messages[0]!, id: '23', handoff_id: '9', body: '# Findings', source: 'Researcher (run 1)', work_state: 'done', target: '', files: [] },
+  ],
+  research: {
+    message_id: '21', state: 'blocked', phase: 'review', spec: { objective: 'Compare', acceptance: ['Cited'], deliverable: 'report', budget: {} }, depends_on: [],
+    attempt: 1, failures: 0, max_attempts: 3, runner: '', progress: '', last_error: '', checkpoint: '',
+  },
+}
+
 describe('handoff inbox', () => {
+  it('shows a research task for review with Accept and Send back on its brief only', async () => {
+    const accepted = { ...research.messages[0]!, work_state: 'done' as const }
+    const { calls } = mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/handoffs': { body: { handoffs: [research.handoff] } },
+      'GET /admin/api/projects': { body: { projects: [atlas] } },
+      'GET /admin/api/handoffs/9': { body: research },
+      'POST /admin/api/handoff-messages/21/actions': { body: accepted },
+    })
+    renderApp('/admin/handoffs')
+    const list = await screen.findByRole('list', { name: /handoffs/i })
+    expect(within(list).getByText('Research')).toBeInTheDocument()
+    await userEvent.setup().click(within(list).getByRole('link', { name: /vector db survey/i }))
+    const panel = await screen.findByRole('region', { name: /research status/i })
+    expect(within(panel).getByRole('heading', { name: 'Ready for review' })).toBeInTheDocument()
+    expect(within(panel).getByText(/accept it, or reply with what to change and send back/i)).toBeInTheDocument()
+    const thread = screen.getByRole('region', { name: /handoff messages/i })
+    const items = within(thread).getAllByRole('listitem')
+    expect(within(items[0]!).getByRole('button', { name: 'Accept' })).toBeInTheDocument()
+    expect(within(items[0]!).getByRole('button', { name: 'Send back' })).toBeInTheDocument()
+    expect(within(items[0]!).queryByRole('button', { name: /claim|block/i })).not.toBeInTheDocument()
+    for (const note of items.slice(1)) expect(within(note).getAllByRole('button').map((button) => button.textContent)).toEqual([' Copy'])
+    await userEvent.setup().click(within(items[0]!).getByRole('button', { name: 'Accept' }))
+    await waitFor(() => expect(calls.find((call) => call.path === '/admin/api/handoff-messages/21/actions')?.body).toMatchObject({ action: 'complete' }))
+  })
+
+
   it('opens a handoff with separate delivery and work states', async () => {
     mockApi({
       'GET /admin/api/session': authenticatedSession,

@@ -263,7 +263,7 @@ func addHandoffTools(server *mcp.Server, db *store.DB) {
 			if input.Draft {
 				state = "draft"
 			}
-			message, err := db.AppendHandoffMessage(ctx, store.HandoffMessage{HandoffID: handoffID, Body: input.Body, Target: input.Target, WorkState: state, Source: name, ClientID: id.ClientID})
+			message, err := db.AppendHandoffMessage(ctx, store.HandoffMessage{HandoffID: handoffID, Body: input.Body, Target: input.Target, WorkState: state, Source: name, ClientID: id.ClientID}, false)
 			if err != nil {
 				return handoffResultError(err)
 			}

@@ -141,6 +141,30 @@ fun InputStream.readBounded(limit: Int): ByteArray {
     return output.toByteArray()
 }
 
+/** In a research thread only the brief moves, and the owner's buttons are named for what they do to the task. */
+fun researchActions(work: String, phase: String, brief: Boolean): List<Pair<String, String>> = if (!brief) emptyList() else when (work) {
+    "draft" -> listOf("publish" to "Queue")
+    "in_progress" -> listOf("release" to "Stop and requeue")
+    "blocked" -> when (phase) {
+        "review" -> listOf("complete" to "Accept", "release" to "Send back")
+        "question" -> listOf("release" to "Resume")
+        else -> listOf("release" to "Retry")
+    }
+    "done" -> listOf("reopen" to "Run again")
+    else -> emptyList()
+}
+
+/** The research status card: a title and what to do next. */
+fun researchHeadline(work: String, phase: String, attempt: Int, failures: Int, maxAttempts: Int, progress: String, lastError: String): Pair<String, String> = when {
+    work == "draft" -> "Research draft" to "Queue it when the brief is ready."
+    work == "ready" -> "Queued" to "Waiting for a free sandbox."
+    work == "in_progress" -> "Running · run $attempt" to progress.ifBlank { "A sandbox is working on it." }
+    work == "done" -> "Accepted" to "Run again reopens it for another run."
+    phase == "review" -> "Ready for review" to "Read the result below. Accept it, or add a message saying what to change and Send back."
+    phase == "question" -> "Question for you" to "Answer it in a new message, then Resume."
+    else -> "Stopped" to "$failures of $maxAttempts failed runs." + (if (lastError.isNotBlank()) " Last error: $lastError." else "") + " Retry gives it a fresh set of attempts."
+}
+
 fun messageActions(work: String, delivery: String): List<String> = buildList {
     if (delivery == "unseen" && work != "draft") add("acknowledge")
     addAll(when (work) {

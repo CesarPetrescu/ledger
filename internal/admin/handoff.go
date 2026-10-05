@@ -54,7 +54,7 @@ func handoffResponse(handoff store.Handoff) map[string]any {
 		"id": strconv.FormatInt(handoff.ID, 10), "project_slug": handoff.ProjectSlug, "project_name": handoff.ProjectName,
 		"title": handoff.Title, "description": handoff.Description, "scope": handoff.Scope,
 		"source": handoff.Source, "client_id": handoff.ClientID, "created_at": handoff.CreatedAt,
-		"updated_at": handoff.UpdatedAt, "archived_at": handoff.ArchivedAt,
+		"updated_at": handoff.UpdatedAt, "archived_at": handoff.ArchivedAt, "kind": handoff.Kind,
 		"draft_count": handoff.DraftCount, "ready_count": handoff.ReadyCount,
 		"in_progress_count": handoff.ProgressCount, "blocked_count": handoff.BlockedCount, "done_count": handoff.DoneCount,
 	}
@@ -66,6 +66,18 @@ func handoffDetailResponse(detail store.HandoffDetail) map[string]any {
 		messages[i] = handoffMessageResponse(message)
 	}
 	response := map[string]any{"handoff": handoffResponse(detail.Handoff), "messages": messages}
+	if task := detail.Research; task != nil {
+		depends := make([]string, len(task.DependsOn))
+		for i, id := range task.DependsOn {
+			depends[i] = strconv.FormatInt(id, 10)
+		}
+		response["research"] = map[string]any{
+			"message_id": strconv.FormatInt(task.MessageID, 10), "state": task.State, "phase": task.Phase, "spec": task.Spec, "depends_on": depends,
+			"attempt": task.Attempt, "failures": task.Failures, "max_attempts": task.MaxAttempts, "runner": task.Runner,
+			"lease_until": task.LeaseUntil, "heartbeat_at": task.HeartbeatAt, "progress": task.Progress, "last_error": task.LastError,
+			"checkpoint": task.Checkpoint, "checkpoint_attempt": task.CheckpointAttempt, "checkpoint_at": task.CheckpointAt,
+		}
+	}
 	if detail.NextBefore != nil {
 		response["next_before"] = strconv.FormatInt(*detail.NextBefore, 10)
 	}
@@ -256,7 +268,7 @@ func (s *Server) appendHandoffMessage(w http.ResponseWriter, r *http.Request) {
 		state = "draft"
 	}
 	clientID := clientIdentifier(sessionFrom(r))
-	message, err := s.db.AppendHandoffMessage(r.Context(), store.HandoffMessage{HandoffID: handoffID, Body: input.Body, Target: input.Target, WorkState: state, Source: writeSource, ClientID: clientID})
+	message, err := s.db.AppendHandoffMessage(r.Context(), store.HandoffMessage{HandoffID: handoffID, Body: input.Body, Target: input.Target, WorkState: state, Source: writeSource, ClientID: clientID}, true)
 	if err != nil {
 		s.handoffError(w, r, err)
 		return

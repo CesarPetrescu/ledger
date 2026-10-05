@@ -91,6 +91,7 @@ func NewServer(config Config, db *store.DB) *Server {
 	s.mux.HandleFunc("GET /admin/api/projects", s.listProjects)
 	s.mux.HandleFunc("GET /admin/api/projects/{slug}", s.getProject)
 	s.mux.HandleFunc("PUT /admin/api/projects/{slug}", s.putProject)
+	s.mux.HandleFunc("PUT /admin/api/projects/{slug}/research", s.putProjectResearch)
 	s.mux.HandleFunc("POST /admin/api/projects/{slug}/entries", s.appendEntry)
 	s.mux.HandleFunc("GET /admin/api/projects/{slug}/files", s.listProjectFiles)
 	s.mux.HandleFunc("GET /admin/api/entries", s.listEntries)
@@ -451,6 +452,35 @@ func (s *Server) putProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, saved)
+}
+
+// putProjectResearch switches whether research runs may see the project's summary.
+func (s *Server) putProjectResearch(w http.ResponseWriter, r *http.Request) {
+	slug := r.PathValue("slug")
+	if err := store.ValidateProjectSlug(slug); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var input struct {
+		Visible *bool `json:"visible"`
+	}
+	if err := decodeJSON(w, r, &input, maxBodyBytes); err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if input.Visible == nil {
+		writeError(w, http.StatusBadRequest, "visible is required")
+		return
+	}
+	if err := s.db.SetProjectResearchVisible(r.Context(), slug, *input.Visible); err != nil {
+		if store.IsNotFound(err) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		s.internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"research_visible": *input.Visible})
 }
 
 func (s *Server) appendEntry(w http.ResponseWriter, r *http.Request) {

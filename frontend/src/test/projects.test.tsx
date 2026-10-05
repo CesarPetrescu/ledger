@@ -19,6 +19,22 @@ const labelled: TableEntry = {
 }
 
 describe('project browser', () => {
+  it('shares a project with research runs from its details', async () => {
+    const { calls } = mockApi({
+      ...projectBase,
+      'GET /admin/api/projects': { body: { projects: [atlas, beacon] } },
+      'GET /admin/api/projects/atlas': { body: atlasDetail },
+      'PUT /admin/api/projects/atlas/research': { body: { research_visible: true } },
+    })
+    renderApp('/admin/projects/atlas/details')
+    const share = await screen.findByRole('checkbox', { name: /share with research runs/i })
+    expect(share).not.toBeChecked()
+    await userEvent.setup().click(share)
+    expect(await screen.findByRole('checkbox', { name: /share with research runs/i })).toBeChecked()
+    expect(calls.find((call) => call.path === '/admin/api/projects/atlas/research')?.body).toEqual({ visible: true })
+  })
+
+
   it('lists projects densely, filters by text and tier, and opens a project page with AI titles instead of raw text', async () => {
     const { calls } = mockApi({
       ...projectBase,

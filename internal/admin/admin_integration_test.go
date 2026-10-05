@@ -1805,3 +1805,46 @@ func TestEntriesCanKeepOnlyOverdueOnes(t *testing.T) {
 		}
 	}
 }
+
+// The owner's research switch is its own endpoint: saving the project form leaves it alone, and research
+// handoffs show their run status to the owner.
+func TestOwnerSharesAProjectWithResearchAndSeesRunStatus(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
+	_, s := login(t, server, "correct horse", "")
+	if res := request(t, server, http.MethodPut, "/admin/api/projects/atlas", `{"name":"Atlas","tier":"focus","hours_wk":8}`, authed(s, true)); res.Code != http.StatusOK {
+		t.Fatalf("create project = %d %s", res.Code, res.Body.String())
+	}
+	if res := request(t, server, http.MethodPut, "/admin/api/projects/atlas/research", `{"visible":true}`, map[string]string{"Cookie": s.cookie}); res.Code != http.StatusForbidden {
+		t.Fatalf("switch without CSRF = %d", res.Code)
+	}
+	if res := request(t, server, http.MethodPut, "/admin/api/projects/atlas/research", `{}`, authed(s, true)); res.Code != http.StatusBadRequest {
+		t.Fatalf("switch without visible = %d", res.Code)
+	}
+	if res := request(t, server, http.MethodPut, "/admin/api/projects/missing/research", `{"visible":true}`, authed(s, true)); res.Code != http.StatusNotFound {
+		t.Fatalf("switch on a missing project = %d", res.Code)
+	}
+	if res := request(t, server, http.MethodPut, "/admin/api/projects/atlas/research", `{"visible":true}`, authed(s, true)); res.Code != http.StatusOK {
+		t.Fatalf("switch = %d %s", res.Code, res.Body.String())
+	}
+	if res := request(t, server, http.MethodPut, "/admin/api/projects/atlas", `{"name":"Atlas","tier":"focus","hours_wk":9}`, authed(s, true)); res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"research_visible":true`) {
+		t.Fatalf("form save reset the switch: %d %s", res.Code, res.Body.String())
+	}
+
+	task, err := db.CreateResearchTask(ctx, store.NewResearchTask{ProjectSlug: "atlas", Title: "Survey", Source: "claude", ClientID: "c", Spec: store.ResearchSpec{Objective: "Compare", Acceptance: []string{"Cited"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := request(t, server, http.MethodGet, "/admin/api/handoffs/"+strconv.FormatInt(task.ID, 10), "", authed(s, false))
+	var detail struct {
+		Handoff  struct{ Kind string } `json:"handoff"`
+		Research struct {
+			MessageID   string `json:"message_id"`
+			State       string `json:"state"`
+			MaxAttempts int    `json:"max_attempts"`
+		} `json:"research"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &detail); err != nil || detail.Handoff.Kind != "research" || detail.Research.MessageID != strconv.FormatInt(task.MessageID, 10) || detail.Research.State != "ready" || detail.Research.MaxAttempts != 3 {
+		t.Fatalf("research detail = %s, %v", res.Body.String(), err)
+	}
+}

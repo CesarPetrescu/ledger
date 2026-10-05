@@ -42,6 +42,7 @@ func TestToolsListIsExactAndAnnotated(t *testing.T) {
 		"list_calendars": true, "list_calendar_events": true, "create_calendar_event": false, "update_calendar_event": false, "delete_calendar_event": false,
 		"list_handoffs": true, "get_handoff": true, "create_handoff": false, "append_handoff_message": false,
 		"update_handoff_message": false, "attach_handoff_file": false, "read_handoff_file": true,
+		"create_research_task": false,
 	}
 	if len(result.Tools) != len(want) {
 		t.Fatalf("got %d tools", len(result.Tools))
@@ -74,6 +75,7 @@ func TestToolsListIsExactAndAnnotated(t *testing.T) {
 		"update_handoff_message": {handoffMessageOutput(store.HandoffMessage{SeenAt: &now, ClaimedAt: &now})},
 		"attach_handoff_file":    {handoffFileOutput(file)},
 		"read_handoff_file":      {map[string]string{"id": "9007199254740993", "filename": "note.txt", "uri": "ledger://handoff-file/9007199254740993"}},
+		"create_research_task":   {researchSample(now)},
 	}
 	for name, key := range map[string]string{"list_projects": "projects", "list_calendars": "calendars", "list_calendar_events": "events"} {
 		for i, value := range samples[name] {
@@ -125,6 +127,8 @@ func TestToolsListIsExactAndAnnotated(t *testing.T) {
 			}
 		} else if strings.Contains(tool.Name, "handoff") {
 			suffix = HandoffDescriptionSuffix
+		} else if strings.Contains(tool.Name, "research") {
+			suffix = ResearchDescriptionSuffix
 		}
 		if !strings.HasSuffix(tool.Description, suffix) {
 			t.Errorf("tool %q description missing required suffix", tool.Name)
@@ -182,5 +186,77 @@ func TestBearerTokenParsesHTTPAuthorizationScheme(t *testing.T) {
 				t.Fatalf("bearerToken(%q) = %q, %v; want %q, %v", test.values, got, ok, test.want, test.want != "")
 			}
 		})
+	}
+}
+
+func researchSample(now time.Time) store.ResearchTask {
+	attempt := 1
+	return store.ResearchTask{ID: 4, MessageID: 9, Title: "Survey", State: "in_progress", DependsOn: []int64{}, Spec: store.ResearchSpec{Objective: "Find", Acceptance: []string{"Cited"}, Deliverable: "report"},
+		Attempt: 1, MaxAttempts: 3, LeaseUntil: &now, Checkpoint: "step 2", CheckpointAttempt: &attempt, CheckpointAt: &now}
+}
+
+// The research and dispatch endpoints expose exactly their own tools, each with an object output schema
+// that the tool's real output satisfies.
+func TestResearchAndDispatchToolsAreExact(t *testing.T) {
+	now := time.Now().UTC()
+	task := researchSample(now)
+	for name, test := range map[string]struct {
+		server  *mcp.Server
+		samples map[string]any
+	}{
+		"research": {NewResearchServer(nil), map[string]any{
+			"get_task":   store.ResearchContext{Task: task, Project: &store.ResearchProject{Slug: "atlas", Name: "Atlas"}, Thread: []store.ResearchNote{{From: "owner", Body: "Use 2026 data", At: now}}},
+			"heartbeat":  leaseOutput{LeaseUntil: now},
+			"checkpoint": leaseOutput{LeaseUntil: now},
+			"submit":     submitOutput{MessageID: "12", State: "blocked", Phase: "review"},
+			"ask_owner":  stateOutput{State: "blocked", Phase: "question"},
+		}},
+		"dispatch": {NewDispatchServer(nil, "https://ledger.example.com"), map[string]any{
+			"claim_research_task":  dispatchClaim{Claimed: true, Task: &task, Token: "t", Endpoint: "https://ledger.example.com/mcp/research"},
+			"renew_research_lease": leaseOutput{LeaseUntil: now},
+			"end_research_run":     task,
+		}},
+	} {
+		ctx := context.Background()
+		serverTransport, clientTransport := mcp.NewInMemoryTransports()
+		serverSession, err := test.server.Connect(ctx, serverTransport, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		session, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil).Connect(ctx, clientTransport, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := session.ListTools(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(result.Tools) != len(test.samples) {
+			t.Errorf("%s: got %d tools, want %d", name, len(result.Tools), len(test.samples))
+		}
+		for _, tool := range result.Tools {
+			sample, ok := test.samples[tool.Name]
+			if !ok {
+				t.Errorf("%s: unexpected tool %q", name, tool.Name)
+				continue
+			}
+			var schema jsonschema.Schema
+			encoded, _ := json.Marshal(tool.OutputSchema)
+			if err := json.Unmarshal(encoded, &schema); err != nil || schema.Type != "object" {
+				t.Fatalf("%s/%s: output schema %s", name, tool.Name, encoded)
+			}
+			resolved, err := schema.Resolve(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var value any
+			encoded, _ = json.Marshal(sample)
+			_ = json.Unmarshal(encoded, &value)
+			if err := resolved.Validate(value); err != nil {
+				t.Errorf("%s/%s: output does not match schema: %v", name, tool.Name, err)
+			}
+		}
+		session.Close()
+		serverSession.Close()
 	}
 }

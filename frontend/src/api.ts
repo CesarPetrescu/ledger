@@ -19,6 +19,7 @@ export interface Project {
   needs_me: string
   automate: string
   stack: string
+  research_visible: boolean
   updated_at: string
   last_entry_at?: string
 }
@@ -390,6 +391,7 @@ export interface Handoff {
   created_at: string
   updated_at: string
   archived_at?: string
+  kind?: 'general' | 'research'
   draft_count: number
   ready_count: number
   in_progress_count: number
@@ -431,9 +433,29 @@ export interface HandoffMessage {
   files: HandoffFile[]
 }
 
+export interface ResearchStatus {
+  message_id: string
+  state: HandoffWorkState
+  phase: '' | 'question' | 'review' | 'dead'
+  spec: { objective: string; acceptance: string[]; deliverable: string; eval_cmd?: string; budget: { rounds?: number; minutes?: number; tokens?: number } }
+  depends_on: string[]
+  attempt: number
+  failures: number
+  max_attempts: number
+  runner: string
+  lease_until?: string
+  heartbeat_at?: string
+  progress: string
+  last_error: string
+  checkpoint: string
+  checkpoint_attempt?: number
+  checkpoint_at?: string
+}
+
 export interface HandoffDetail {
   handoff: Handoff
   messages: HandoffMessage[]
+  research?: ResearchStatus
   next_before?: string
 }
 
@@ -545,6 +567,7 @@ export const api = {
   // The project page lists entries itself; this only needs the project record.
   getProject: (slug: string) => request<ProjectDetail>('GET', `/projects/${encodeURIComponent(slug)}?entries=1`).then((detail) => detail.project),
   saveProject: (slug: string, input: ProjectInput) => request<Project>('PUT', `/projects/${encodeURIComponent(slug)}`, input),
+  setProjectResearch: (slug: string, visible: boolean) => request<{ research_visible: boolean }>('PUT', `/projects/${encodeURIComponent(slug)}/research`, { visible }),
   appendEntry: (slug: string, kind: string, body: string) => request<Entry>('POST', `/projects/${encodeURIComponent(slug)}/entries`, { kind, body }),
   listEntries: (filter: EntryFilter, before?: string) => request<EntryTablePage>('GET', `/entries${entryQuery(filter, { limit: '200', ...(before ? { before } : {}) })}`),
   getProjectSummaries: () => request<ProjectSummaries>('GET', '/table/projects'),

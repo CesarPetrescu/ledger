@@ -69,8 +69,13 @@ fun HandoffDetail(model: LedgerModel, id: String) {
     val markdown = rememberMarkdownPreview()
     Load(model, "handoff:$id:$before", { it.request("GET", handoffPath(id, before)) }) { data ->
         val h = data.getJSONObject("handoff")
+        val research = data.optJSONObject("research")
         Page {
             item { MarkdownCard(h.text("title"), h.text("project_name").ifBlank { "General" }, listOf(h.text("description"), h.text("scope")).filter { it.isNotBlank() }.joinToString("\n\n"), markdown.value) }
+            if (research != null) item {
+                val (title, hint) = researchHeadline(research.text("state"), research.text("phase"), research.optInt("attempt"), research.optInt("failures"), research.optInt("max_attempts"), research.text("progress"), research.text("last_error"))
+                MarkdownCard("Research task", title, hint, false)
+            }
             item {
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { model.go("message-new/$id") }, enabled = !model.busy) { Text("Add message") }
@@ -79,7 +84,7 @@ fun HandoffDetail(model: LedgerModel, id: String) {
                 }
             }
             item { MarkdownSwitch(markdown) }
-            items(data.rows("messages"), key = { it.text("id") }) { message -> MessageCard(model, message, markdown.value) }
+            items(data.rows("messages"), key = { it.text("id") }) { message -> MessageCard(model, message, markdown.value, research) }
             item { Row {
                 if (before.isNotBlank()) TextButton(onClick = { before = "" }) { Text("Latest messages") }
                 if (data.text("next_before").isNotBlank()) TextButton(onClick = { before = data.text("next_before") }) { Text("Older messages") }
@@ -89,7 +94,7 @@ fun HandoffDetail(model: LedgerModel, id: String) {
 }
 
 @Composable
-private fun MessageCard(model: LedgerModel, message: JSONObject, markdown: Boolean) {
+private fun MessageCard(model: LedgerModel, message: JSONObject, markdown: Boolean, research: JSONObject?) {
     val id = message.text("id")
     var retarget by remember { mutableStateOf(false) }
     var target by rememberSaveable { mutableStateOf(message.text("target")) }
@@ -97,10 +102,12 @@ private fun MessageCard(model: LedgerModel, message: JSONObject, markdown: Boole
         MarkdownCard("${label(message.text("work_state"))} · ${label(message.text("delivery_state"))}",
             "${displayTime(message.text("created_at"))} · ${message.text("source")}" + if (message.text("target").isNotBlank()) " → ${message.text("target")}" else "", message.text("body"), markdown)
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            messageActions(message.text("work_state"), message.text("delivery_state")).forEach { action ->
-                OutlinedButton(enabled = !model.busy, onClick = { model.act("${label(action)} applied") { it.request("POST", "/handoff-messages/${segment(id)}/actions", json("action" to action)) } }) { Text(label(action)) }
+            val actions = if (research != null) researchActions(message.text("work_state"), research.text("phase"), id == research.text("message_id"))
+                else messageActions(message.text("work_state"), message.text("delivery_state")).map { it to label(it) }
+            actions.forEach { (action, name) ->
+                OutlinedButton(enabled = !model.busy, onClick = { model.act("$name applied") { it.request("POST", "/handoff-messages/${segment(id)}/actions", json("action" to action)) } }) { Text(name) }
             }
-            if (canRetarget(message.text("work_state"), message.text("claimed_at").isNotBlank())) TextButton(onClick = { retarget = true }, enabled = !model.busy) { Text("Retarget") }
+            if (research == null && canRetarget(message.text("work_state"), message.text("claimed_at").isNotBlank())) TextButton(onClick = { retarget = true }, enabled = !model.busy) { Text("Retarget") }
         }
         message.rows("files").forEach { file -> FileRow(model, file, message.text("work_state") == "draft") }
         if (message.text("work_state") == "draft") UploadButton(model, id)

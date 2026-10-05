@@ -9,6 +9,7 @@ import {
   type HandoffMessage,
   type HandoffWorkState,
   type Project,
+  type ResearchStatus,
 } from '../api'
 import { useToast } from '../components/Toast'
 import { EmptyState, ErrorState, Icon, Loading, StaleNotice, Timestamp } from '../components/ui'
@@ -250,7 +251,23 @@ function MessageComposer({ handoffID, preview, onAppended }: { handoffID: string
   )
 }
 
-function actionNames(message: HandoffMessage): string[] {
+type MessageAction = { action: string; label: string }
+
+function actionNames(message: HandoffMessage, research?: ResearchStatus): MessageAction[] {
+  const named = (...actions: string[]) => actions.map((action) => ({ action, label: titleCase(action) }))
+  // In a research thread only the brief moves: the dispatcher claims it and the run blocks it, so the
+  // owner's buttons are named for what they do to the task.
+  if (research) {
+    if (message.id !== research.message_id) return []
+    if (message.work_state === 'draft') return [{ action: 'publish', label: 'Queue' }]
+    if (message.work_state === 'in_progress') return [{ action: 'release', label: 'Stop and requeue' }]
+    if (message.work_state === 'blocked') {
+      const release = { action: 'release', label: research.phase === 'review' ? 'Send back' : research.phase === 'question' ? 'Resume' : 'Retry' }
+      return research.phase === 'review' ? [{ action: 'complete', label: 'Accept' }, release] : [release]
+    }
+    if (message.work_state === 'done') return [{ action: 'reopen', label: 'Run again' }]
+    return []
+  }
   const actions: string[] = []
   if (message.delivery_state === 'unseen' && message.work_state !== 'draft') actions.push('acknowledge')
   if (message.work_state === 'draft') actions.push('publish')
@@ -258,7 +275,37 @@ function actionNames(message: HandoffMessage): string[] {
   if (message.work_state === 'in_progress') actions.push('block', 'complete', 'release')
   if (message.work_state === 'blocked') actions.push('complete', 'release')
   if (message.work_state === 'done') actions.push('reopen')
-  return actions
+  return named(...actions)
+}
+
+function researchHeadline(research: ResearchStatus): { title: string; hint: string } {
+  const failures = `${research.failures} of ${research.max_attempts} failed runs`
+  if (research.state === 'draft') return { title: 'Research draft', hint: 'Queue it when the brief is ready.' }
+  if (research.state === 'ready') return { title: 'Queued', hint: research.depends_on.length ? `Waits for research ${research.depends_on.map((id) => `#${id}`).join(', ')} to be accepted, then for a free sandbox.` : 'Waiting for a free sandbox.' }
+  if (research.state === 'in_progress') return { title: `Running · run ${research.attempt}`, hint: `On ${research.runner || 'a sandbox'}${research.progress ? `: ${research.progress}` : ''}.` }
+  if (research.state === 'done') return { title: 'Accepted', hint: 'Run again reopens it for another run.' }
+  if (research.phase === 'review') return { title: 'Ready for review', hint: 'Read the result below. Accept it, or reply with what to change and Send back.' }
+  if (research.phase === 'question') return { title: 'Question for you', hint: 'Answer it in a reply below, then Resume.' }
+  return { title: 'Stopped', hint: `${failures}. Retry gives it a fresh set of attempts.` }
+}
+
+function ResearchPanel({ research }: { research: ResearchStatus }) {
+  const { title, hint } = researchHeadline(research)
+  return (
+    <section className="research-panel" aria-label="Research status" data-phase={research.phase || research.state}>
+      <p className="eyebrow">Research task</p>
+      <h2>{title}</h2>
+      <p>{hint}</p>
+      <dl className="research-facts">
+        <div><dt>Runs</dt><dd>{research.attempt}</dd></div>
+        <div><dt>Failed</dt><dd>{research.failures} of {research.max_attempts}</dd></div>
+        {research.heartbeat_at && <div><dt>Last heartbeat</dt><dd><Timestamp iso={research.heartbeat_at} /></dd></div>}
+        {research.lease_until && <div><dt>Lease until</dt><dd><Timestamp iso={research.lease_until} /></dd></div>}
+        {research.checkpoint_at && <div><dt>Checkpoint</dt><dd>run {research.checkpoint_attempt}, <Timestamp iso={research.checkpoint_at} /></dd></div>}
+      </dl>
+      {research.last_error && <p className="research-error"><strong>Last error:</strong> {research.last_error}</p>}
+    </section>
+  )
 }
 
 function HandoffThread({ id }: { id: string }) {
@@ -277,12 +324,13 @@ function HandoffThread({ id }: { id: string }) {
       toast('Clipboard access failed.', 'error')
     }
   }
-  const act = async (message: HandoffMessage, action: string) => {
+  const act = async (message: HandoffMessage, action: string, label: string) => {
     setBusy(`${message.id}:${action}`)
     try {
       const updated = await api.updateHandoffMessage(message.id, action)
       detail.update((current) => ({ ...current, messages: current.messages.map((item) => item.id === updated.id ? updated : item) }))
-      toast(`${titleCase(action)} complete.`)
+      if (detail.data?.research) detail.reload()
+      toast(`${label} complete.`)
     } catch (failure) {
       toast(describeError(failure), 'error')
     } finally {
@@ -316,7 +364,7 @@ function HandoffThread({ id }: { id: string }) {
 
   if (detail.loading) return <Loading label="Loading handoff…" />
   if (!detail.data) return <ErrorState message={detail.error === 'handoff item not found' ? 'Handoff not found.' : "Couldn't load this handoff."} onRetry={detail.reload} />
-  const { handoff, messages } = detail.data
+  const { handoff, messages, research } = detail.data
   const text = (value: string) => markdown ? <MarkdownText text={value} /> : value
   return (
     <article className="detail handoff-detail">
@@ -330,6 +378,7 @@ function HandoffThread({ id }: { id: string }) {
         <button type="button" className="btn" onClick={() => void copyFull()}><Icon name="copy" /> Copy full handoff</button>
       </header>
       {detail.stale && <StaleNotice message="Showing the last loaded version; refresh failed." onRetry={detail.reload} />}
+      {research && <ResearchPanel research={research} />}
       <dl className="handoff-summary"><div><dt>Description</dt><dd>{text(handoff.description)}</dd></div><div><dt>Work scope</dt><dd>{text(handoff.scope)}</dd></div></dl>
       <section className="handoff-thread" aria-label="Handoff messages">
         <div className="section-head"><h2 className="section-title">Messages <span className="count">{messages.length} loaded</span></h2><MarkdownToggle on={markdown} onChange={setMarkdown} />{detail.data.next_before && <button type="button" className="btn" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? 'Loading…' : 'Load older'}</button>}</div>
@@ -345,7 +394,7 @@ function HandoffThread({ id }: { id: string }) {
               {message.work_state === 'draft' && <DraftUploader message={message} onUpdated={(updated) => detail.update((current) => ({ ...current, messages: current.messages.map((item) => item.id === updated.id ? updated : item) }))} />}
               <footer className="message-actions">
                 <button type="button" className="btn btn-quiet" aria-label="Copy message" onClick={() => void copy(message.body, 'Message')}><Icon name="copy" /> Copy</button>
-                {actionNames(message).map((action) => <button key={action} type="button" className={action === 'claim' || action === 'publish' ? 'btn btn-primary' : 'btn'} disabled={busy !== ''} onClick={() => void act(message, action)}>{busy === `${message.id}:${action}` ? 'Working…' : titleCase(action)}</button>)}
+                {actionNames(message, research).map(({ action, label }) => <button key={action} type="button" className={action === 'claim' || action === 'publish' || (research && action === 'complete') ? 'btn btn-primary' : 'btn'} disabled={busy !== ''} onClick={() => void act(message, action, label)}>{busy === `${message.id}:${action}` ? 'Working…' : label}</button>)}
               </footer>
             </li>
           ))}
@@ -414,7 +463,7 @@ export function HandoffsPage({ id, creating = false, initialProject = '' }: { id
         {!list.loading && !list.data && <ErrorState message="Couldn't load handoffs." onRetry={list.reload} />}
         {list.stale && <StaleNotice message="Handoff list may be out of date." onRetry={list.reload} />}
         {list.data && visible.length === 0 && <p className="muted">No handoffs match.</p>}
-        {visible.length > 0 && <ul className="handoff-list" aria-label="Handoffs">{visible.map((handoff) => <li key={handoff.id}><Link to={`/handoffs/${handoff.id}`} aria-current={handoff.id === id ? 'page' : undefined}><strong>{handoff.title}</strong><span className="clamp">{handoff.description}</span><span className="handoff-list-meta">{handoff.project_name || 'General'} · <Timestamp iso={handoff.updated_at} /></span><span className="handoff-counts">{counts(handoff).map((item) => <span key={item.label} data-status={item.label.toLowerCase().replace(' ', '_')}>{item.value} {item.label}</span>)}</span></Link></li>)}</ul>}
+        {visible.length > 0 && <ul className="handoff-list" aria-label="Handoffs">{visible.map((handoff) => <li key={handoff.id}><Link to={`/handoffs/${handoff.id}`} aria-current={handoff.id === id ? 'page' : undefined}><strong>{handoff.kind === 'research' && <span className="badge research-badge">Research</span>}{handoff.title}</strong><span className="clamp">{handoff.description}</span><span className="handoff-list-meta">{handoff.project_name || 'General'} · <Timestamp iso={handoff.updated_at} /></span><span className="handoff-counts">{counts(handoff).map((item) => <span key={item.label} data-status={item.label.toLowerCase().replace(' ', '_')}>{item.value} {item.label}</span>)}</span></Link></li>)}</ul>}
         {list.data?.next_before && <button type="button" className="btn" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? 'Loading…' : 'Load more handoffs'}</button>}
       </section>
       <section className="pane pane-detail" aria-label="Handoff inspector">

@@ -38,6 +38,11 @@ class ContractTest {
         assertEquals(listOf("publish"), messageActions("draft", "unseen"))
         assertEquals(listOf("acknowledge", "claim"), messageActions("ready", "unseen"))
         assertEquals(listOf("block", "complete", "release"), messageActions("in_progress", "seen"))
+        assertEquals(listOf("complete" to "Accept", "release" to "Send back"), researchActions("blocked", "review", brief = true))
+        assertEquals(listOf("release" to "Retry"), researchActions("blocked", "dead", brief = true))
+        assertEquals(emptyList<Pair<String, String>>(), researchActions("ready", "", brief = true))
+        assertEquals(emptyList<Pair<String, String>>(), researchActions("done", "", brief = false))
+        assertEquals("Stopped", researchHeadline("blocked", "dead", 3, 3, 3, "", "exit 137").first)
         assertEquals(listOf("complete", "release"), messageActions("blocked", "seen"))
         assertEquals(listOf("reopen"), messageActions("done", "seen"))
     }

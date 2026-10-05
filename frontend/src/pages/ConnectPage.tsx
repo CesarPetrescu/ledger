@@ -8,6 +8,7 @@ const permissions: Record<string, string> = {
   'ledger:write': 'Add and update project memory',
   'calendar:read': 'Read selected calendars',
   'calendar:write': 'Change selected calendars',
+  'research:dispatch': 'Run research tasks: claim queued research and start a sandbox for each, with a token for that task only',
 }
 
 export function AuthorizePage({ query }: { query: string }) {
