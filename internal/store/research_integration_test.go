@@ -122,6 +122,33 @@ func TestResearchRunThatDiesIsRetriedFromItsCheckpoint(t *testing.T) {
 	}
 }
 
+// The owner stopping a run requeues the task without spending an attempt, and the thread says so.
+func TestOwnerStoppingARunIsNotAFailure(t *testing.T) {
+	db, ctx := researchDB(t)
+	task := newResearch(t, db, ctx, "Stop me", 1)
+	c := claim(t, db, ctx)
+	if _, err := db.UpdateHandoffMessage(ctx, task.MessageID, "release", "", store.OwnerSource, "owner", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.RenewResearchLease(ctx, task.ID, 1, "dispatch-client"); !errors.Is(err, store.ErrResearchLease) {
+		t.Fatalf("renew after stop = %v", err)
+	}
+	if _, _, err := db.ResearchRun(ctx, c.Token); !store.IsNotFound(err) {
+		t.Fatalf("token after stop = %v", err)
+	}
+	stopped, err := db.EndResearchRun(ctx, task.ID, 1, "dispatch-client", "killed")
+	if err != nil || stopped.State != "ready" || stopped.Failures != 0 || stopped.Phase != "" {
+		t.Fatalf("after stop = %#v, %v", stopped, err)
+	}
+	pack, _ := db.ResearchContext(ctx, task.ID, nil)
+	if last := pack.Thread[len(pack.Thread)-1]; last.From != "ledger" || last.Body != "Run 1 stopped by the owner." {
+		t.Fatalf("thread = %#v", pack.Thread)
+	}
+	if next := claim(t, db, ctx); next == nil || next.Task.Attempt != 2 {
+		t.Fatalf("claim after stop = %#v", next)
+	}
+}
+
 func TestResearchTaskStopsAfterItsAttemptsAndTheOwnerCanRetry(t *testing.T) {
 	db, ctx := researchDB(t)
 	task := newResearch(t, db, ctx, "Flaky", 2)

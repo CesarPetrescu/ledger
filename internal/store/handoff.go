@@ -494,9 +494,16 @@ WHERE id=$1 RETURNING id,handoff_id,body,target,work_state,source,client_id,seen
 	}
 	if briefID != 0 && !note && newState != state.WorkState {
 		// The run (if any) ends here: its token stops working once the brief leaves in_progress. Releasing
-		// a stopped task gives it a fresh set of attempts.
-		if _, err := tx.Exec(ctx, `UPDATE research_task SET lease_until=NULL,progress='',failures=CASE WHEN phase='dead' THEN 0 ELSE failures END,phase=NULL WHERE handoff_id=$1`, state.HandoffID); err != nil {
+		// a dead task gives it a fresh set of attempts. The owner stopping a run is a decision, not a failed
+		// attempt, so it is noted rather than counted.
+		var attempt int
+		if err := tx.QueryRow(ctx, `UPDATE research_task SET lease_until=NULL,progress='',failures=CASE WHEN phase='dead' THEN 0 ELSE failures END,phase=NULL WHERE handoff_id=$1 RETURNING attempt`, state.HandoffID).Scan(&attempt); err != nil {
 			return HandoffMessage{}, err
+		}
+		if state.WorkState == "in_progress" {
+			if err := researchNote(ctx, tx, state.HandoffID, fmt.Sprintf("Run %d stopped by the owner.", attempt)); err != nil {
+				return HandoffMessage{}, err
+			}
 		}
 	}
 	messages := []HandoffMessage{message}

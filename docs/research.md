@@ -44,7 +44,8 @@ Research threads are owner-only. `list_handoffs`, `get_handoff`, and the other h
 - A run ends one of three ways:
   - **`submit`**: phase `review`.
   - **`ask_owner`**: phase `question`.
-  - **Failure**: the lease lapses, the dispatcher calls `end_research_run` before a submit, or the owner stops it. A failure adds one to `failures` and sets `last_error`. The task goes back to `ready`, or becomes `dead` once `failures` reaches `max_attempts`.
+  - **Failure**: the lease lapses, or the dispatcher calls `end_research_run` before a submit. A failure adds one to `failures` and sets `last_error`. The task goes back to `ready`, or becomes `dead` once `failures` reaches `max_attempts`.
+  - **Stopped by the owner** (Stop and requeue): the task goes back to `ready` without counting a failure, and the thread notes the stop. The dispatcher's renewal then fails with `lease_lost`.
 - Ledger checks for lapsed leases every 15 seconds, so a task returns to the queue within the lease time plus 15 seconds even if the dispatcher has died.
 - The run token works only while its task is `in_progress` under the same attempt with a live lease. It stops working the moment the run ends.
 - `checkpoint` stores up to 64 KiB of state. The next run gets it from `get_task` (`checkpoint` and `checkpoint_attempt`) and should resume from it.
