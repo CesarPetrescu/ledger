@@ -127,6 +127,10 @@ func TestOwnerStoppingARunIsNotAFailure(t *testing.T) {
 	db, ctx := researchDB(t)
 	task := newResearch(t, db, ctx, "Stop me", 1)
 	c := claim(t, db, ctx)
+	// Accept needs a result: a stale tab cannot accept a running task.
+	if _, err := db.UpdateHandoffMessage(ctx, task.MessageID, "complete", "", store.OwnerSource, "owner", true); !errors.Is(err, store.ErrHandoffConflict) {
+		t.Fatalf("accept a running task = %v", err)
+	}
 	if _, err := db.UpdateHandoffMessage(ctx, task.MessageID, "release", "", store.OwnerSource, "owner", true); err != nil {
 		t.Fatal(err)
 	}
@@ -253,6 +257,19 @@ func TestResearchSubmitGoesToReviewAndFeedbackReachesTheNextRun(t *testing.T) {
 	}
 	if asked, _ := db.ResearchTask(ctx, task.ID); asked.Phase != "question" || asked.State != "blocked" {
 		t.Fatalf("asked = %#v", asked)
+	}
+	if _, err := db.UpdateHandoffMessage(ctx, task.MessageID, "complete", "", store.OwnerSource, "owner", true); !errors.Is(err, store.ErrHandoffConflict) {
+		t.Fatalf("accept an open question = %v", err)
+	}
+	// Answer it, run again, submit, and accept the result.
+	if _, err := db.UpdateHandoffMessage(ctx, task.MessageID, "release", "", store.OwnerSource, "owner", true); err != nil {
+		t.Fatal(err)
+	}
+	if c := claim(t, db, ctx); c == nil || c.Task.Attempt != 3 {
+		t.Fatalf("claim after answer = %#v", c)
+	}
+	if _, err := db.SubmitResearch(ctx, task.ID, 3, "# Final", nil); err != nil {
+		t.Fatal(err)
 	}
 	// Accepting is completing the brief; the thread then archives.
 	if _, err := db.UpdateHandoffMessage(ctx, task.MessageID, "complete", "", store.OwnerSource, "owner", true); err != nil {

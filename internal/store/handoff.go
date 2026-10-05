@@ -404,8 +404,9 @@ func (db *DB) UpdateHandoffMessage(ctx context.Context, id int64, action, target
 	defer tx.Rollback(ctx)
 	var state messageState
 	var briefID int64
-	err = tx.QueryRow(ctx, `SELECT h.id,COALESCE((SELECT message_id FROM research_task WHERE handoff_id=h.id),0) FROM handoff h JOIN handoff_message m ON m.handoff_id=h.id
-WHERE m.id=$1 AND ($2 OR h.kind='general') FOR UPDATE OF h`, id, admin).Scan(&state.HandoffID, &briefID)
+	var phase string
+	err = tx.QueryRow(ctx, `SELECT h.id,COALESCE(t.message_id,0),COALESCE(t.phase,'') FROM handoff h JOIN handoff_message m ON m.handoff_id=h.id LEFT JOIN research_task t ON t.handoff_id=h.id
+WHERE m.id=$1 AND ($2 OR h.kind='general') FOR UPDATE OF h`, id, admin).Scan(&state.HandoffID, &briefID, &phase)
 	if err != nil {
 		return HandoffMessage{}, err
 	}
@@ -458,6 +459,10 @@ WHERE m.id=$1 AND ($2 OR h.kind='general') FOR UPDATE OF h`, id, admin).Scan(&st
 	case "complete":
 		if (state.WorkState != "in_progress" && state.WorkState != "blocked") || !claimant {
 			return HandoffMessage{}, ErrHandoffForbidden
+		}
+		// Accepting a research task needs a result to accept: not a run in progress, a question, or a stop.
+		if briefID != 0 && (state.WorkState != "blocked" || phase != "review") {
+			return HandoffMessage{}, ErrHandoffConflict
 		}
 		newState = "done"
 	case "release":
