@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // TrashRetention is how long deleted projects and entries can be restored.
@@ -236,6 +238,36 @@ type storedEntry struct {
 	ResolvedBy *int64          `json:"resolved_by"`
 }
 
+// insertSnapshot puts back a row that Trash saved as JSON. It writes only the columns the snapshot has, so
+// a column added after the snapshot was taken gets its own default instead of NULL, and keys for columns
+// dropped since are ignored. Restores therefore keep working across migrations without per-column fixes.
+// clause goes before SELECT (such as OVERRIDING SYSTEM VALUE) and conflict after it.
+func insertSnapshot(ctx context.Context, tx pgx.Tx, table string, row []byte, clause, conflict string) (pgconn.CommandTag, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(row, &fields); err != nil {
+		return pgconn.CommandTag{}, err
+	}
+	rows, err := tx.Query(ctx, `SELECT column_name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name=$1 AND is_generated='NEVER' ORDER BY ordinal_position`, table)
+	if err != nil {
+		return pgconn.CommandTag{}, err
+	}
+	names, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return pgconn.CommandTag{}, err
+	}
+	var columns []string
+	for _, name := range names {
+		if _, ok := fields[name]; ok {
+			columns = append(columns, pgx.Identifier{name}.Sanitize())
+		}
+	}
+	if len(columns) == 0 {
+		return pgconn.CommandTag{}, fmt.Errorf("trash snapshot has no %s columns", table)
+	}
+	list, name := strings.Join(columns, ","), pgx.Identifier{table}.Sanitize()
+	return tx.Exec(ctx, `INSERT INTO `+name+`(`+list+`) `+clause+` SELECT `+list+` FROM jsonb_populate_record(NULL::`+name+`,$1) `+conflict, row)
+}
+
 func restore(ctx context.Context, tx pgx.Tx, trashID int64) error {
 	// Restores relink entries across trash items (a todo and the entry that
 	// closed it), so run them one at a time; they are rare and quick.
@@ -258,7 +290,7 @@ func restore(ctx context.Context, tx pgx.Tx, trashID int64) error {
 		if err := json.Unmarshal(payload, &p); err != nil {
 			return err
 		}
-		tag, err := tx.Exec(ctx, `INSERT INTO project SELECT * FROM jsonb_populate_record(NULL::project,'{"research_visible":false}'::jsonb||$1) ON CONFLICT(slug) DO NOTHING`, []byte(p.Project))
+		tag, err := insertSnapshot(ctx, tx, "project", p.Project, "", "ON CONFLICT(slug) DO NOTHING")
 		if err != nil {
 			return err
 		}
@@ -285,36 +317,42 @@ func restore(ctx context.Context, tx pgx.Tx, trashID int64) error {
 	}
 	// Entries first, so metadata links between restored entries resolve.
 	for _, e := range entries {
-		// Entries trashed before a column existed restore with its default.
-		if _, err := tx.Exec(ctx, `INSERT INTO entry OVERRIDING SYSTEM VALUE SELECT * FROM jsonb_populate_record(NULL::entry,'{"context":""}'::jsonb||$1)`, []byte(e.Entry)); err != nil {
+		if _, err := insertSnapshot(ctx, tx, "entry", e.Entry, "OVERRIDING SYSTEM VALUE", ""); err != nil {
 			return err
 		}
 	}
 	for _, e := range entries {
 		if len(e.Meta) > 0 && string(e.Meta) != "null" {
 			// A resolution target that is gone or already resolved is dropped.
-			// Defaults first: items trashed before a column existed lack its key.
-			if _, err := tx.Exec(ctx, `INSERT INTO entry_meta SELECT (jsonb_populate_record(NULL::entry_meta,
-  '{"category":"","details":{},"unsure":[],"edited":[]}'::jsonb||
-  CASE WHEN EXISTS (SELECT 1 FROM entry WHERE id=($1::jsonb->>'resolves')::bigint)
+			var meta []byte
+			if err := tx.QueryRow(ctx, `SELECT CASE WHEN EXISTS (SELECT 1 FROM entry WHERE id=($1::jsonb->>'resolves')::bigint)
         AND NOT EXISTS (SELECT 1 FROM entry_meta WHERE resolves=($1::jsonb->>'resolves')::bigint)
-   THEN $1::jsonb ELSE $1::jsonb||'{"resolves":null}' END)).*`, []byte(e.Meta)); err != nil {
+   THEN $1::jsonb ELSE $1::jsonb||'{"resolves":null}' END`, []byte(e.Meta)).Scan(&meta); err != nil {
+				return err
+			}
+			if _, err := insertSnapshot(ctx, tx, "entry_meta", meta, "", ""); err != nil {
 				return err
 			}
 		}
 		// Idempotent writes stay idempotent: a retried request finds its entry.
 		if len(e.Receipts) > 0 && string(e.Receipts) != "null" {
-			if _, err := tx.Exec(ctx, `INSERT INTO entry_write_receipt SELECT * FROM jsonb_populate_recordset(NULL::entry_write_receipt,$1) ON CONFLICT DO NOTHING`, []byte(e.Receipts)); err != nil {
+			var receipts []json.RawMessage
+			if err := json.Unmarshal(e.Receipts, &receipts); err != nil {
 				return err
+			}
+			for _, receipt := range receipts {
+				if _, err := insertSnapshot(ctx, tx, "entry_write_receipt", receipt, "", "ON CONFLICT DO NOTHING"); err != nil {
+					return err
+				}
 			}
 		}
 		if len(e.Labels) > 0 && string(e.Labels) != "null" {
-			if _, err := tx.Exec(ctx, `INSERT INTO entry_meta_override SELECT * FROM jsonb_populate_record(NULL::entry_meta_override,$1)`, []byte(e.Labels)); err != nil {
+			if _, err := insertSnapshot(ctx, tx, "entry_meta_override", e.Labels, "", ""); err != nil {
 				return err
 			}
 		}
 		if len(e.Owner) > 0 && string(e.Owner) != "null" {
-			if _, err := tx.Exec(ctx, `INSERT INTO entry_owner_state SELECT * FROM jsonb_populate_record(NULL::entry_owner_state,$1)`, []byte(e.Owner)); err != nil {
+			if _, err := insertSnapshot(ctx, tx, "entry_owner_state", e.Owner, "", ""); err != nil {
 				return err
 			}
 		}
