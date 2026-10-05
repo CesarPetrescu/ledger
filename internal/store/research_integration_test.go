@@ -343,6 +343,29 @@ func TestResearchContextPagesThroughALongThread(t *testing.T) {
 	}
 }
 
+// A project trashed before research_visible existed still restores, unshared.
+func TestProjectTrashedBeforeResearchRestores(t *testing.T) {
+	db, ctx := researchDB(t)
+	if err := db.SetProjectResearchVisible(ctx, "atlas", true); err != nil {
+		t.Fatal(err)
+	}
+	trashID, _, err := db.TrashProject(ctx, "atlas")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tag, err := db.Pool.Exec(ctx, `UPDATE trash SET payload=payload #- '{project,research_visible}' WHERE id=$1 AND payload->'project' ? 'research_visible'`, trashID)
+	if err != nil || tag.RowsAffected() != 1 {
+		t.Fatalf("make the snapshot legacy: %v, %d", err, tag.RowsAffected())
+	}
+	if err := db.RestoreTrash(ctx, trashID); err != nil {
+		t.Fatalf("restore legacy project = %v", err)
+	}
+	restored, err := db.GetProject(ctx, "atlas", 1)
+	if err != nil || restored.Project.ResearchVisible || restored.Project.Description != "Private roadmap" {
+		t.Fatalf("restored = %#v, %v", restored.Project, err)
+	}
+}
+
 func TestConcurrentDispatchersNeverShareATask(t *testing.T) {
 	db, ctx := researchDB(t)
 	newResearch(t, db, ctx, "Only one", 3)

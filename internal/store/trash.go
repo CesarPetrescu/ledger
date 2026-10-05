@@ -258,7 +258,7 @@ func restore(ctx context.Context, tx pgx.Tx, trashID int64) error {
 		if err := json.Unmarshal(payload, &p); err != nil {
 			return err
 		}
-		tag, err := tx.Exec(ctx, `INSERT INTO project SELECT * FROM jsonb_populate_record(NULL::project,$1) ON CONFLICT(slug) DO NOTHING`, []byte(p.Project))
+		tag, err := tx.Exec(ctx, `INSERT INTO project SELECT * FROM jsonb_populate_record(NULL::project,'{"research_visible":false}'::jsonb||$1) ON CONFLICT(slug) DO NOTHING`, []byte(p.Project))
 		if err != nil {
 			return err
 		}
