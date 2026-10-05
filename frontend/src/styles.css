@@ -1685,6 +1685,7 @@ label > textarea {
 .research-facts dt { color: var(--text-muted); }
 .research-facts dd { margin: 0; }
 .research-error { overflow-wrap: anywhere; color: var(--danger); }
+.research-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .research-badge { margin-right: 6px; vertical-align: 1px; }
 .research-share { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 16px; }
 .research-share > span { display: flex; flex-direction: column; gap: 2px; }

@@ -255,19 +255,9 @@ type MessageAction = { action: string; label: string }
 
 function actionNames(message: HandoffMessage, research?: ResearchStatus): MessageAction[] {
   const named = (...actions: string[]) => actions.map((action) => ({ action, label: titleCase(action) }))
-  // In a research thread only the brief moves: the dispatcher claims it and the run blocks it, so the
-  // owner's buttons are named for what they do to the task.
-  if (research) {
-    if (message.id !== research.message_id) return message.work_state === 'draft' ? [{ action: 'publish', label: 'Publish' }] : []
-    if (message.work_state === 'draft') return [{ action: 'publish', label: 'Queue' }]
-    if (message.work_state === 'in_progress') return [{ action: 'release', label: 'Stop and requeue' }]
-    if (message.work_state === 'blocked') {
-      const release = { action: 'release', label: research.phase === 'review' ? 'Send back' : research.phase === 'question' ? 'Resume' : 'Retry' }
-      return research.phase === 'review' ? [{ action: 'complete', label: 'Accept' }, release] : [release]
-    }
-    if (message.work_state === 'done') return [{ action: 'reopen', label: 'Run again' }]
-    return []
-  }
+  // In a research thread the task's buttons live on the status panel (the brief may be paged out of a
+  // long thread); a message here can only be an owner's draft reply waiting to be published.
+  if (research) return message.work_state === 'draft' ? [{ action: 'publish', label: 'Publish' }] : []
   const actions: string[] = []
   if (message.delivery_state === 'unseen' && message.work_state !== 'draft') actions.push('acknowledge')
   if (message.work_state === 'draft') actions.push('publish')
@@ -289,8 +279,22 @@ function researchHeadline(research: ResearchStatus): { title: string; hint: stri
   return { title: 'Stopped', hint: `${failures}. Retry gives it a fresh set of attempts.` }
 }
 
-function ResearchPanel({ research }: { research: ResearchStatus }) {
+// researchActions are the owner's moves on the brief, named for what they do to the task: the dispatcher
+// claims it and the run blocks it, so claim and block never appear.
+function researchActions(research: ResearchStatus): MessageAction[] {
+  if (research.state === 'draft') return [{ action: 'publish', label: 'Queue' }]
+  if (research.state === 'in_progress') return [{ action: 'release', label: 'Stop and requeue' }]
+  if (research.state === 'blocked') {
+    const release = { action: 'release', label: research.phase === 'review' ? 'Send back' : research.phase === 'question' ? 'Resume' : 'Retry' }
+    return research.phase === 'review' ? [{ action: 'complete', label: 'Accept' }, release] : [release]
+  }
+  if (research.state === 'done') return [{ action: 'reopen', label: 'Run again' }]
+  return []
+}
+
+function ResearchPanel({ research, busy, onAct }: { research: ResearchStatus; busy: string; onAct: (action: string, label: string) => void }) {
   const { title, hint } = researchHeadline(research)
+  const actions = researchActions(research)
   return (
     <section className="research-panel" aria-label="Research status" data-phase={research.phase || research.state}>
       <p className="eyebrow">Research task</p>
@@ -304,6 +308,7 @@ function ResearchPanel({ research }: { research: ResearchStatus }) {
         {research.checkpoint_at && <div><dt>Checkpoint</dt><dd>run {research.checkpoint_attempt}, <Timestamp iso={research.checkpoint_at} /></dd></div>}
       </dl>
       {research.last_error && <p className="research-error"><strong>Last error:</strong> {research.last_error}</p>}
+      {actions.length > 0 && <div className="research-actions">{actions.map(({ action, label }) => <button key={action} type="button" className={action === 'complete' || action === 'publish' ? 'btn btn-primary' : 'btn'} disabled={busy !== ''} onClick={() => onAct(action, label)}>{busy === `${research.message_id}:${action}` ? 'Working…' : label}</button>)}</div>}
     </section>
   )
 }
@@ -324,10 +329,10 @@ function HandoffThread({ id }: { id: string }) {
       toast('Clipboard access failed.', 'error')
     }
   }
-  const act = async (message: HandoffMessage, action: string, label: string) => {
-    setBusy(`${message.id}:${action}`)
+  const act = async (messageID: string, action: string, label: string) => {
+    setBusy(`${messageID}:${action}`)
     try {
-      const updated = await api.updateHandoffMessage(message.id, action)
+      const updated = await api.updateHandoffMessage(messageID, action)
       detail.update((current) => ({ ...current, messages: current.messages.map((item) => item.id === updated.id ? updated : item) }))
       if (detail.data?.research) detail.reload()
       toast(`${label} complete.`)
@@ -378,7 +383,7 @@ function HandoffThread({ id }: { id: string }) {
         <button type="button" className="btn" onClick={() => void copyFull()}><Icon name="copy" /> Copy full handoff</button>
       </header>
       {detail.stale && <StaleNotice message="Showing the last loaded version; refresh failed." onRetry={detail.reload} />}
-      {research && <ResearchPanel research={research} />}
+      {research && <ResearchPanel research={research} busy={busy} onAct={(action, label) => void act(research.message_id, action, label)} />}
       <dl className="handoff-summary"><div><dt>Description</dt><dd>{text(handoff.description)}</dd></div><div><dt>Work scope</dt><dd>{text(handoff.scope)}</dd></div></dl>
       <section className="handoff-thread" aria-label="Handoff messages">
         <div className="section-head"><h2 className="section-title">Messages <span className="count">{messages.length} loaded</span></h2><MarkdownToggle on={markdown} onChange={setMarkdown} />{detail.data.next_before && <button type="button" className="btn" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? 'Loading…' : 'Load older'}</button>}</div>
@@ -394,7 +399,7 @@ function HandoffThread({ id }: { id: string }) {
               {message.work_state === 'draft' && <DraftUploader message={message} onUpdated={(updated) => detail.update((current) => ({ ...current, messages: current.messages.map((item) => item.id === updated.id ? updated : item) }))} />}
               <footer className="message-actions">
                 <button type="button" className="btn btn-quiet" aria-label="Copy message" onClick={() => void copy(message.body, 'Message')}><Icon name="copy" /> Copy</button>
-                {actionNames(message, research).map(({ action, label }) => <button key={action} type="button" className={action === 'claim' || action === 'publish' || (research && action === 'complete') ? 'btn btn-primary' : 'btn'} disabled={busy !== ''} onClick={() => void act(message, action, label)}>{busy === `${message.id}:${action}` ? 'Working…' : label}</button>)}
+                {actionNames(message, research).map(({ action, label }) => <button key={action} type="button" className={action === 'claim' || action === 'publish' ? 'btn btn-primary' : 'btn'} disabled={busy !== ''} onClick={() => void act(message.id, action, label)}>{busy === `${message.id}:${action}` ? 'Working…' : label}</button>)}
               </footer>
             </li>
           ))}

@@ -222,7 +222,10 @@ func (db *DB) AppendHandoffMessage(ctx context.Context, message HandoffMessage, 
 	if err != nil {
 		return HandoffMessage{}, err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE handoff SET updated_at=now(),archived_at=NULL WHERE id=$1`, message.HandoffID); err != nil {
+	// New work reactivates the handoff; a research note on a finished task leaves it archived.
+	if _, err := tx.Exec(ctx, `UPDATE handoff SET updated_at=now(),archived_at=CASE
+WHEN EXISTS (SELECT 1 FROM handoff_message WHERE handoff_id=$1 AND work_state<>'done') THEN NULL
+ELSE COALESCE(archived_at,now()) END WHERE id=$1`, message.HandoffID); err != nil {
 		return HandoffMessage{}, err
 	}
 	return message, tx.Commit(ctx)

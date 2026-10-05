@@ -54,7 +54,7 @@ const research: HandoffDetail = {
 }
 
 describe('handoff inbox', () => {
-  it('shows a research task for review with Accept and Send back on its brief only', async () => {
+  it('shows a research task for review with Accept and Send back on its status panel', async () => {
     const accepted = { ...research.messages[0]!, work_state: 'done' as const }
     const { calls } = mockApi({
       'GET /admin/api/session': authenticatedSession,
@@ -70,13 +70,12 @@ describe('handoff inbox', () => {
     const panel = await screen.findByRole('region', { name: /research status/i })
     expect(within(panel).getByRole('heading', { name: 'Ready for review' })).toBeInTheDocument()
     expect(within(panel).getByText(/accept it, or reply with what to change and send back/i)).toBeInTheDocument()
+    expect(within(panel).getByRole('button', { name: 'Send back' })).toBeInTheDocument()
+    // The brief may be paged out of a long thread, so no message carries task buttons, and claim/block never appear.
     const thread = screen.getByRole('region', { name: /handoff messages/i })
-    const items = within(thread).getAllByRole('listitem')
-    expect(within(items[0]!).getByRole('button', { name: 'Accept' })).toBeInTheDocument()
-    expect(within(items[0]!).getByRole('button', { name: 'Send back' })).toBeInTheDocument()
-    expect(within(items[0]!).queryByRole('button', { name: /claim|block/i })).not.toBeInTheDocument()
-    for (const note of items.slice(1)) expect(within(note).getAllByRole('button').map((button) => button.textContent)).toEqual([' Copy'])
-    await userEvent.setup().click(within(items[0]!).getByRole('button', { name: 'Accept' }))
+    for (const item of within(thread).getAllByRole('listitem')) expect(within(item).getAllByRole('button').map((button) => button.textContent)).toEqual([' Copy'])
+    expect(screen.queryByRole('button', { name: /^(claim|block)$/i })).not.toBeInTheDocument()
+    await userEvent.setup().click(within(panel).getByRole('button', { name: 'Accept' }))
     await waitFor(() => expect(calls.find((call) => call.path === '/admin/api/handoff-messages/21/actions')?.body).toMatchObject({ action: 'complete' }))
   })
 

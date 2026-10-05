@@ -234,6 +234,13 @@ func TestResearchSubmitGoesToReviewAndFeedbackReachesTheNextRun(t *testing.T) {
 	if err != nil || detail.Research == nil || detail.Research.State != "done" || detail.Research.Phase != "" || detail.Handoff.ArchivedAt == nil || detail.Handoff.Kind != "research" {
 		t.Fatalf("accepted detail = %#v, %v", detail, err)
 	}
+	// A thank-you note on the accepted task is not new work: it stays archived.
+	if _, err := db.AppendHandoffMessage(ctx, store.HandoffMessage{HandoffID: task.ID, Body: "Thanks, merged into the plan.", WorkState: "ready", Source: store.OwnerSource, ClientID: "owner"}, true); err != nil {
+		t.Fatal(err)
+	}
+	if after, _ := db.GetHandoff(ctx, task.ID, 50, nil, "", true); after.Handoff.ArchivedAt == nil {
+		t.Fatal("a note unarchived an accepted research task")
+	}
 }
 
 func TestResearchWaitsForDependenciesAndIsHiddenFromAgents(t *testing.T) {

@@ -75,6 +75,12 @@ fun HandoffDetail(model: LedgerModel, id: String) {
             if (research != null) item {
                 val (title, hint) = researchHeadline(research.text("state"), research.text("phase"), research.optInt("attempt"), research.optInt("failures"), research.optInt("max_attempts"), research.text("progress"), research.text("last_error"))
                 MarkdownCard("Research task", title, hint, false)
+                // The task's buttons live here: the brief is the oldest message and a long thread pages it out.
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    researchActions(research.text("state"), research.text("phase"), true).forEach { (action, name) ->
+                        Button(enabled = !model.busy, onClick = { model.act("$name applied") { it.request("POST", "/handoff-messages/${segment(research.text("message_id"))}/actions", json("action" to action)) } }) { Text(name) }
+                    }
+                }
             }
             item {
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -102,7 +108,7 @@ private fun MessageCard(model: LedgerModel, message: JSONObject, markdown: Boole
         MarkdownCard("${label(message.text("work_state"))} · ${label(message.text("delivery_state"))}",
             "${displayTime(message.text("created_at"))} · ${message.text("source")}" + if (message.text("target").isNotBlank()) " → ${message.text("target")}" else "", message.text("body"), markdown)
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val actions = if (research != null) researchActions(message.text("work_state"), research.text("phase"), id == research.text("message_id"))
+            val actions = if (research != null) researchActions(message.text("work_state"), research.text("phase"), brief = false)
                 else messageActions(message.text("work_state"), message.text("delivery_state")).map { it to label(it) }
             actions.forEach { (action, name) ->
                 OutlinedButton(enabled = !model.busy, onClick = { model.act("$name applied") { it.request("POST", "/handoff-messages/${segment(id)}/actions", json("action" to action)) } }) { Text(name) }
