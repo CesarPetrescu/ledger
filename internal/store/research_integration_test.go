@@ -4,6 +4,7 @@ package store_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -20,7 +21,7 @@ import (
 func newResearch(t *testing.T, db *store.DB, ctx context.Context, title string, maxAttempts int, depends ...int64) store.ResearchTask {
 	t.Helper()
 	task, err := db.CreateResearchTask(ctx, store.NewResearchTask{ProjectSlug: "atlas", Title: title, MaxAttempts: maxAttempts, DependsOn: depends, Source: "claude", ClientID: "claude-client",
-		Spec: store.ResearchSpec{Objective: "Compare vector databases", Acceptance: []string{"Three options", "Every claim cited"}, Budget: store.ResearchBudget{Minutes: 30}}})
+		Spec: store.ResearchSpec{Objective: "Compare vector databases", Acceptance: []string{"Three options", "Every claim cited"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -757,5 +758,41 @@ func TestResearchContinuationKeepsAFullLengthResult(t *testing.T) {
 	pack, _ := db.ResearchContext(ctx, child.ID, nil)
 	if len(pack.Thread) != 2 || pack.Thread[1].Body != long {
 		t.Fatalf("copied result length = %d", len(pack.Thread[len(pack.Thread)-1].Body))
+	}
+}
+
+// A task stored with an old budget reads, runs, and continues as until done, and the migration removes the
+// stored budget. No other execution mode can be stored.
+func TestOldBudgetsNoLongerGovernResearch(t *testing.T) {
+	db, ctx := researchDB(t)
+	if _, err := db.CreateResearchTask(ctx, store.NewResearchTask{Title: "Bad", Source: "c", ClientID: "c", Spec: store.ResearchSpec{Objective: "x", Acceptance: []string{"y"}, ExecutionMode: "max_turns"}}); err == nil {
+		t.Fatal("a task with another execution mode was created")
+	}
+	task := newResearch(t, db, ctx, "Legacy", 3)
+	if task.Spec.ExecutionMode != store.ExecutionUntilDone || strings.Contains(task.Spec.Objective, "Budget") {
+		t.Fatalf("created = %#v", task.Spec)
+	}
+	if _, err := db.Pool.Exec(ctx, `UPDATE research_task SET spec=(spec-'execution_mode')||'{"budget":{"rounds":1,"minutes":1,"tokens":1}}' WHERE handoff_id=$1`, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	read, _ := db.ResearchTask(ctx, task.ID)
+	encoded, _ := json.Marshal(read.Spec)
+	if read.Spec.ExecutionMode != store.ExecutionUntilDone || strings.Contains(string(encoded), "budget") {
+		t.Fatalf("legacy spec reads as %s", encoded)
+	}
+	c := claim(t, db, ctx)
+	if c == nil || c.Task.Spec.ExecutionMode != store.ExecutionUntilDone {
+		t.Fatalf("legacy claim = %#v", c)
+	}
+	sql, err := fs.ReadFile(migrations.Files, "0021_research_until_done.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, string(sql)); err != nil {
+		t.Fatal(err)
+	}
+	var stored string
+	if err := db.Pool.QueryRow(ctx, `SELECT spec::text FROM research_task WHERE handoff_id=$1`, task.ID).Scan(&stored); err != nil || strings.Contains(stored, "budget") || !strings.Contains(stored, `"execution_mode": "until_done"`) {
+		t.Fatalf("migrated spec = %s, %v", stored, err)
 	}
 }

@@ -447,7 +447,7 @@ export interface ResearchStatus {
   message_id: string
   state: HandoffWorkState
   phase: '' | 'question' | 'review' | 'dead'
-  spec: { objective: string; acceptance: string[]; deliverable: string; eval_cmd?: string; budget: { rounds?: number; minutes?: number; tokens?: number } }
+  spec: { objective: string; acceptance: string[]; deliverable: string; eval_cmd?: string; execution_mode: 'until_done' }
   depends_on: string[]
   attempt: number
   failures: number

@@ -171,7 +171,7 @@ func apiHandler(db *store.DB, publicURL string) http.Handler {
 			apiError(w, 409, "not_accepted", "accept the previous result before continuing")
 			return
 		}
-		task, err := db.CreateResearchTask(r.Context(), store.NewResearchTask{ContinueFromTaskID: id, ProjectSlug: parent.ProjectSlug, Title: input.Title, Source: key(r).Name, ClientID: client(r), MaxAttempts: parent.MaxAttempts, Spec: store.ResearchSpec{Objective: input.Objective, Acceptance: input.Acceptance, Deliverable: parent.Spec.Deliverable, Budget: parent.Spec.Budget}})
+		task, err := db.CreateResearchTask(r.Context(), store.NewResearchTask{ContinueFromTaskID: id, ProjectSlug: parent.ProjectSlug, Title: input.Title, Source: key(r).Name, ClientID: client(r), MaxAttempts: parent.MaxAttempts, Spec: store.ResearchSpec{Objective: input.Objective, Acceptance: input.Acceptance, Deliverable: parent.Spec.Deliverable}})
 		if errors.Is(err, store.ErrNotAccepted) {
 			apiError(w, http.StatusConflict, "not_accepted", "accept the previous result before continuing")
 			return

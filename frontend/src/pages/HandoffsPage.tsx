@@ -302,6 +302,7 @@ function ResearchPanel({ research, busy, onAct }: { research: ResearchStatus; bu
       <p>{hint}</p>
       <dl className="research-facts">
         <div><dt>Runs</dt><dd>{research.attempt}</dd></div>
+        <div><dt>Each run</dt><dd>until done</dd></div>
         <div><dt>Failed</dt><dd>{research.failures} of {research.max_attempts}</dd></div>
         {research.heartbeat_at && <div><dt>Last heartbeat</dt><dd><Timestamp iso={research.heartbeat_at} /></dd></div>}
         {research.lease_until && <div><dt>Lease until</dt><dd><Timestamp iso={research.lease_until} /></dd></div>}

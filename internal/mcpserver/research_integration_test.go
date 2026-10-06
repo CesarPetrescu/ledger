@@ -63,9 +63,9 @@ func TestResearchTokensAreConfinedToTheirOwnTask(t *testing.T) {
 	created := map[string]researchTaskOutput{}
 	for _, title := range []string{"Mine", "Someone else's"} {
 		task := callTool[researchTaskOutput](t, agent, "create_research_task", map[string]any{
-			"project_slug": "atlas", "title": title, "objective": "Compare vector databases", "acceptance": []string{"Three options"}, "budget": map[string]any{"minutes": 20},
+			"project_slug": "atlas", "title": title, "objective": "Compare vector databases", "acceptance": []string{"Three options"},
 		})
-		if task.State != "ready" || task.Spec.Budget.Minutes != 20 {
+		if task.State != "ready" || task.Spec.ExecutionMode != "until_done" {
 			t.Fatalf("created = %#v", task)
 		}
 		created[title] = task
@@ -168,5 +168,63 @@ func TestResearchTokensAreConfinedToTheirOwnTask(t *testing.T) {
 	var files int
 	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM handoff_file f JOIN handoff_message m ON m.id=f.message_id WHERE m.handoff_id=$1::bigint`, created["Mine"].ID).Scan(&files); err != nil || files != 2 {
 		t.Fatalf("submitted files = %d, %v", files, err)
+	}
+}
+
+// Research runs until done: create_research_task has no budget input, refuses stale budget fields and
+// their aliases in the handler (creating nothing), and every output carries execution_mode until_done.
+func TestResearchCreationIsUntilDoneOnly(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	addAccess(t, db, ctx, "agent-token", []string{"ledger:read", "ledger:write"})
+	server := httptest.NewServer(HTTPHandler(NewServer(db, "http://unused"), db, "https://ledger.example.com"))
+	defer server.Close()
+	agent := connectMCP(t, server.URL+"/mcp", "agent-token", "claude-code")
+
+	tools, err := agent.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range tools.Tools {
+		if tool.Name == "create_research_task" {
+			schema, _ := json.Marshal(tool.InputSchema)
+			for _, banned := range []string{"budget", "rounds", "minutes", "tokens", "max_turns", "max_time", "max_tokens", "execution_mode"} {
+				if strings.Contains(string(schema), `"`+banned+`"`) {
+					t.Errorf("create_research_task input schema offers %q: %s", banned, schema)
+				}
+			}
+		}
+	}
+	base := map[string]any{"project_slug": "atlas", "title": "Survey", "objective": "Compare options", "acceptance": []string{"Cite sources"}, "deliverable": "report"}
+	for name, value := range map[string]any{
+		"budget": map[string]any{"rounds": 1, "minutes": 1, "tokens": 1}, "max_turns": 5, "max_time": 60, "max_tokens": 1000,
+		"rounds": 5, "minutes": 5, "tokens": 5, "execution_mode": "max_turns",
+	} {
+		arguments := map[string]any{name: value}
+		for k, v := range base {
+			arguments[k] = v
+		}
+		result, err := agent.CallTool(ctx, &mcp.CallToolParams{Name: "create_research_task", Arguments: arguments})
+		if err == nil && !result.IsError {
+			t.Errorf("create_research_task accepted %q", name)
+		}
+	}
+	var created int
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM research_task`).Scan(&created); err != nil || created != 0 {
+		t.Fatalf("refused calls created %d tasks, %v", created, err)
+	}
+
+	result, err := agent.CallTool(ctx, &mcp.CallToolParams{Name: "create_research_task", Arguments: base})
+	if err != nil || result.IsError {
+		t.Fatalf("budgetless create = %#v, %v", result, err)
+	}
+	structured, _ := json.Marshal(result.StructuredContent)
+	text := result.Content[0].(*mcp.TextContent).Text
+	for name, body := range map[string]string{"structured": string(structured), "text": text} {
+		if !strings.Contains(body, `"execution_mode":"until_done"`) || strings.Contains(body, "budget") {
+			t.Errorf("%s output = %s", name, body)
+		}
 	}
 }
