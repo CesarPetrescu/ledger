@@ -396,4 +396,20 @@ func TestDraftResearchStaysWithItsCreator(t *testing.T) {
 	if peek, err := other.CallTool(ctx, &mcp.CallToolParams{Name: "get_research_task", Arguments: map[string]any{"id": draft.ID}}); err != nil || !peek.IsError {
 		t.Fatalf("another client reads the draft: %#v, %v", peek, err)
 	}
+	// Files in a draft task (such as a continuation's copied result) are the creator's too.
+	id, _ := strconv.ParseInt(draft.ID, 10, 64)
+	var noteID int64
+	if err := db.Pool.QueryRow(ctx, `INSERT INTO handoff_message(handoff_id,body,work_state,source,client_id,status_updated_source,status_updated_client_id) VALUES($1,'copied result','done','ledger','ledger','ledger','ledger') RETURNING id`, id).Scan(&noteID); err != nil {
+		t.Fatal(err)
+	}
+	var fileID int64
+	if err := db.Pool.QueryRow(ctx, `INSERT INTO handoff_file(message_id,filename,media_type,size_bytes,sha256,data) VALUES($1,'copied.csv','text/csv',1,sha256('x'::bytea),'x') RETURNING id`, noteID).Scan(&fileID); err != nil {
+		t.Fatal(err)
+	}
+	if peek, err := other.CallTool(ctx, &mcp.CallToolParams{Name: "read_handoff_file", Arguments: map[string]any{"file_id": strconv.FormatInt(fileID, 10)}}); err != nil || !peek.IsError {
+		t.Fatalf("another client reads a draft task's file: %#v, %v", peek, err)
+	}
+	if mine, err := creator.CallTool(ctx, &mcp.CallToolParams{Name: "read_handoff_file", Arguments: map[string]any{"file_id": strconv.FormatInt(fileID, 10)}}); err != nil || mine.IsError {
+		t.Fatalf("creator cannot read its draft's file: %#v, %v", mine, err)
+	}
 }

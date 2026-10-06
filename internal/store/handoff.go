@@ -650,7 +650,9 @@ func (db *DB) GetHandoffFile(ctx context.Context, id int64, viewerClientID strin
 	var file HandoffFile
 	err := db.Pool.QueryRow(ctx, `SELECT f.id,f.message_id,m.handoff_id,h.title,f.filename,f.media_type,f.size_bytes,encode(f.sha256,'hex'),f.created_at,f.data
 FROM handoff_file f JOIN handoff_message m ON m.id=f.message_id JOIN handoff h ON h.id=m.handoff_id
-WHERE f.id=$1 AND ($2 OR m.work_state<>'draft' OR m.client_id=$3)`, id, admin, viewerClientID).
+WHERE f.id=$1 AND ($2 OR (m.work_state<>'draft' OR m.client_id=$3)
+  -- A draft research task, and the files copied into it, belong to its creator until it is queued.
+  AND NOT EXISTS (SELECT 1 FROM research_task t JOIN handoff_message b ON b.id=t.message_id WHERE t.handoff_id=h.id AND b.work_state='draft' AND h.client_id<>$3))`, id, admin, viewerClientID).
 		Scan(&file.ID, &file.MessageID, &file.HandoffID, &file.HandoffTitle, &file.Filename, &file.MediaType, &file.SizeBytes, &file.SHA256, &file.CreatedAt, &file.Data)
 	return file, err
 }
