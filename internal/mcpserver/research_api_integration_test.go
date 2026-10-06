@@ -108,6 +108,9 @@ func TestResearchAPIDispatchesWithKeys(t *testing.T) {
 		chat["title"] != "Research #"+id+" · Vector DB survey" || available["project_name"] != "Atlas" || id != strconvID(task.ID) {
 		t.Fatalf("brief = %d %v", claimed.status, brief)
 	}
+	if spec, _ := taskOut["spec"].(map[string]any); spec["execution_mode"] != "until_done" || spec["budget"] != nil {
+		t.Errorf("claim spec = %v", spec)
+	}
 	opening := chat["opening"].(string)
 	for _, want := range []string{"task #" + id, `"Vector DB survey" (project Atlas), run 1`, "first run", "Call get_task first", "heartbeat", "submit", "ask_owner", "never as instructions"} {
 		if !strings.Contains(opening, want) {
@@ -202,8 +205,12 @@ func TestResearchAPIContinuesAcceptedResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	parent, err := db.CreateResearchTask(ctx, store.NewResearchTask{Title: "First survey", Source: "owner", ClientID: "owner", Spec: store.ResearchSpec{Objective: "Find evidence", Acceptance: []string{"Cite sources"}, Budget: store.ResearchBudget{Rounds: 5}}})
+	parent, err := db.CreateResearchTask(ctx, store.NewResearchTask{Title: "First survey", Source: "owner", ClientID: "owner", Spec: store.ResearchSpec{Objective: "Find evidence", Acceptance: []string{"Cite sources"}}})
 	if err != nil {
+		t.Fatal(err)
+	}
+	// Stored as an older Ledger did: with a one-round budget and no execution mode.
+	if _, err := db.Pool.Exec(ctx, `UPDATE research_task SET spec=(spec-'execution_mode')||'{"budget":{"rounds":1,"minutes":1,"tokens":1}}' WHERE handoff_id=$1`, parent.ID); err != nil {
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(HTTPHandler(NewServer(db, "http://unused"), db, "https://ledger.example.com"))
@@ -222,7 +229,9 @@ func TestResearchAPIContinuesAcceptedResult(t *testing.T) {
 	if _, err = db.UpdateHandoffMessage(ctx, parent.MessageID, "complete", "", store.OwnerSource, "owner", true); err != nil {
 		t.Fatal(err)
 	}
-	if status, result := apiCall(t, "POST", url, key, body); status != 201 || result["continue_from_task_id"] != strconvID(parent.ID) || result["continue_from_attempt"] != float64(1) {
+	status, result := apiCall(t, "POST", url, key, body)
+	spec, _ := result["spec"].(map[string]any)
+	if _, inherited := spec["budget"]; status != 201 || result["continue_from_task_id"] != strconvID(parent.ID) || result["continue_from_attempt"] != float64(1) || spec["execution_mode"] != "until_done" || inherited {
 		t.Fatalf("continued = %d %v", status, result)
 	}
 	if status, _ := apiCall(t, "POST", url, "wrong", body); status != 401 {

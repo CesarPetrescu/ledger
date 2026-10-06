@@ -48,7 +48,7 @@ const research: HandoffDetail = {
     { ...detail.messages[0]!, id: '23', handoff_id: '9', body: '# Findings', source: 'Researcher (run 1)', work_state: 'done', target: '', files: [] },
   ],
   research: {
-    message_id: '21', state: 'blocked', phase: 'review', spec: { objective: 'Compare', acceptance: ['Cited'], deliverable: 'report', budget: {} }, depends_on: [],
+    message_id: '21', state: 'blocked', phase: 'review', spec: { objective: 'Compare', acceptance: ['Cited'], deliverable: 'report', execution_mode: 'until_done' }, depends_on: [],
     attempt: 1, failures: 0, max_attempts: 3, runner: '', progress: '', last_error: '', checkpoint: '',
   },
 }

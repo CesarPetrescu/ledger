@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -34,18 +33,17 @@ var (
 	ResearchDeliverables = []string{"report", "answer", "dataset", "code"}
 )
 
-type ResearchBudget struct {
-	Rounds  int   `json:"rounds,omitempty"`
-	Minutes int   `json:"minutes,omitempty"`
-	Tokens  int64 `json:"tokens,omitempty"`
-}
+// ExecutionUntilDone is research's only execution policy: a run works until its acceptance items are met
+// and it submits, or it asks the owner. There is no turn, time, or token limit. Leases (lease_seconds),
+// claim waits (wait_seconds), and max_attempts (failed runs before a task stops) are not run limits.
+const ExecutionUntilDone = "until_done"
 
 type ResearchSpec struct {
-	Objective   string         `json:"objective"`
-	Acceptance  []string       `json:"acceptance"`
-	Deliverable string         `json:"deliverable"`
-	EvalCmd     string         `json:"eval_cmd,omitempty"`
-	Budget      ResearchBudget `json:"budget"`
+	Objective     string   `json:"objective"`
+	Acceptance    []string `json:"acceptance"`
+	Deliverable   string   `json:"deliverable"`
+	EvalCmd       string   `json:"eval_cmd,omitempty"`
+	ExecutionMode string   `json:"execution_mode"`
 }
 
 func (s *ResearchSpec) normalize() error {
@@ -72,9 +70,11 @@ func (s *ResearchSpec) normalize() error {
 	if utf8.RuneCountInString(s.EvalCmd) > 2000 {
 		return fmt.Errorf("eval_cmd must be at most 2000 characters")
 	}
-	b := s.Budget
-	if b.Rounds < 0 || b.Rounds > 10000 || b.Minutes < 0 || b.Minutes > 7*24*60 || b.Tokens < 0 || b.Tokens > 5_000_000_000 {
-		return fmt.Errorf("budget: rounds up to 10000, minutes up to 10080, tokens up to 5000000000; 0 means no limit")
+	if s.ExecutionMode == "" {
+		s.ExecutionMode = ExecutionUntilDone
+	}
+	if s.ExecutionMode != ExecutionUntilDone {
+		return fmt.Errorf("execution_mode can only be until_done: research has no turn, time, or token limit")
 	}
 	return nil
 }
@@ -82,22 +82,9 @@ func (s *ResearchSpec) normalize() error {
 // researchBrief renders the spec as the brief's Markdown body, which is what the handoff views show.
 func researchBrief(s ResearchSpec, maxAttempts int) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "**Research task** · deliverable: %s · stops after %d failed runs\n\n## Objective\n\n%s\n\n## Acceptance\n\n", s.Deliverable, maxAttempts, s.Objective)
+	fmt.Fprintf(&b, "**Research task** · deliverable: %s · runs until done · stops after %d failed runs\n\n## Objective\n\n%s\n\n## Acceptance\n\n", s.Deliverable, maxAttempts, s.Objective)
 	for _, item := range s.Acceptance {
 		fmt.Fprintf(&b, "- [ ] %s\n", item)
-	}
-	var budget []string
-	if s.Budget.Rounds > 0 {
-		budget = append(budget, strconv.Itoa(s.Budget.Rounds)+" rounds")
-	}
-	if s.Budget.Minutes > 0 {
-		budget = append(budget, strconv.Itoa(s.Budget.Minutes)+" minutes")
-	}
-	if s.Budget.Tokens > 0 {
-		budget = append(budget, strconv.FormatInt(s.Budget.Tokens, 10)+" tokens")
-	}
-	if len(budget) > 0 {
-		fmt.Fprintf(&b, "\n## Budget\n\n%s\n", strings.Join(budget, " · "))
 	}
 	if s.EvalCmd != "" {
 		fence := "```"
@@ -142,6 +129,8 @@ func (db *DB) ResearchTask(ctx context.Context, id int64) (ResearchTask, error) 
 	var t ResearchTask
 	err := db.Pool.QueryRow(ctx, researchSelect+` WHERE t.handoff_id=$1`, id).Scan(&t.ID, &t.MessageID, &t.ProjectSlug, &t.Title, &t.State, &t.Phase, &t.Spec, &t.SpecVersion, &t.DependsOn,
 		&t.Attempt, &t.Failures, &t.MaxAttempts, &t.Runner, &t.LeaseUntil, &t.HeartbeatAt, &t.Progress, &t.LastError, &t.Checkpoint, &t.CheckpointAttempt, &t.CheckpointAt, &t.ContinueFromTaskID, &t.ContinueFromAttempt)
+	// The policy is fixed, so every task reads as until done, whatever an older stored spec held.
+	t.Spec.ExecutionMode = ExecutionUntilDone
 	return t, err
 }
 

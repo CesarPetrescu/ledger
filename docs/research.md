@@ -31,9 +31,10 @@ The spec has these fields:
 - `acceptance`: 1 to 20 one-line checks.
 - `deliverable`: `report` (the default), `answer`, `dataset`, or `code`.
 - `eval_cmd`: optional.
-- `budget`: `rounds`, `minutes`, and `tokens`, where 0 means no limit.
 
-The task also has `max_attempts` (1 to 10, default 3) and `depends_on`. Ledger stores and returns the budget, and the dispatcher enforces it.
+The task also has `max_attempts` (1 to 10, default 3) and `depends_on`. `max_attempts` counts failed runs (crashes, lapsed leases) before the task stops; it is not a limit on turns, time, or tokens.
+
+**Every run works until done.** It keeps going until every acceptance item is met, then submits; if it cannot continue without the owner, it checkpoints and asks. There is no turn, time, or token budget, and no input can set one: specs carry `"execution_mode": "until_done"`, and `create_research_task` refuses `budget` and similar fields. A run still ends if the owner stops it, its credential is revoked, or its lease lapses. `lease_seconds` and `wait_seconds` control ownership and polling, not how long a run may work. Budget notes in tasks created before this change no longer apply. `spec_version` 2 is this shape; version 1 specs had a `budget` and no `execution_mode`.
 
 Research threads are owner-only. `list_handoffs`, `get_handoff`, and the other handoff tools on `/mcp` do not return them, so unreviewed web-derived text never reaches the owner's other agents.
 
@@ -69,7 +70,7 @@ A dispatcher loop:
    ```json
    {
      "claimed": true,
-     "task": {"id": "12", "title": "Vector DB survey", "project_slug": "atlas", "attempt": 2, "spec": {"objective": "…", "acceptance": ["…"], "deliverable": "report", "budget": {"minutes": 30}}},
+     "task": {"id": "12", "title": "Vector DB survey", "project_slug": "atlas", "attempt": 2, "spec": {"objective": "…", "acceptance": ["…"], "deliverable": "report", "execution_mode": "until_done"}},
      "token": "…run token…",
      "endpoint": "https://ledger.example.com/mcp/research",
      "reason": "revision",
@@ -187,8 +188,8 @@ Content-Type: application/json
 {"title":"Refresh the survey","objective":"Check new evidence since the accepted survey","acceptance":["Cite changed findings"]}
 ```
 
-Returns 201 and the queued task. The project, deliverable, budget and maximum failed attempts are
-inherited; the old evaluation command is not. Missing tasks return 404, unaccepted tasks 409, invalid
+Returns 201 and the queued task. The project, deliverable, and maximum failed attempts are
+inherited; the old evaluation command is not, and the follow-up runs until done like every task. Missing tasks return 404, unaccepted tasks 409, invalid
 input 400, and invalid keys 401. This narrowly extends `research:dispatch` to request follow-up work;
 it does not grant arbitrary task creation or owner review. Run tokens cannot use the endpoint.
 Dispatchers can use the lineage pair to restore a matching retained workspace without guessing topics.
