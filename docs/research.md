@@ -34,7 +34,7 @@ The spec has these fields:
 
 The task also has `max_attempts` (1 to 10, default 3) and `depends_on`. `max_attempts` counts failed runs (crashes, lapsed leases) before the task stops; it is not a limit on turns, time, or tokens.
 
-**Every run works until done.** It keeps going until every acceptance item is met, then submits; if it cannot continue without the owner, it checkpoints and asks. There is no turn, time, or token budget, and no input can set one: specs carry `"execution_mode": "until_done"`, and `create_research_task` refuses `budget` and similar fields. A run still ends if the owner stops it, its credential is revoked, or its lease lapses. `lease_seconds` and `wait_seconds` control ownership and polling, not how long a run may work. Budget notes in tasks created before this change no longer apply.
+**Every run works until done.** It keeps going until every acceptance item is met, then submits; if it cannot continue without the owner, it checkpoints and asks. There is no turn, time, or token budget, and no input can set one: specs carry `"execution_mode": "until_done"`, and `create_research_task` refuses `budget` and similar fields. A run still ends if the owner stops it, its credential is revoked, or its lease lapses. `lease_seconds` and `wait_seconds` control ownership and polling, not how long a run may work. Budget notes in tasks created before this change no longer apply. `spec_version` 2 is this shape; version 1 specs had a `budget` and no `execution_mode`.
 
 Research threads are owner-only. `list_handoffs`, `get_handoff`, and the other handoff tools on `/mcp` do not return them, so unreviewed web-derived text never reaches the owner's other agents.
 

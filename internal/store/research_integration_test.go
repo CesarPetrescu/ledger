@@ -769,10 +769,10 @@ func TestOldBudgetsNoLongerGovernResearch(t *testing.T) {
 		t.Fatal("a task with another execution mode was created")
 	}
 	task := newResearch(t, db, ctx, "Legacy", 3)
-	if task.Spec.ExecutionMode != store.ExecutionUntilDone || strings.Contains(task.Spec.Objective, "Budget") {
+	if task.Spec.ExecutionMode != store.ExecutionUntilDone || task.SpecVersion != 2 {
 		t.Fatalf("created = %#v", task.Spec)
 	}
-	if _, err := db.Pool.Exec(ctx, `UPDATE research_task SET spec=(spec-'execution_mode')||'{"budget":{"rounds":1,"minutes":1,"tokens":1}}' WHERE handoff_id=$1`, task.ID); err != nil {
+	if _, err := db.Pool.Exec(ctx, `UPDATE research_task SET spec=(spec-'execution_mode')||'{"budget":{"rounds":1,"minutes":1,"tokens":1}}',spec_version=1 WHERE handoff_id=$1`, task.ID); err != nil {
 		t.Fatal(err)
 	}
 	read, _ := db.ResearchTask(ctx, task.ID)
@@ -792,7 +792,8 @@ func TestOldBudgetsNoLongerGovernResearch(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stored string
-	if err := db.Pool.QueryRow(ctx, `SELECT spec::text FROM research_task WHERE handoff_id=$1`, task.ID).Scan(&stored); err != nil || strings.Contains(stored, "budget") || !strings.Contains(stored, `"execution_mode": "until_done"`) {
-		t.Fatalf("migrated spec = %s, %v", stored, err)
+	var version int
+	if err := db.Pool.QueryRow(ctx, `SELECT spec::text,spec_version FROM research_task WHERE handoff_id=$1`, task.ID).Scan(&stored, &version); err != nil || strings.Contains(stored, "budget") || !strings.Contains(stored, `"execution_mode": "until_done"`) || version != 2 {
+		t.Fatalf("migrated spec = %s v%d, %v", stored, version, err)
 	}
 }
