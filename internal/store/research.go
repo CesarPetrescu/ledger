@@ -951,16 +951,31 @@ ON CONFLICT (slug) DO NOTHING`, slug); err != nil {
 			return err
 		}
 	}
+	// The note must fit an entry, so the excerpt gets whatever the title and pointer leave of the limit,
+	// and the file names are dropped if even they do not fit.
+	head := fmt.Sprintf("Accepted research #%d: %s\n\n", id, title)
+	pointer := func(names bool) string {
+		tail := "\n\nFull result"
+		if len(files) > 0 && names {
+			tail += fmt.Sprintf(" and %d file(s) (%s)", len(files), strings.Join(files, ", "))
+		} else if len(files) > 0 {
+			tail += fmt.Sprintf(" and %d file(s)", len(files))
+		}
+		return tail + fmt.Sprintf(": get_research_task with id \"%d\".", id)
+	}
+	tail := pointer(true)
+	room := maxEntryBodyRunes - utf8.RuneCountInString(head) - utf8.RuneCountInString(tail) - 1
+	if room < 400 {
+		tail = pointer(false)
+		room = maxEntryBodyRunes - utf8.RuneCountInString(head) - utf8.RuneCountInString(tail) - 1
+	}
+	room = min(room, maxPublishedExcerpt)
 	excerpt := strings.TrimSpace(result)
-	if runes := []rune(excerpt); len(runes) > maxPublishedExcerpt {
-		excerpt = strings.TrimSpace(string(runes[:maxPublishedExcerpt])) + "…"
+	if runes := []rune(excerpt); len(runes) > room {
+		excerpt = strings.TrimSpace(string(runes[:room])) + "…"
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "Accepted research #%d: %s\n\n%s\n\nFull result", id, title, excerpt)
-	if len(files) > 0 {
-		fmt.Fprintf(&b, " and %d file(s) (%s)", len(files), strings.Join(files, ", "))
-	}
-	fmt.Fprintf(&b, ": get_research_task with id \"%d\".", id)
+	b.WriteString(head + excerpt + tail)
 	context := fmt.Sprintf("research task #%d, accepted", id)
 	if acceptedBy != OwnerSource {
 		context += " by " + acceptedBy
@@ -976,33 +991,45 @@ var ErrResearchNotReviewable = errors.New("research task has no result waiting f
 // publishes it), or send it back with feedback, which also answers a question. The feedback becomes a
 // thread note the next run reads.
 func (db *DB) ReviewResearch(ctx context.Context, id int64, action, feedback, source, clientID string) (ResearchTask, error) {
-	task, err := db.ResearchTask(ctx, id)
-	if err != nil {
-		return ResearchTask{}, err
-	}
 	feedback = strings.TrimSpace(feedback)
-	switch action {
-	case "accept":
-		if task.State != "blocked" || task.Phase != "review" {
-			return ResearchTask{}, ErrResearchNotReviewable
-		}
-	case "send_back":
-		if task.State != "blocked" || task.Phase != "review" && task.Phase != "question" {
-			return ResearchTask{}, ErrResearchNotReviewable
-		}
-		if feedback == "" {
-			return ResearchTask{}, fmt.Errorf("send_back needs feedback: what to change, or the answer to the question")
-		}
-	default:
+	move := map[string]string{"accept": "complete", "send_back": "release"}[action]
+	if move == "" {
 		return ResearchTask{}, fmt.Errorf("action must be accept or send_back")
 	}
+	if action == "send_back" && feedback == "" {
+		return ResearchTask{}, fmt.Errorf("send_back needs feedback: what to change, or the answer to the question")
+	}
 	if feedback != "" {
-		if _, err := db.AppendHandoffMessage(ctx, HandoffMessage{HandoffID: id, Body: feedback, WorkState: "ready", Source: source, ClientID: clientID}, true); err != nil {
+		if err := ValidateHandoffMessage(feedback, "", "done"); err != nil {
 			return ResearchTask{}, err
 		}
 	}
-	move := map[string]string{"accept": "complete", "send_back": "release"}[action]
-	if _, err := db.UpdateHandoffMessage(ctx, task.MessageID, move, "", source, clientID, true); err != nil {
+	if err := validateHandoffAttribution(source, clientID); err != nil {
+		return ResearchTask{}, err
+	}
+	// The check, the feedback, and the decision commit together, so a concurrent review or a failed
+	// publish leaves no stray feedback behind.
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return ResearchTask{}, err
+	}
+	defer tx.Rollback(ctx)
+	l, err := lockResearch(ctx, tx, id)
+	if err != nil {
+		return ResearchTask{}, err
+	}
+	if l.State != "blocked" || l.Phase != "review" && (action == "accept" || l.Phase != "question") {
+		return ResearchTask{}, ErrResearchNotReviewable
+	}
+	if feedback != "" {
+		if _, err := insertHandoffMessage(ctx, tx, HandoffMessage{HandoffID: id, Body: feedback, WorkState: "done", Source: source, ClientID: clientID}); err != nil {
+			return ResearchTask{}, err
+		}
+	}
+	if _, err := updateHandoffMessage(ctx, tx, l.MessageID, move, "", source, clientID, true); err != nil {
+		return ResearchTask{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return ResearchTask{}, err
 	}
 	return db.ResearchTask(ctx, id)

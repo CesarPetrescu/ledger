@@ -402,6 +402,16 @@ func (db *DB) UpdateHandoffMessage(ctx context.Context, id int64, action, target
 		return HandoffMessage{}, err
 	}
 	defer tx.Rollback(ctx)
+	message, err := updateHandoffMessage(ctx, tx, id, action, target, source, clientID, admin)
+	if err != nil {
+		return HandoffMessage{}, err
+	}
+	return message, tx.Commit(ctx)
+}
+
+// updateHandoffMessage applies an action inside the caller's transaction.
+func updateHandoffMessage(ctx context.Context, tx pgx.Tx, id int64, action, target, source, clientID string, admin bool) (HandoffMessage, error) {
+	var err error
 	var state messageState
 	var briefID int64
 	var phase string
@@ -545,7 +555,7 @@ WHEN EXISTS (SELECT 1 FROM handoff_message WHERE handoff_id=$1 AND work_state<>'
 ELSE COALESCE(archived_at,now()) END WHERE id=$1`, state.HandoffID); err != nil {
 		return HandoffMessage{}, err
 	}
-	return message, tx.Commit(ctx)
+	return message, nil
 }
 
 func nullableString(value string) any {

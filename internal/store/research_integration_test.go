@@ -797,3 +797,30 @@ func TestOldBudgetsNoLongerGovernResearch(t *testing.T) {
 		t.Fatalf("migrated spec = %s v%d, %v", stored, version, err)
 	}
 }
+
+// The longest valid result, title, and attachments still publish on accept, inside the entry limit.
+func TestAcceptPublishesWithinTheEntryLimit(t *testing.T) {
+	db, ctx := researchDB(t)
+	task, err := db.CreateResearchTask(ctx, store.NewResearchTask{ProjectSlug: "atlas", Title: strings.Repeat("T", 200), Source: "c", ClientID: "c", Spec: store.ResearchSpec{Objective: "x", Acceptance: []string{"y"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim(t, db, ctx)
+	var files []store.ResearchFile
+	for i := 0; i < 10; i++ {
+		files = append(files, store.ResearchFile{Filename: fmt.Sprintf("%d%s.csv", i, strings.Repeat("n", 246)), Data: []byte("x")})
+	}
+	if _, err := db.SubmitResearch(ctx, task.ID, 1, strings.Repeat("r", 100000), files); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ReviewResearch(ctx, task.ID, "accept", "", "claude-code", "claude-client"); err != nil {
+		t.Fatalf("accept = %v", err)
+	}
+	project, _ := db.GetProject(ctx, "atlas", 5)
+	if len(project.Entries) != 1 || len([]rune(project.Entries[0].Body)) > 4000 || !strings.Contains(project.Entries[0].Body, "10 file(s)") {
+		t.Fatalf("published %d entries, body %d runes", len(project.Entries), len([]rune(project.Entries[0].Body)))
+	}
+	if again, _ := db.ResearchTask(ctx, task.ID); again.State != "done" {
+		t.Fatalf("state = %s", again.State)
+	}
+}
