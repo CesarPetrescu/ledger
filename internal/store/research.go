@@ -214,6 +214,7 @@ type researchLock struct {
 	Attempt         int
 	Leased          bool
 	ClaimedClientID string
+	ClaimFamily     string
 }
 
 func (l researchLock) live(attempt int) bool { return l.Leased && l.Attempt == attempt }
@@ -224,9 +225,9 @@ func lockResearch(ctx context.Context, tx pgx.Tx, id int64) (researchLock, error
 	if err := tx.QueryRow(ctx, `SELECT id FROM handoff WHERE id=$1 AND kind='research' FOR UPDATE`, id).Scan(&id); err != nil {
 		return l, err
 	}
-	err := tx.QueryRow(ctx, `SELECT t.message_id,m.work_state,COALESCE(t.phase,''),t.attempt,m.work_state='in_progress' AND t.lease_until>now(),COALESCE(m.claimed_client_id,'')
+	err := tx.QueryRow(ctx, `SELECT t.message_id,m.work_state,COALESCE(t.phase,''),t.attempt,m.work_state='in_progress' AND t.lease_until>now(),COALESCE(m.claimed_client_id,''),COALESCE(t.claim_family::text,'')
 FROM research_task t JOIN handoff_message m ON m.id=t.message_id WHERE t.handoff_id=$1 FOR UPDATE OF t,m`, id).
-		Scan(&l.MessageID, &l.State, &l.Phase, &l.Attempt, &l.Leased, &l.ClaimedClientID)
+		Scan(&l.MessageID, &l.State, &l.Phase, &l.Attempt, &l.Leased, &l.ClaimedClientID, &l.ClaimFamily)
 	return l, err
 }
 
@@ -342,9 +343,9 @@ func (db *DB) claimResearchTask(ctx context.Context, leaseSeconds int, source, c
 			return nil, err
 		}
 	}
+	var family *string
 	if guard.accessHash != nil {
-		var held int
-		if err := tx.QueryRow(ctx, `SELECT 1 FROM oauth_token WHERE hash=$1 AND kind='access' AND NOT revoked AND expires_at>now() FOR SHARE`, guard.accessHash).Scan(&held); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT family::text FROM oauth_token WHERE hash=$1 AND kind='access' AND NOT revoked AND expires_at>now() FOR SHARE`, guard.accessHash).Scan(&family); err != nil {
 			if IsNotFound(err) {
 				return nil, ErrAccessRevoked
 			}
@@ -374,8 +375,8 @@ status_updated_at=now(),status_updated_source=$2,status_updated_client_id=$3 WHE
 		return nil, err
 	}
 	var attempt int
-	if err := tx.QueryRow(ctx, `UPDATE research_task SET attempt=attempt+1,phase=NULL,lease_seconds=$2::integer,lease_until=now()+$2::integer*interval '1 second',heartbeat_at=NULL,progress=''
-WHERE handoff_id=$1 RETURNING attempt`, id, leaseSeconds).Scan(&attempt); err != nil {
+	if err := tx.QueryRow(ctx, `UPDATE research_task SET attempt=attempt+1,phase=NULL,lease_seconds=$2::integer,lease_until=now()+$2::integer*interval '1 second',heartbeat_at=NULL,progress='',
+claim_family=$3::uuid WHERE handoff_id=$1 RETURNING attempt`, id, leaseSeconds, family).Scan(&attempt); err != nil {
 		return nil, err
 	}
 	hash := sha256.Sum256([]byte(token))
@@ -408,11 +409,28 @@ WHERE handoff_id=$1 RETURNING attempt`, id, leaseSeconds).Scan(&attempt); err !=
 	return &ResearchClaim{Task: task, Token: token, Reason: reason, Available: available}, nil
 }
 
-// stopRunsClaimedBy requeues, without counting a failure, every run a dispatcher credential claimed: one
-// client ID, or with allOAuth every run claimed through OAuth. Their run tokens die with the runs.
-func stopRunsClaimedBy(ctx context.Context, tx pgx.Tx, clientID string, allOAuth bool, why string) error {
+// claimants picks the runs a revoked dispatcher credential claimed: those of one client ID, every run
+// claimed through OAuth, or those of one OAuth token family.
+type claimants struct {
+	clientID string
+	allOAuth bool
+	family   string
+}
+
+func (c claimants) match(l researchLock) bool {
+	return l.State == "in_progress" && (c.clientID != "" && l.ClaimedClientID == c.clientID ||
+		c.allOAuth && !strings.HasPrefix(l.ClaimedClientID, "apikey:") || c.family != "" && l.ClaimFamily == c.family)
+}
+
+// stopRunsClaimedBy requeues, without counting a failure, every run the revoked credential claimed.
+// Their run tokens die with the runs.
+func stopRunsClaimedBy(ctx context.Context, tx pgx.Tx, who claimants, why string) error {
+	var family any
+	if who.family != "" {
+		family = who.family
+	}
 	rows, err := tx.Query(ctx, `SELECT t.handoff_id FROM research_task t JOIN handoff_message m ON m.id=t.message_id
-WHERE m.work_state='in_progress' AND (m.claimed_client_id=$1 OR $2 AND m.claimed_client_id NOT LIKE 'apikey:%')`, clientID, allOAuth)
+WHERE m.work_state='in_progress' AND (m.claimed_client_id=$1 OR $2 AND m.claimed_client_id NOT LIKE 'apikey:%' OR t.claim_family=$3::uuid)`, who.clientID, who.allOAuth, family)
 	if err != nil {
 		return err
 	}
@@ -426,10 +444,10 @@ WHERE m.work_state='in_progress' AND (m.claimed_client_id=$1 OR $2 AND m.claimed
 			return err
 		}
 		// Recheck the claimant under the lock: the run found above may have ended and been claimed anew.
-		if l.State != "in_progress" || !allOAuth && l.ClaimedClientID != clientID || allOAuth && strings.HasPrefix(l.ClaimedClientID, "apikey:") {
+		if !who.match(l) {
 			continue
 		}
-		if _, err := tx.Exec(ctx, `UPDATE research_task SET lease_until=NULL,progress='',requeue_reason='restarted' WHERE handoff_id=$1`, id); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE research_task SET lease_until=NULL,progress='',requeue_reason='restarted',claim_family=NULL WHERE handoff_id=$1`, id); err != nil {
 			return err
 		}
 		if err := setBrief(ctx, tx, l.MessageID, "ready", researchNoteSource, researchNoteSource); err != nil {
@@ -440,6 +458,15 @@ WHERE m.work_state='in_progress' AND (m.claimed_client_id=$1 OR $2 AND m.claimed
 		}
 	}
 	return nil
+}
+
+// revokeTokenFamily revokes an OAuth token family (logout, or replay detected) and stops the research
+// runs that family claimed.
+func revokeTokenFamily(ctx context.Context, tx pgx.Tx, family string) error {
+	if _, err := tx.Exec(ctx, `UPDATE oauth_token SET revoked=true WHERE family=$1::uuid`, family); err != nil {
+		return err
+	}
+	return stopRunsClaimedBy(ctx, tx, claimants{family: family}, "its dispatcher's OAuth tokens were revoked")
 }
 
 // failRun ends a locked in-progress run that produced nothing: one more failure, then the brief goes

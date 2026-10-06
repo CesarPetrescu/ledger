@@ -116,7 +116,7 @@ func (db *DB) Revoke(ctx context.Context, clientID string, all bool) (int64, err
 		return 0, err
 	}
 	// A dispatcher's access ends with its research runs, so their run tokens cannot outlive it.
-	if err := stopRunsClaimedBy(ctx, tx, clientID, all, "its dispatcher's access was revoked"); err != nil {
+	if err := stopRunsClaimedBy(ctx, tx, claimants{clientID: clientID, allOAuth: all}, "its dispatcher's access was revoked"); err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), tx.Commit(ctx)
@@ -201,7 +201,7 @@ func (db *DB) ExchangeCode(ctx context.Context, raw, clientID, redirectURI, veri
 		Scan(&storedClient, &storedRedirect, &challenge, &scope, &expires, &used)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			if _, err := tx.Exec(ctx, `UPDATE oauth_token SET revoked=true WHERE family=$1::uuid`, family); err != nil {
+			if err := revokeTokenFamily(ctx, tx, family); err != nil {
 				return TokenPair{}, err
 			}
 			if err := tx.Commit(ctx); err != nil {
@@ -212,7 +212,7 @@ func (db *DB) ExchangeCode(ctx context.Context, raw, clientID, redirectURI, veri
 		return TokenPair{}, err
 	}
 	if used {
-		if _, err := tx.Exec(ctx, `UPDATE oauth_token SET revoked=true WHERE family=$1::uuid`, family); err != nil {
+		if err := revokeTokenFamily(ctx, tx, family); err != nil {
 			return TokenPair{}, err
 		}
 		if err := tx.Commit(ctx); err != nil {
@@ -268,7 +268,7 @@ func (db *DB) ExchangeRefresh(ctx context.Context, raw, clientID string) (TokenP
 		return TokenPair{}, err
 	}
 	if revoked {
-		if _, err := tx.Exec(ctx, `UPDATE oauth_token SET revoked=true WHERE family=$1::uuid`, family); err != nil {
+		if err := revokeTokenFamily(ctx, tx, family); err != nil {
 			return TokenPair{}, err
 		}
 		if err := tx.Commit(ctx); err != nil {

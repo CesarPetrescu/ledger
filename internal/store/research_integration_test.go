@@ -632,3 +632,38 @@ func TestOAuthClaimsHoldTheirAccessToken(t *testing.T) {
 		t.Fatalf("claim with an unknown token = %v", err)
 	}
 }
+
+// Revoking an OAuth token family (the dispatcher logging out, or replay detected) stops the runs that
+// family claimed, and only those.
+func TestRevokingATokenFamilyStopsItsRuns(t *testing.T) {
+	db, ctx := researchDB(t)
+	if _, err := db.PutClient(ctx, store.OAuthClient{ClientID: "oauth-dispatcher", Kind: "device", Name: "Dispatcher", RedirectURIs: []string{}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, token := range []struct{ raw, family string }{{"access-a", "00000000-0000-4000-8000-00000000000a"}, {"access-b", "00000000-0000-4000-8000-00000000000b"}} {
+		if _, err := db.Pool.Exec(ctx, `INSERT INTO oauth_token(hash,kind,client_id,scope,family,expires_at) VALUES(sha256($1::bytea),'access','oauth-dispatcher','research:dispatch',$2,now()+interval '15 minutes')`, []byte(token.raw), token.family); err != nil {
+			t.Fatal(err)
+		}
+	}
+	task := newResearch(t, db, ctx, "Family", 3)
+	c, err := db.ClaimResearchTaskWithAccess(ctx, "access-a", 60, "Dispatcher", "oauth-dispatcher")
+	if err != nil || c == nil {
+		t.Fatalf("claim = %#v, %v", c, err)
+	}
+	if err := db.RevokeToken(ctx, "access-b", "oauth-dispatcher"); err != nil {
+		t.Fatal(err)
+	}
+	if still, _ := db.ResearchTask(ctx, task.ID); still.State != "in_progress" {
+		t.Fatalf("another family's revocation stopped the run: %#v", still)
+	}
+	if err := db.RevokeToken(ctx, "access-a", "oauth-dispatcher"); err != nil {
+		t.Fatal(err)
+	}
+	stopped, _ := db.ResearchTask(ctx, task.ID)
+	if stopped.State != "ready" || stopped.Failures != 0 {
+		t.Fatalf("after family revoke = %#v", stopped)
+	}
+	if _, _, err := db.ResearchRun(ctx, c.Token); !store.IsNotFound(err) {
+		t.Fatalf("revoked family's run token still works: %v", err)
+	}
+}

@@ -80,7 +80,7 @@ func (db *DB) RevokeAPIKey(ctx context.Context, id int64) (APIKey, error) {
 	if err != nil {
 		return APIKey{}, err
 	}
-	if err := stopRunsClaimedBy(ctx, tx, APIKeyClientID(id), false, "its dispatcher's API key was revoked"); err != nil {
+	if err := stopRunsClaimedBy(ctx, tx, claimants{clientID: APIKeyClientID(id)}, "its dispatcher's API key was revoked"); err != nil {
 		return APIKey{}, err
 	}
 	return key, tx.Commit(ctx)
