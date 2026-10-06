@@ -109,7 +109,7 @@ func TestOwnerAuthorizationAndApprovalPasswordReset(t *testing.T) {
 		AccessToken string `json:"access_token"`
 		Scope       string `json:"scope"`
 	}
-	if token.Code != 200 || json.Unmarshal(token.Body.Bytes(), &pair) != nil || pair.Scope != "calendar:write ledger:read" {
+	if token.Code != 200 || json.Unmarshal(token.Body.Bytes(), &pair) != nil || pair.Scope != "calendar:read calendar:write ledger:read ledger:write" {
 		t.Fatalf("owner token exchange = %d %s", token.Code, token.Body.String())
 	}
 	params.Set("action", "approve")

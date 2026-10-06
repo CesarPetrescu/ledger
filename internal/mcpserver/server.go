@@ -382,12 +382,12 @@ func oauthProtected(db *store.DB, publicURL string, next http.Handler, scope str
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, ok := bearerToken(r.Header)
 		if !ok {
-			unauthorized(w, publicURL)
+			unauthorized(w, publicURL, scope)
 			return
 		}
 		clientID, scopes, err := db.LookupAccess(r.Context(), token)
 		if err != nil {
-			unauthorized(w, publicURL)
+			unauthorized(w, publicURL, scope)
 			return
 		}
 		if scope != "" && !oauth.HasScope(scopes, scope) {
@@ -416,8 +416,13 @@ func bearerToken(header http.Header) (string, bool) {
 	return token, true
 }
 
-func unauthorized(w http.ResponseWriter, publicURL string) {
-	w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="`+publicURL+`/.well-known/oauth-protected-resource"`)
+// unauthorized challenges for a token with the scope the endpoint needs: on /mcp every agent permission,
+// so clients that follow the challenge ask for all of them at once; on /mcp/dispatch, research:dispatch.
+func unauthorized(w http.ResponseWriter, publicURL, scope string) {
+	if scope == "" {
+		scope = strings.Join(oauth.MCPScopes, " ")
+	}
+	w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="`+publicURL+`/.well-known/oauth-protected-resource", scope="`+scope+`"`)
 	http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 }
 
