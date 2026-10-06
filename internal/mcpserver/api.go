@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/cesarpetrescu/ledger/internal/store"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // /api/v1 is a plain JSON API for servers that dispatch research, such as Adastrion Core, authenticated
@@ -171,8 +172,13 @@ func apiHandler(db *store.DB, publicURL string) http.Handler {
 			return
 		}
 		task, err := db.CreateResearchTask(r.Context(), store.NewResearchTask{ContinueFromTaskID: id, ProjectSlug: parent.ProjectSlug, Title: input.Title, Source: key(r).Name, ClientID: client(r), MaxAttempts: parent.MaxAttempts, Spec: store.ResearchSpec{Objective: input.Objective, Acceptance: input.Acceptance, Deliverable: parent.Spec.Deliverable, Budget: parent.Spec.Budget}})
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) || store.IsNotFound(err) || r.Context().Err() != nil {
+			apiError(w, http.StatusInternalServerError, "server_error", "could not create the continuation")
+			return
+		}
 		if err != nil {
-			apiError(w, 400, "invalid_request", err.Error())
+			apiError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
 		writeAPI(w, http.StatusCreated, taskOutput(task))

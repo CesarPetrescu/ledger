@@ -722,10 +722,10 @@ func TestResearchContinuationCopiesOnlyAcceptedSubmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pack.Thread) != 1 || !strings.Contains(pack.Thread[0].Body, "Accepted findings") || len(pack.Thread[0].Files) != 1 {
+	if len(pack.Thread) != 2 || !strings.Contains(pack.Thread[0].Body, "accepted result from research task") || pack.Thread[1].Body != "Accepted findings" || len(pack.Thread[1].Files) != 1 {
 		t.Fatalf("context: %#v", pack.Thread)
 	}
-	file, err := db.ResearchFile(ctx, child.ID, pack.Thread[0].Files[0].ID)
+	file, err := db.ResearchFile(ctx, child.ID, pack.Thread[1].Files[0].ID)
 	if err != nil || string(file.Data) != "accepted" {
 		t.Fatalf("copied file: %v", err)
 	}
@@ -735,5 +735,27 @@ func TestResearchContinuationCopiesOnlyAcceptedSubmission(t *testing.T) {
 	next.ProjectSlug = "different"
 	if _, err = db.CreateResearchTask(ctx, next); err == nil {
 		t.Fatal("cross-project continuation accepted")
+	}
+}
+
+// A result at the full message limit still continues: provenance is a note of its own.
+func TestResearchContinuationKeepsAFullLengthResult(t *testing.T) {
+	db, ctx := researchDB(t)
+	parent := newResearch(t, db, ctx, "Long survey", 3)
+	claim(t, db, ctx)
+	long := strings.Repeat("x", 100000)
+	if _, err := db.SubmitResearch(ctx, parent.ID, 1, long, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.UpdateHandoffMessage(ctx, parent.MessageID, "complete", "", store.OwnerSource, "owner", true); err != nil {
+		t.Fatal(err)
+	}
+	child, err := db.CreateResearchTask(ctx, store.NewResearchTask{ProjectSlug: "atlas", Title: "Continue", Source: "owner", ClientID: "owner", ContinueFromTaskID: parent.ID, Spec: store.ResearchSpec{Objective: "Go on", Acceptance: []string{"More"}}})
+	if err != nil {
+		t.Fatalf("continue from a full-length result = %v", err)
+	}
+	pack, _ := db.ResearchContext(ctx, child.ID, nil)
+	if len(pack.Thread) != 2 || pack.Thread[1].Body != long {
+		t.Fatalf("copied result length = %d", len(pack.Thread[len(pack.Thread)-1].Body))
 	}
 }
