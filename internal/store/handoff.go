@@ -526,6 +526,14 @@ requeue_reason=CASE WHEN $2 THEN $3 ELSE requeue_reason END WHERE handoff_id=$1 
 				return HandoffMessage{}, err
 			}
 		}
+		// Accepting publishes the result to the project's log, in the same transaction.
+		// ponytail: takes the project lock after the handoff lock; a project deleted at the same instant can
+		// deadlock with it, and Postgres then aborts one of the two for a retry.
+		if action == "complete" {
+			if err := publishResearch(ctx, tx, state.HandoffID); err != nil {
+				return HandoffMessage{}, err
+			}
+		}
 	}
 	messages := []HandoffMessage{message}
 	if err := addFilesToMessages(ctx, tx, messages); err != nil {
@@ -632,7 +640,7 @@ func (db *DB) GetHandoffFile(ctx context.Context, id int64, viewerClientID strin
 	var file HandoffFile
 	err := db.Pool.QueryRow(ctx, `SELECT f.id,f.message_id,m.handoff_id,h.title,f.filename,f.media_type,f.size_bytes,encode(f.sha256,'hex'),f.created_at,f.data
 FROM handoff_file f JOIN handoff_message m ON m.id=f.message_id JOIN handoff h ON h.id=m.handoff_id
-WHERE f.id=$1 AND ($2 OR (h.kind='general' AND (m.work_state<>'draft' OR m.client_id=$3)))`, id, admin, viewerClientID).
+WHERE f.id=$1 AND ($2 OR m.work_state<>'draft' OR m.client_id=$3)`, id, admin, viewerClientID).
 		Scan(&file.ID, &file.MessageID, &file.HandoffID, &file.HandoffTitle, &file.Filename, &file.MediaType, &file.SizeBytes, &file.SHA256, &file.CreatedAt, &file.Data)
 	return file, err
 }

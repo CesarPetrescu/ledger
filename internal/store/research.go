@@ -891,7 +891,7 @@ const researchStatusSQL = `CASE m.work_state WHEN 'draft' THEN 'draft' WHEN 'rea
 
 // ListResearchTasks lists tasks by status, newest activity first. status "" means every task that is
 // not a draft or accepted; "all" means every task.
-func (db *DB) ListResearchTasks(ctx context.Context, status string, limit int) ([]ResearchSummary, error) {
+func (db *DB) ListResearchTasks(ctx context.Context, status, projectSlug string, limit int) ([]ResearchSummary, error) {
 	if status != "" && status != "all" && !slices.Contains(ResearchStatuses, status) {
 		return nil, fmt.Errorf("status must be one of %s, or all", strings.Join(ResearchStatuses, ", "))
 	}
@@ -901,10 +901,10 @@ func (db *DB) ListResearchTasks(ctx context.Context, status string, limit int) (
 	if limit < 1 || limit > 100 {
 		return nil, fmt.Errorf("limit must be between 1 and 100")
 	}
-	rows, err := db.Pool.Query(ctx, `SELECT * FROM (SELECT t.handoff_id::text AS id,h.title,COALESCE(h.project_slug,''),`+researchStatusSQL+` AS status,t.attempt,t.failures,t.max_attempts,
+	rows, err := db.Pool.Query(ctx, `SELECT * FROM (SELECT t.handoff_id::text AS id,h.title,COALESCE(h.project_slug,'') AS project_slug,`+researchStatusSQL+` AS status,t.attempt,t.failures,t.max_attempts,
  COALESCE(m.claimed_source,''),t.lease_until,t.heartbeat_at,t.progress,t.last_error,h.created_at,h.updated_at
 FROM research_task t JOIN handoff h ON h.id=t.handoff_id JOIN handoff_message m ON m.id=t.message_id) s
-WHERE ($1='all' OR ($1='' AND s.status NOT IN ('draft','accepted')) OR s.status=$1) ORDER BY s.updated_at DESC,s.id::bigint DESC LIMIT $2`, status, limit)
+WHERE ($1='all' OR ($1='' AND s.status NOT IN ('draft','accepted')) OR s.status=$1) AND ($3='' OR s.project_slug=$3) ORDER BY s.updated_at DESC,s.id::bigint DESC LIMIT $2`, status, limit, projectSlug)
 	if err != nil {
 		return nil, err
 	}
@@ -912,6 +912,57 @@ WHERE ($1='all' OR ($1='' AND s.status NOT IN ('draft','accepted')) OR s.status=
 		var r ResearchSummary
 		return r, row.Scan(&r.ID, &r.Title, &r.ProjectSlug, &r.Status, &r.Attempt, &r.Failures, &r.MaxAttempts, &r.Runner, &r.LeaseUntil, &r.HeartbeatAt, &r.Progress, &r.LastError, &r.CreatedAt, &r.UpdatedAt)
 	})
+}
+
+// ResearchProjectSlug is where accepted results that belong to no project are published.
+const ResearchProjectSlug = "research"
+
+const maxPublishedExcerpt = 3200
+
+// publishResearch writes an accepted task's result into its project's log, so every agent finds it with
+// search and get_project. It runs inside the owner's Accept, holding the task's handoff lock.
+func publishResearch(ctx context.Context, tx pgx.Tx, id int64) error {
+	var title, slug string
+	if err := tx.QueryRow(ctx, `SELECT title,COALESCE(project_slug,'') FROM handoff WHERE id=$1`, id).Scan(&title, &slug); err != nil {
+		return err
+	}
+	var result string
+	var resultID int64
+	err := tx.QueryRow(ctx, `SELECT id,body FROM handoff_message WHERE handoff_id=$1 AND client_id LIKE 'research:%' AND work_state='done' ORDER BY id DESC LIMIT 1`, id).Scan(&resultID, &result)
+	if IsNotFound(err) {
+		return nil // nothing was submitted, so there is nothing to publish
+	}
+	if err != nil {
+		return err
+	}
+	var files []string
+	rows, err := tx.Query(ctx, `SELECT filename FROM handoff_file WHERE message_id=$1 ORDER BY id`, resultID)
+	if err != nil {
+		return err
+	}
+	if files, err = pgx.CollectRows(rows, pgx.RowTo[string]); err != nil {
+		return err
+	}
+	if slug == "" {
+		slug = ResearchProjectSlug
+		if _, err := tx.Exec(ctx, `INSERT INTO project(slug,name,tier,type,goal,description) VALUES($1,'Research','park','Ledger research',
+'Accepted research results that belong to no other project','Ledger publishes accepted research here when the task named no project. Each entry links to the full result through get_research_task.')
+ON CONFLICT (slug) DO NOTHING`, slug); err != nil {
+			return err
+		}
+	}
+	excerpt := strings.TrimSpace(result)
+	if runes := []rune(excerpt); len(runes) > maxPublishedExcerpt {
+		excerpt = strings.TrimSpace(string(runes[:maxPublishedExcerpt])) + "…"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Accepted research #%d: %s\n\n%s\n\nFull result", id, title, excerpt)
+	if len(files) > 0 {
+		fmt.Fprintf(&b, " and %d file(s) (%s)", len(files), strings.Join(files, ", "))
+	}
+	fmt.Fprintf(&b, ": get_research_task with id \"%d\".", id)
+	_, _, err = insertEntry(ctx, tx, NewEntry{Slug: slug, Kind: "note", Body: b.String(), Source: OwnerSource, ClientID: researchNoteSource, Context: fmt.Sprintf("research task #%d, accepted", id)})
+	return err
 }
 
 // ResearchFile returns one attachment from this task's own thread, for the run's read_file tool.

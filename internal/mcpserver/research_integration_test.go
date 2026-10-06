@@ -228,3 +228,80 @@ func TestResearchCreationIsUntilDoneOnly(t *testing.T) {
 		}
 	}
 }
+
+// Agents follow research through review: they see status and progress, read a submitted result and its
+// files while it awaits the owner, and once the owner accepts it the result is published to the project
+// log (or to the Research project when the task named none).
+func TestAgentsSeeResearchThroughReviewAndPublication(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	addAccess(t, db, ctx, "agent-token", []string{"ledger:read", "ledger:write"})
+	server := httptest.NewServer(HTTPHandler(NewServer(db, "http://unused"), db, "https://ledger.example.com"))
+	defer server.Close()
+	agent := connectMCP(t, server.URL+"/mcp", "agent-token", "claude-code")
+
+	inAtlas := callTool[researchTaskOutput](t, agent, "create_research_task", map[string]any{"project_slug": "atlas", "title": "Engines", "objective": "Compare engines", "acceptance": []string{"Cite code"}})
+	loose := callTool[researchTaskOutput](t, agent, "create_research_task", map[string]any{"title": "Loose survey", "objective": "Survey", "acceptance": []string{"Cite"}})
+	listed := callTool[researchTaskList](t, agent, "list_research_tasks", map[string]any{"status": "queued"})
+	if len(listed.Tasks) != 2 {
+		t.Fatalf("queued = %#v", listed.Tasks)
+	}
+
+	id, _ := strconv.ParseInt(inAtlas.ID, 10, 64)
+	c, err := db.ClaimResearchTask(ctx, 60, "Adastrion", "dispatcher")
+	if err != nil || c.Task.ID != id {
+		t.Fatalf("claim = %#v, %v", c, err)
+	}
+	if _, err := db.ResearchHeartbeat(ctx, id, 1, "reading the scheduler"); err != nil {
+		t.Fatal(err)
+	}
+	running := callTool[researchTaskList](t, agent, "list_research_tasks", map[string]any{"status": "running", "project_slug": "atlas"})
+	if len(running.Tasks) != 1 || running.Tasks[0].Progress != "reading the scheduler" || running.Tasks[0].Runner != "Adastrion" {
+		t.Fatalf("running = %#v", running.Tasks)
+	}
+	submitted, err := db.SubmitResearch(ctx, id, 1, "# Engines compared\n\nvLLM batches continuously.", []store.ResearchFile{{Filename: "table.csv", MediaType: "text/csv", Data: []byte("engine,batching\n")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := callTool[researchView](t, agent, "get_research_task", map[string]any{"id": inAtlas.ID})
+	last := view.Thread[len(view.Thread)-1]
+	if view.Result != "awaiting_review" || last.From != "researcher" || !strings.HasPrefix(last.Body, "# Engines compared") || len(last.Files) != 1 {
+		t.Fatalf("under review = %#v", view)
+	}
+	file, err := agent.CallTool(ctx, &mcp.CallToolParams{Name: "read_handoff_file", Arguments: map[string]any{"file_id": strconv.FormatInt(submitted.Files[0].ID, 10)}})
+	if err != nil || file.IsError || string(file.Content[0].(*mcp.EmbeddedResource).Resource.Blob) != "engine,batching\n" {
+		t.Fatalf("read result file = %#v, %v", file, err)
+	}
+
+	// The owner accepts: the result is published to Atlas's log, where search and get_project find it.
+	if _, err := db.UpdateHandoffMessage(ctx, c.Task.MessageID, "complete", "", store.OwnerSource, "owner", true); err != nil {
+		t.Fatal(err)
+	}
+	if accepted := callTool[researchView](t, agent, "get_research_task", map[string]any{"id": inAtlas.ID}); accepted.Result != "accepted" {
+		t.Fatalf("after accept = %#v", accepted.Result)
+	}
+	project := callTool[store.ProjectWithEntries](t, agent, "get_project", map[string]any{"slug": "atlas"})
+	if len(project.Entries) != 1 || !strings.HasPrefix(project.Entries[0].Body, "Accepted research #"+inAtlas.ID+": Engines") || !strings.Contains(project.Entries[0].Body, "vLLM batches continuously.") ||
+		!strings.Contains(project.Entries[0].Body, `1 file(s) (table.csv)`) || project.Entries[0].Kind != "note" || project.Entries[0].Source != store.OwnerSource {
+		t.Fatalf("published entry = %#v", project.Entries)
+	}
+
+	// A task with no project publishes to the Research project, created on first use.
+	looseID, _ := strconv.ParseInt(loose.ID, 10, 64)
+	lc, _ := db.ClaimResearchTask(ctx, 60, "Adastrion", "dispatcher")
+	if lc == nil || lc.Task.ID != looseID {
+		t.Fatalf("loose claim = %#v", lc)
+	}
+	if _, err := db.SubmitResearch(ctx, looseID, 1, "Loose findings", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.UpdateHandoffMessage(ctx, lc.Task.MessageID, "complete", "", store.OwnerSource, "owner", true); err != nil {
+		t.Fatal(err)
+	}
+	research := callTool[store.ProjectWithEntries](t, agent, "get_project", map[string]any{"slug": store.ResearchProjectSlug})
+	if research.Project.Name != "Research" || len(research.Entries) != 1 || !strings.Contains(research.Entries[0].Body, "Loose findings") {
+		t.Fatalf("research project = %#v", research)
+	}
+}

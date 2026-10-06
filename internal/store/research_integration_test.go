@@ -496,7 +496,7 @@ func TestResearchOverviewAndSharedProjectContext(t *testing.T) {
 	}
 	claim(t, db, ctx)
 	statuses := map[string]string{}
-	all, err := db.ListResearchTasks(ctx, "", 0)
+	all, err := db.ListResearchTasks(ctx, "", "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -506,10 +506,10 @@ func TestResearchOverviewAndSharedProjectContext(t *testing.T) {
 	if len(all) != 2 || statuses["Queued"] != "review" || statuses["Running"] != "running" {
 		t.Fatalf("overview = %#v", all)
 	}
-	if review, _ := db.ListResearchTasks(ctx, "review", 10); len(review) != 1 || review[0].ID != strconv.FormatInt(queued.ID, 10) {
+	if review, _ := db.ListResearchTasks(ctx, "review", "", 10); len(review) != 1 || review[0].ID != strconv.FormatInt(queued.ID, 10) {
 		t.Fatalf("review filter = %#v", review)
 	}
-	if _, err := db.ListResearchTasks(ctx, "bogus", 0); err == nil {
+	if _, err := db.ListResearchTasks(ctx, "bogus", "", 0); err == nil {
 		t.Fatal("unknown status accepted")
 	}
 
