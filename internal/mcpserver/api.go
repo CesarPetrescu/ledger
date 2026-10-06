@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/cesarpetrescu/ledger/internal/store"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // /api/v1 is a plain JSON API for servers that dispatch research, such as Adastrion Core, authenticated
@@ -140,6 +141,51 @@ func apiHandler(db *store.DB, publicURL string) http.Handler {
 			return
 		}
 		writeAPI(w, http.StatusOK, taskOutput(task))
+	})
+
+	// A dispatcher may request follow-up work only from an accepted task. Run tokens cannot use this API.
+	mux.HandleFunc("POST /api/v1/research/tasks/{id}/continue", func(w http.ResponseWriter, r *http.Request) {
+		id, ok := taskID(w, r)
+		if !ok {
+			return
+		}
+		var input struct {
+			Title      string   `json:"title"`
+			Objective  string   `json:"objective"`
+			Acceptance []string `json:"acceptance"`
+		}
+		if err := decodeAPI(r, &input); err != nil {
+			apiError(w, 400, "invalid_request", "send title, objective and acceptance")
+			return
+		}
+		parent, err := db.ResearchTask(r.Context(), id)
+		if store.IsNotFound(err) {
+			apiError(w, 404, "not_found", "research task not found")
+			return
+		}
+		if err != nil {
+			apiError(w, 500, "server_error", "could not read task")
+			return
+		}
+		if parent.State != "done" {
+			apiError(w, 409, "not_accepted", "accept the previous result before continuing")
+			return
+		}
+		task, err := db.CreateResearchTask(r.Context(), store.NewResearchTask{ContinueFromTaskID: id, ProjectSlug: parent.ProjectSlug, Title: input.Title, Source: key(r).Name, ClientID: client(r), MaxAttempts: parent.MaxAttempts, Spec: store.ResearchSpec{Objective: input.Objective, Acceptance: input.Acceptance, Deliverable: parent.Spec.Deliverable, Budget: parent.Spec.Budget}})
+		if errors.Is(err, store.ErrNotAccepted) {
+			apiError(w, http.StatusConflict, "not_accepted", "accept the previous result before continuing")
+			return
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) || store.IsNotFound(err) || r.Context().Err() != nil {
+			apiError(w, http.StatusInternalServerError, "server_error", "could not create the continuation")
+			return
+		}
+		if err != nil {
+			apiError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
+		writeAPI(w, http.StatusCreated, taskOutput(task))
 	})
 
 	type runInput struct {

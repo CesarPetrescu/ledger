@@ -695,3 +695,67 @@ func TestMigrationRequeuesRunsInFlight(t *testing.T) {
 		t.Fatalf("claim after migration = %#v", next)
 	}
 }
+
+func TestResearchContinuationCopiesOnlyAcceptedSubmission(t *testing.T) {
+	db, ctx := researchDB(t)
+	parent := newResearch(t, db, ctx, "Initial survey", 3)
+	next := store.NewResearchTask{ProjectSlug: "atlas", Title: "Refresh survey", Source: "owner", ClientID: "owner", ContinueFromTaskID: parent.ID, Spec: store.ResearchSpec{Objective: "Refresh the findings", Acceptance: []string{"Cite new evidence"}}}
+	if _, err := db.CreateResearchTask(ctx, next); !errors.Is(err, store.ErrNotAccepted) {
+		t.Fatalf("continued an unaccepted task: %v", err)
+	}
+	claim(t, db, ctx)
+	submitted, err := db.SubmitResearch(ctx, parent.ID, 1, "Accepted findings", []store.ResearchFile{{Filename: "result.csv", Data: []byte("accepted")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.UpdateHandoffMessage(ctx, parent.MessageID, "complete", "", store.OwnerSource, "owner", true); err != nil {
+		t.Fatal(err)
+	}
+	child, err := db.CreateResearchTask(ctx, next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.ContinueFromTaskID != parent.ID || child.ContinueFromAttempt != 1 {
+		t.Fatalf("lineage: %#v", child)
+	}
+	pack, err := db.ResearchContext(ctx, child.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pack.Thread) != 2 || !strings.Contains(pack.Thread[0].Body, "accepted result from research task") || pack.Thread[1].Body != "Accepted findings" || len(pack.Thread[1].Files) != 1 {
+		t.Fatalf("context: %#v", pack.Thread)
+	}
+	file, err := db.ResearchFile(ctx, child.ID, pack.Thread[1].Files[0].ID)
+	if err != nil || string(file.Data) != "accepted" {
+		t.Fatalf("copied file: %v", err)
+	}
+	if _, err = db.ResearchFile(ctx, child.ID, submitted.Files[0].ID); !store.IsNotFound(err) {
+		t.Fatal("child can read parent file ID")
+	}
+	next.ProjectSlug = "different"
+	if _, err = db.CreateResearchTask(ctx, next); err == nil {
+		t.Fatal("cross-project continuation accepted")
+	}
+}
+
+// A result at the full message limit still continues: provenance is a note of its own.
+func TestResearchContinuationKeepsAFullLengthResult(t *testing.T) {
+	db, ctx := researchDB(t)
+	parent := newResearch(t, db, ctx, "Long survey", 3)
+	claim(t, db, ctx)
+	long := strings.Repeat("x", 100000)
+	if _, err := db.SubmitResearch(ctx, parent.ID, 1, long, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.UpdateHandoffMessage(ctx, parent.MessageID, "complete", "", store.OwnerSource, "owner", true); err != nil {
+		t.Fatal(err)
+	}
+	child, err := db.CreateResearchTask(ctx, store.NewResearchTask{ProjectSlug: "atlas", Title: "Continue", Source: "owner", ClientID: "owner", ContinueFromTaskID: parent.ID, Spec: store.ResearchSpec{Objective: "Go on", Acceptance: []string{"More"}}})
+	if err != nil {
+		t.Fatalf("continue from a full-length result = %v", err)
+	}
+	pack, _ := db.ResearchContext(ctx, child.ID, nil)
+	if len(pack.Thread) != 2 || pack.Thread[1].Body != long {
+		t.Fatalf("copied result length = %d", len(pack.Thread[len(pack.Thread)-1].Body))
+	}
+}

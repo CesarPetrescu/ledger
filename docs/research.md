@@ -166,3 +166,29 @@ After the run ends, the token gets 401 on every endpoint. `/mcp` and `/mcp/dispa
 ## Sandbox network
 
 The sandbox's only secret is its run token, and everything it writes lands in an owner-only thread. Give it open egress for research, but no route to private networks, the host, or other sandboxes. It should reach Ledger only through its public URL, at `/mcp/research`. Adastrion Core's sandbox router already enforces this shape.
+
+### Continue an accepted task
+
+`create_research_task` accepts optional `continue_from_task_id`, a positive ID string.
+The predecessor must already be accepted and must have the same `project_slug` (including no project).
+Creation freezes its accepted attempt in `continue_from_attempt` and copies only that run's submission
+and attachments into the new task. The inherited note identifies its source. Private owner notes and
+rejected submissions are excluded. `get_task` and `read_file` work on the new task's own copies, with
+new file IDs; a run still cannot read arbitrary predecessor files. Reopening the predecessor later
+does not change the copied result.
+
+An API-key dispatcher may also request a follow-up from an accepted task:
+
+```http
+POST /api/v1/research/tasks/12/continue
+Authorization: Bearer <dispatcher-api-key>
+Content-Type: application/json
+
+{"title":"Refresh the survey","objective":"Check new evidence since the accepted survey","acceptance":["Cite changed findings"]}
+```
+
+Returns 201 and the queued task. The project, deliverable, budget and maximum failed attempts are
+inherited; the old evaluation command is not. Missing tasks return 404, unaccepted tasks 409, invalid
+input 400, and invalid keys 401. This narrowly extends `research:dispatch` to request follow-up work;
+it does not grant arbitrary task creation or owner review. Run tokens cannot use the endpoint.
+Dispatchers can use the lineage pair to restore a matching retained workspace without guessing topics.

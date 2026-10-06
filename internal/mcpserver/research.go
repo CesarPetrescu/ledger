@@ -48,6 +48,7 @@ func researchError(err error) (*mcp.CallToolResult, any, error) {
 // MCP outputs carry IDs as strings, like every other Ledger tool, so a dispatcher can pass task.id and a
 // run can pass a file's id straight back into the tools that take them.
 type researchTaskOutput struct {
+	ContinueFromTaskID string `json:"continue_from_task_id,omitempty"`
 	store.ResearchTask
 	ID        string   `json:"id"`
 	MessageID string   `json:"message_id"`
@@ -84,7 +85,11 @@ func taskOutput(task store.ResearchTask) researchTaskOutput {
 	for i, id := range task.DependsOn {
 		depends[i] = strconv.FormatInt(id, 10)
 	}
-	return researchTaskOutput{ResearchTask: task, ID: strconv.FormatInt(task.ID, 10), MessageID: strconv.FormatInt(task.MessageID, 10), DependsOn: depends}
+	var continued string
+	if task.ContinueFromTaskID != 0 {
+		continued = strconv.FormatInt(task.ContinueFromTaskID, 10)
+	}
+	return researchTaskOutput{ContinueFromTaskID: continued, ResearchTask: task, ID: strconv.FormatInt(task.ID, 10), MessageID: strconv.FormatInt(task.MessageID, 10), DependsOn: depends}
 }
 
 func filesOutput(files []store.HandoffFile) []researchFileOutput {
@@ -407,16 +412,17 @@ func NewDispatchServer(db *store.DB, publicURL string) *mcp.Server {
 
 func addResearchCreateTool(server *mcp.Server, db *store.DB) {
 	type createInput struct {
-		ProjectSlug string               `json:"project_slug,omitempty" jsonschema:"optional project slug"`
-		Title       string               `json:"title" jsonschema:"task title, 1 to 200 characters on one line"`
-		Objective   string               `json:"objective" jsonschema:"what to find out and why, 1 to 8000 characters"`
-		Acceptance  []string             `json:"acceptance" jsonschema:"1 to 20 checkable conditions the result must meet"`
-		Deliverable string               `json:"deliverable,omitempty" jsonschema:"report (default), answer, dataset, or code"`
-		EvalCmd     string               `json:"eval_cmd,omitempty" jsonschema:"optional shell command that checks the result"`
-		Budget      store.ResearchBudget `json:"budget,omitempty" jsonschema:"optional limits per run: rounds, minutes, tokens; 0 means no limit"`
-		MaxAttempts int                  `json:"max_attempts,omitempty" jsonschema:"failed runs before the task stops, 1 to 10, default 3"`
-		DependsOn   []string             `json:"depends_on,omitempty" jsonschema:"research task IDs that must be accepted first"`
-		Draft       bool                 `json:"draft,omitempty" jsonschema:"create without queueing it; the owner queues it from the console"`
+		ContinueFromTaskID string               `json:"continue_from_task_id,omitempty" jsonschema:"accepted research task ID to continue; must use the same project; copies only the accepted submission and attachments"`
+		ProjectSlug        string               `json:"project_slug,omitempty" jsonschema:"optional project slug"`
+		Title              string               `json:"title" jsonschema:"task title, 1 to 200 characters on one line"`
+		Objective          string               `json:"objective" jsonschema:"what to find out and why, 1 to 8000 characters"`
+		Acceptance         []string             `json:"acceptance" jsonschema:"1 to 20 checkable conditions the result must meet"`
+		Deliverable        string               `json:"deliverable,omitempty" jsonschema:"report (default), answer, dataset, or code"`
+		EvalCmd            string               `json:"eval_cmd,omitempty" jsonschema:"optional shell command that checks the result"`
+		Budget             store.ResearchBudget `json:"budget,omitempty" jsonschema:"optional limits per run: rounds, minutes, tokens; 0 means no limit"`
+		MaxAttempts        int                  `json:"max_attempts,omitempty" jsonschema:"failed runs before the task stops, 1 to 10, default 3"`
+		DependsOn          []string             `json:"depends_on,omitempty" jsonschema:"research task IDs that must be accepted first"`
+		Draft              bool                 `json:"draft,omitempty" jsonschema:"create without queueing it; the owner queues it from the console"`
 	}
 	mcp.AddTool(server, &mcp.Tool{Name: "create_research_task", OutputSchema: outputSchema[researchTaskOutput](), Description: "Queue a research task for a sandboxed research run. The owner reviews the result in Ledger; research threads are not readable through this server. " + ResearchDescriptionSuffix, Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: boolPointer(false)}},
 		func(ctx context.Context, request *mcp.CallToolRequest, input createInput) (*mcp.CallToolResult, any, error) {
@@ -433,7 +439,14 @@ func addResearchCreateTool(server *mcp.Server, db *store.DB) {
 					return nil, nil, fmt.Errorf("depends_on entries must be positive integer strings")
 				}
 			}
-			task, err := db.CreateResearchTask(ctx, store.NewResearchTask{ProjectSlug: input.ProjectSlug, Title: input.Title, MaxAttempts: input.MaxAttempts, DependsOn: depends, Draft: input.Draft, Source: name, ClientID: id.ClientID,
+			var continued int64
+			if input.ContinueFromTaskID != "" {
+				continued, err = parseTaskID(input.ContinueFromTaskID)
+				if err != nil {
+					return nil, nil, err
+				}
+			}
+			task, err := db.CreateResearchTask(ctx, store.NewResearchTask{ContinueFromTaskID: continued, ProjectSlug: input.ProjectSlug, Title: input.Title, MaxAttempts: input.MaxAttempts, DependsOn: depends, Draft: input.Draft, Source: name, ClientID: id.ClientID,
 				Spec: store.ResearchSpec{Objective: input.Objective, Acceptance: input.Acceptance, Deliverable: input.Deliverable, EvalCmd: input.EvalCmd, Budget: input.Budget}})
 			if err != nil {
 				return nil, nil, err
