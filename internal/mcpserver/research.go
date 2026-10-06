@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/cesarpetrescu/ledger/internal/store"
+	"github.com/jackc/pgx/v5"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -435,7 +436,7 @@ func addResearchReadTools(server *mcp.Server, db *store.DB) {
 			if !canRead(ctx) {
 				return scopeError(), nil, nil
 			}
-			tasks, err := db.ListResearchTasks(ctx, input.Status, input.ProjectSlug, input.Limit)
+			tasks, err := db.ListResearchTasks(ctx, input.Status, input.ProjectSlug, identityFrom(ctx).ClientID, input.Limit)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -464,6 +465,10 @@ func addResearchReadTools(server *mcp.Server, db *store.DB) {
 				before = &value
 			}
 			pack, err := db.ResearchContext(ctx, id, before)
+			// A draft belongs to its creator until it is queued.
+			if err == nil && pack.Task.State == "draft" && pack.Task.CreatorClientID != identityFrom(ctx).ClientID {
+				err = pgx.ErrNoRows
+			}
 			if store.IsNotFound(err) {
 				return handoffResultError(err)
 			}

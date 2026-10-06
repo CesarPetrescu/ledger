@@ -119,16 +119,19 @@ type ResearchTask struct {
 	Checkpoint          string       `json:"checkpoint,omitempty"`
 	CheckpointAttempt   *int         `json:"checkpoint_attempt,omitempty"`
 	CheckpointAt        *time.Time   `json:"checkpoint_at,omitempty"`
+	// CreatorClientID is the OAuth client that created the task. A draft is visible only to it (and the
+	// owner) until it is queued.
+	CreatorClientID string `json:"-"`
 }
 
 const researchSelect = `SELECT t.handoff_id,t.message_id,COALESCE(h.project_slug,''),h.title,m.work_state,COALESCE(t.phase,''),t.spec,t.spec_version,t.depends_on,
-t.attempt,t.failures,t.max_attempts,COALESCE(m.claimed_source,''),t.lease_until,t.heartbeat_at,t.progress,t.last_error,t.checkpoint,t.checkpoint_attempt,t.checkpoint_at,COALESCE(t.continue_from_task_id,0),COALESCE(t.continue_from_attempt,0)
+t.attempt,t.failures,t.max_attempts,COALESCE(m.claimed_source,''),t.lease_until,t.heartbeat_at,t.progress,t.last_error,t.checkpoint,t.checkpoint_attempt,t.checkpoint_at,COALESCE(t.continue_from_task_id,0),COALESCE(t.continue_from_attempt,0),h.client_id
 FROM research_task t JOIN handoff h ON h.id=t.handoff_id JOIN handoff_message m ON m.id=t.message_id`
 
 func (db *DB) ResearchTask(ctx context.Context, id int64) (ResearchTask, error) {
 	var t ResearchTask
 	err := db.Pool.QueryRow(ctx, researchSelect+` WHERE t.handoff_id=$1`, id).Scan(&t.ID, &t.MessageID, &t.ProjectSlug, &t.Title, &t.State, &t.Phase, &t.Spec, &t.SpecVersion, &t.DependsOn,
-		&t.Attempt, &t.Failures, &t.MaxAttempts, &t.Runner, &t.LeaseUntil, &t.HeartbeatAt, &t.Progress, &t.LastError, &t.Checkpoint, &t.CheckpointAttempt, &t.CheckpointAt, &t.ContinueFromTaskID, &t.ContinueFromAttempt)
+		&t.Attempt, &t.Failures, &t.MaxAttempts, &t.Runner, &t.LeaseUntil, &t.HeartbeatAt, &t.Progress, &t.LastError, &t.Checkpoint, &t.CheckpointAttempt, &t.CheckpointAt, &t.ContinueFromTaskID, &t.ContinueFromAttempt, &t.CreatorClientID)
 	// The policy is fixed, so every task reads as until done, whatever an older stored spec held.
 	t.Spec.ExecutionMode = ExecutionUntilDone
 	return t, err
@@ -891,7 +894,8 @@ const researchStatusSQL = `CASE m.work_state WHEN 'draft' THEN 'draft' WHEN 'rea
 
 // ListResearchTasks lists tasks by status, newest activity first. status "" means every task that is
 // not a draft or accepted; "all" means every task.
-func (db *DB) ListResearchTasks(ctx context.Context, status, projectSlug string, limit int) ([]ResearchSummary, error) {
+// viewer, when set, hides other clients' drafts: a draft belongs to its creator until it is queued.
+func (db *DB) ListResearchTasks(ctx context.Context, status, projectSlug, viewer string, limit int) ([]ResearchSummary, error) {
 	if status != "" && status != "all" && !slices.Contains(ResearchStatuses, status) {
 		return nil, fmt.Errorf("status must be one of %s, or all", strings.Join(ResearchStatuses, ", "))
 	}
@@ -902,15 +906,16 @@ func (db *DB) ListResearchTasks(ctx context.Context, status, projectSlug string,
 		return nil, fmt.Errorf("limit must be between 1 and 100")
 	}
 	rows, err := db.Pool.Query(ctx, `SELECT * FROM (SELECT t.handoff_id::text AS id,h.title,COALESCE(h.project_slug,'') AS project_slug,`+researchStatusSQL+` AS status,t.attempt,t.failures,t.max_attempts,
- COALESCE(m.claimed_source,''),t.lease_until,t.heartbeat_at,t.progress,t.last_error,h.created_at,h.updated_at
+ COALESCE(m.claimed_source,''),t.lease_until,t.heartbeat_at,t.progress,t.last_error,h.created_at,h.updated_at,h.client_id AS creator
 FROM research_task t JOIN handoff h ON h.id=t.handoff_id JOIN handoff_message m ON m.id=t.message_id) s
-WHERE ($1='all' OR ($1='' AND s.status NOT IN ('draft','accepted')) OR s.status=$1) AND ($3='' OR s.project_slug=$3) ORDER BY s.updated_at DESC,s.id::bigint DESC LIMIT $2`, status, limit, projectSlug)
+WHERE ($1='all' OR ($1='' AND s.status NOT IN ('draft','accepted')) OR s.status=$1) AND ($3='' OR s.project_slug=$3) AND (s.status<>'draft' OR $4='' OR s.creator=$4) ORDER BY s.updated_at DESC,s.id::bigint DESC LIMIT $2`, status, limit, projectSlug, viewer)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (ResearchSummary, error) {
 		var r ResearchSummary
-		return r, row.Scan(&r.ID, &r.Title, &r.ProjectSlug, &r.Status, &r.Attempt, &r.Failures, &r.MaxAttempts, &r.Runner, &r.LeaseUntil, &r.HeartbeatAt, &r.Progress, &r.LastError, &r.CreatedAt, &r.UpdatedAt)
+		var creator string
+		return r, row.Scan(&r.ID, &r.Title, &r.ProjectSlug, &r.Status, &r.Attempt, &r.Failures, &r.MaxAttempts, &r.Runner, &r.LeaseUntil, &r.HeartbeatAt, &r.Progress, &r.LastError, &r.CreatedAt, &r.UpdatedAt, &creator)
 	})
 }
 

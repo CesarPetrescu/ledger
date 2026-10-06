@@ -118,7 +118,7 @@ func apiHandler(db *store.DB, publicURL string) http.Handler {
 				return
 			}
 		}
-		tasks, err := db.ListResearchTasks(r.Context(), r.URL.Query().Get("status"), r.URL.Query().Get("project"), limit)
+		tasks, err := db.ListResearchTasks(r.Context(), r.URL.Query().Get("status"), r.URL.Query().Get("project"), client(r), limit)
 		if err != nil {
 			apiError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return

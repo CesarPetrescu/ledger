@@ -367,3 +367,33 @@ func TestAgentsReviewResearch(t *testing.T) {
 		t.Fatal("accepted twice")
 	}
 }
+
+// A draft research task stays with the client that created it until it is queued.
+func TestDraftResearchStaysWithItsCreator(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	addAccess(t, db, ctx, "creator-token", []string{"ledger:read", "ledger:write"})
+	if _, err := db.PutClient(ctx, store.OAuthClient{ClientID: "other", Kind: "dcr", Name: "Other", RedirectURIs: []string{"http://127.0.0.1/cb"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO oauth_token(hash,kind,client_id,scope,family,expires_at) VALUES(sha256('other-token'::bytea),'access','other','ledger:read ledger:write','00000000-0000-4000-8000-000000000002',now()+interval '15 minutes')`); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(HTTPHandler(NewServer(db, "http://unused"), db, "https://ledger.example.com"))
+	defer server.Close()
+	creator := connectMCP(t, server.URL+"/mcp", "creator-token", "creator")
+	other := connectMCP(t, server.URL+"/mcp", "other-token", "other")
+	draft := callTool[researchTaskOutput](t, creator, "create_research_task", map[string]any{"title": "Secret plan", "objective": "Private", "acceptance": []string{"x"}, "draft": true})
+
+	if mine := callTool[researchTaskList](t, creator, "list_research_tasks", map[string]any{"status": "draft"}); len(mine.Tasks) != 1 {
+		t.Fatalf("creator's drafts = %#v", mine.Tasks)
+	}
+	if callTool[researchView](t, creator, "get_research_task", map[string]any{"id": draft.ID}).Task.Title != "Secret plan" {
+		t.Fatal("creator cannot read its draft")
+	}
+	if theirs := callTool[researchTaskList](t, other, "list_research_tasks", map[string]any{"status": "all"}); len(theirs.Tasks) != 0 {
+		t.Fatalf("another client lists the draft: %#v", theirs.Tasks)
+	}
+	if peek, err := other.CallTool(ctx, &mcp.CallToolParams{Name: "get_research_task", Arguments: map[string]any{"id": draft.ID}}); err != nil || !peek.IsError {
+		t.Fatalf("another client reads the draft: %#v, %v", peek, err)
+	}
+}
