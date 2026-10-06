@@ -259,7 +259,7 @@ func claimOutput(claim *store.ResearchClaim, publicURL string) dispatchClaim {
 	return dispatchClaim{Claimed: true, Task: &task, Token: claim.Token, Endpoint: endpoint, Reason: claim.Reason, Available: &claim.Available, Chat: chatFor(claim, endpoint)}
 }
 
-var reasonTitles = map[string]string{"retry_after_failure": "retry", "revision": "revision", "answered": "answered", "retry": "restarted after stopping", "restarted": "restarted", "reopened": "reopened"}
+var reasonTitles = map[string]string{"retry_after_failure": "retry", "revision": "revision", "answered": "answered", "retry": "restarted after stopping", "restarted": "restarted", "reopened": "reopened", "requeued": "continued"}
 
 var reasonSentences = map[string]string{
 	"first_run":           "This is the task's first run.",
@@ -269,6 +269,7 @@ var reasonSentences = map[string]string{
 	"retry":               "The task had stopped after repeated failures (last: %s), and the owner restarted it.",
 	"restarted":           "The owner stopped the previous run and queued the task again.",
 	"reopened":            "The owner had accepted this task and reopened it for another run.",
+	"requeued":            "The task has run before. Read the thread in get_task for what happened and what is left.",
 }
 
 // chatFor writes the first message of the chat that carries a run: what the task is, why this run

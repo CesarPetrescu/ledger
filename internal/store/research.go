@@ -328,10 +328,11 @@ func (db *DB) claimResearchTask(ctx context.Context, leaseSeconds int, source, c
 	}
 	var id, messageID int64
 	var reason string
-	err = tx.QueryRow(ctx, `SELECT t.handoff_id,t.message_id,t.requeue_reason FROM research_task t JOIN handoff h ON h.id=t.handoff_id JOIN handoff_message m ON m.id=t.message_id
+	var ran bool
+	err = tx.QueryRow(ctx, `SELECT t.handoff_id,t.message_id,t.requeue_reason,t.attempt>0 FROM research_task t JOIN handoff h ON h.id=t.handoff_id JOIN handoff_message m ON m.id=t.message_id
 WHERE m.work_state='ready' AND NOT EXISTS (SELECT 1 FROM unnest(t.depends_on) d(id)
   LEFT JOIN research_task dt ON dt.handoff_id=d.id LEFT JOIN handoff_message dm ON dm.id=dt.message_id WHERE dm.work_state IS DISTINCT FROM 'done')
-ORDER BY m.status_updated_at,t.handoff_id LIMIT 1 FOR UPDATE OF h,m SKIP LOCKED`).Scan(&id, &messageID, &reason)
+ORDER BY m.status_updated_at,t.handoff_id LIMIT 1 FOR UPDATE OF h,m SKIP LOCKED`).Scan(&id, &messageID, &reason, &ran)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -373,7 +374,10 @@ WHERE handoff_id=$1 RETURNING attempt`, id, leaseSeconds).Scan(&attempt); err !=
 	if err != nil {
 		return nil, err
 	}
-	if reason == "" {
+	switch {
+	case reason == "" && ran:
+		reason = "requeued"
+	case reason == "":
 		reason = "first_run"
 	}
 	return &ResearchClaim{Task: task, Token: token, Reason: reason, Available: available}, nil

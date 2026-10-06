@@ -582,3 +582,19 @@ func TestRevokingADispatcherStopsItsRuns(t *testing.T) {
 		t.Fatalf("requeued claim = %#v", again)
 	}
 }
+
+// A task that ran before requeue reasons were recorded is never presented to its next run as new.
+func TestTasksThatRanBeforeAreNeverAFirstRun(t *testing.T) {
+	db, ctx := researchDB(t)
+	task := newResearch(t, db, ctx, "Old", 3)
+	claim(t, db, ctx)
+	if _, err := db.UpdateHandoffMessage(ctx, task.MessageID, "release", "", store.OwnerSource, "owner", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, `UPDATE research_task SET requeue_reason='' WHERE handoff_id=$1`, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	if c := claim(t, db, ctx); c == nil || c.Reason != "requeued" {
+		t.Fatalf("claim = %#v", c)
+	}
+}

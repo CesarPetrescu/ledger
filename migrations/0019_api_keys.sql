@@ -12,6 +12,8 @@ CREATE TABLE api_key (
 );
 
 -- Why the brief last went back to the queue, so the next run's chat knows what it is continuing:
--- '' (never ran), retry_after_failure, revision, answered, retry, restarted, reopened.
+-- '' (never ran), retry_after_failure, revision, answered, retry, restarted, reopened, or requeued (ran
+-- before this column existed, for an unknown reason).
 ALTER TABLE research_task ADD COLUMN requeue_reason text NOT NULL DEFAULT ''
-  CHECK (requeue_reason IN ('', 'retry_after_failure', 'revision', 'answered', 'retry', 'restarted', 'reopened'));
+  CHECK (requeue_reason IN ('', 'retry_after_failure', 'revision', 'answered', 'retry', 'restarted', 'reopened', 'requeued'));
+UPDATE research_task SET requeue_reason=CASE WHEN failures > 0 AND last_error <> '' THEN 'retry_after_failure' ELSE 'requeued' END WHERE attempt > 0;
