@@ -919,8 +919,39 @@ WHERE ($1='all' OR ($1='' AND s.status NOT IN ('draft','accepted')) OR s.status=
 	})
 }
 
-// ResearchProjectSlug is where accepted results that belong to no project are published.
-const ResearchProjectSlug = "research"
+// ResearchProjectSlug is where accepted results that belong to no project are published, unless the owner
+// already uses that slug: Ledger's own catch-all is marked by ResearchProjectType and never shares a
+// project with the owner's data.
+const (
+	ResearchProjectSlug = "research"
+	ResearchProjectType = "Ledger research"
+)
+
+// researchProject returns the slug of Ledger's catch-all research project, creating it on first use.
+func researchProject(ctx context.Context, tx pgx.Tx) (string, error) {
+	for i := 0; i < 10; i++ {
+		slug := ResearchProjectSlug
+		switch {
+		case i == 1:
+			slug = "ledger-research"
+		case i > 1:
+			slug = fmt.Sprintf("ledger-research-%d", i)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO project(slug,name,tier,type,goal,description) VALUES($1,'Research','park',$2,
+'Accepted research results that belong to no other project','Ledger publishes accepted research here when the task named no project. Each entry links to the full result through get_research_task.')
+ON CONFLICT (slug) DO NOTHING`, slug, ResearchProjectType); err != nil {
+			return "", err
+		}
+		var kind string
+		if err := tx.QueryRow(ctx, `SELECT type FROM project WHERE slug=$1 FOR KEY SHARE`, slug).Scan(&kind); err != nil {
+			return "", err
+		}
+		if kind == ResearchProjectType {
+			return slug, nil
+		}
+	}
+	return "", fmt.Errorf("no free slug for the research project")
+}
 
 const maxPublishedExcerpt = 3200
 
@@ -929,6 +960,9 @@ const maxPublishedExcerpt = 3200
 func publishResearch(ctx context.Context, tx pgx.Tx, id int64, acceptedBy string) error {
 	var title, slug string
 	if err := tx.QueryRow(ctx, `SELECT title,COALESCE(project_slug,'') FROM handoff WHERE id=$1`, id).Scan(&title, &slug); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE research_task SET published_at=now() WHERE handoff_id=$1`, id); err != nil {
 		return err
 	}
 	var result string
@@ -949,10 +983,7 @@ func publishResearch(ctx context.Context, tx pgx.Tx, id int64, acceptedBy string
 		return err
 	}
 	if slug == "" {
-		slug = ResearchProjectSlug
-		if _, err := tx.Exec(ctx, `INSERT INTO project(slug,name,tier,type,goal,description) VALUES($1,'Research','park','Ledger research',
-'Accepted research results that belong to no other project','Ledger publishes accepted research here when the task named no project. Each entry links to the full result through get_research_task.')
-ON CONFLICT (slug) DO NOTHING`, slug); err != nil {
+		if slug, err = researchProject(ctx, tx); err != nil {
 			return err
 		}
 	}
@@ -987,6 +1018,43 @@ ON CONFLICT (slug) DO NOTHING`, slug); err != nil {
 	}
 	_, _, err = insertEntry(ctx, tx, NewEntry{Slug: slug, Kind: "note", Body: b.String(), Source: OwnerSource, ClientID: researchNoteSource, Context: context})
 	return err
+}
+
+// PublishAcceptedResearch publishes accepted results that were never published (accepted before
+// publishing existed). The research sweep runs it, so an upgrade catches up on its own.
+func (db *DB) PublishAcceptedResearch(ctx context.Context) (int, error) {
+	rows, err := db.Pool.Query(ctx, `SELECT t.handoff_id FROM research_task t JOIN handoff_message m ON m.id=t.message_id WHERE m.work_state='done' AND t.published_at IS NULL`)
+	if err != nil {
+		return 0, err
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+	if err != nil {
+		return 0, err
+	}
+	published := 0
+	for _, id := range ids {
+		tx, err := db.Pool.Begin(ctx)
+		if err != nil {
+			return published, err
+		}
+		l, err := lockResearch(ctx, tx, id)
+		var unpublished bool
+		if err == nil && l.State == "done" {
+			err = tx.QueryRow(ctx, `SELECT published_at IS NULL FROM research_task WHERE handoff_id=$1`, id).Scan(&unpublished)
+		}
+		if err == nil && unpublished {
+			if err = publishResearch(ctx, tx, id, OwnerSource); err == nil {
+				if err = tx.Commit(ctx); err == nil {
+					published++
+				}
+			}
+		}
+		tx.Rollback(ctx)
+		if err != nil {
+			return published, err
+		}
+	}
+	return published, nil
 }
 
 // ErrResearchNotReviewable refuses a review of a task that has no result or question waiting.

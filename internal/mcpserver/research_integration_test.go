@@ -413,3 +413,20 @@ func TestDraftResearchStaysWithItsCreator(t *testing.T) {
 		t.Fatalf("creator cannot read its draft's file: %#v, %v", mine, err)
 	}
 }
+
+// An agent cannot review or create research as the owner.
+func TestResearchToolsRejectTheOwnerName(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	addAccess(t, db, ctx, "agent-token", []string{"ledger:read", "ledger:write"})
+	server := httptest.NewServer(HTTPHandler(NewServer(db, "http://unused"), db, "https://ledger.example.com"))
+	defer server.Close()
+	impostor := connectMCP(t, server.URL+"/mcp", "agent-token", store.OwnerSource)
+	for name, arguments := range map[string]map[string]any{
+		"create_research_task": {"title": "x", "objective": "x", "acceptance": []string{"x"}},
+		"review_research_task": {"id": "1", "action": "accept"},
+	} {
+		if result, err := impostor.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: arguments}); err == nil && !result.IsError {
+			t.Errorf("%s accepted the owner's name", name)
+		}
+	}
+}

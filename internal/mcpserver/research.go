@@ -501,6 +501,10 @@ func addResearchReviewTool(server *mcp.Server, db *store.DB) {
 			if err != nil {
 				return nil, nil, err
 			}
+			// Only the owner reviews as the owner.
+			if name == store.OwnerSource {
+				return nil, nil, fmt.Errorf("MCP clientInfo.name %q is reserved", name)
+			}
 			id, err := parseTaskID(input.ID)
 			if err != nil {
 				return nil, nil, err
@@ -544,6 +548,9 @@ func addResearchCreateTool(server *mcp.Server, db *store.DB) {
 			id, name, err := handoffActor(ctx, request)
 			if err != nil {
 				return nil, nil, err
+			}
+			if name == store.OwnerSource {
+				return nil, nil, fmt.Errorf("MCP clientInfo.name %q is reserved", name)
 			}
 			depends := make([]int64, len(input.DependsOn))
 			for i, raw := range input.DependsOn {
@@ -600,6 +607,9 @@ func SweepResearch(ctx context.Context, db *store.DB, interval time.Duration) {
 	for {
 		if _, err := db.ExpireResearchLeases(ctx); err != nil && ctx.Err() == nil {
 			log.Printf("research lease sweep: %v", err)
+		}
+		if _, err := db.PublishAcceptedResearch(ctx); err != nil && ctx.Err() == nil {
+			log.Printf("research publishing: %v", err)
 		}
 		select {
 		case <-ctx.Done():

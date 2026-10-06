@@ -824,3 +824,38 @@ func TestAcceptPublishesWithinTheEntryLimit(t *testing.T) {
 		t.Fatalf("state = %s", again.State)
 	}
 }
+
+// Accepted results from before publishing existed are published by the sweep, once; and the catch-all
+// never publishes into an owner project that happens to use its slug.
+func TestPublishingCatchesUpAndKeepsOutOfOwnerProjects(t *testing.T) {
+	db, ctx := researchDB(t)
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "research", Name: "My research notes", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	task, err := db.CreateResearchTask(ctx, store.NewResearchTask{Title: "Legacy", Source: "c", ClientID: "c", Spec: store.ResearchSpec{Objective: "x", Acceptance: []string{"y"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim(t, db, ctx)
+	if _, err := db.SubmitResearch(ctx, task.ID, 1, "Legacy findings", nil); err != nil {
+		t.Fatal(err)
+	}
+	// Accepted the way an older Ledger did: the brief done, nothing published.
+	if _, err := db.Pool.Exec(ctx, `UPDATE handoff_message SET work_state='done' WHERE id=$1`, task.MessageID); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := db.PublishAcceptedResearch(ctx); err != nil || n != 1 {
+		t.Fatalf("catch-up published %d, %v", n, err)
+	}
+	if n, _ := db.PublishAcceptedResearch(ctx); n != 0 {
+		t.Fatalf("published again: %d", n)
+	}
+	mine, _ := db.GetProject(ctx, "research", 5)
+	if len(mine.Entries) != 0 || mine.Project.Name != "My research notes" {
+		t.Fatalf("owner project touched: %#v", mine)
+	}
+	catchAll, err := db.GetProject(ctx, "ledger-research", 5)
+	if err != nil || catchAll.Project.Type != store.ResearchProjectType || len(catchAll.Entries) != 1 || !strings.Contains(catchAll.Entries[0].Body, "Legacy findings") {
+		t.Fatalf("catch-all = %#v, %v", catchAll, err)
+	}
+}
