@@ -528,3 +528,57 @@ func TestResearchOverviewAndSharedProjectContext(t *testing.T) {
 		t.Fatalf("shared recent = %#v", pack.Project.Recent)
 	}
 }
+
+// Revoking a dispatcher's credential, key or OAuth, stops the runs it claimed: they go back to the queue
+// without a failure, their tokens die, and no further claim succeeds with a revoked key.
+func TestRevokingADispatcherStopsItsRuns(t *testing.T) {
+	db, ctx := researchDB(t)
+	key, _, err := db.CreateAPIKey(ctx, "Adastrion Core", []string{store.ScopeResearchDispatch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyed := newResearch(t, db, ctx, "Keyed", 3)
+	byOAuth := newResearch(t, db, ctx, "OAuth", 3)
+	c, err := db.ClaimResearchTaskWithKey(ctx, key.ID, 60, key.Name)
+	if err != nil || c == nil || c.Task.ID != keyed.ID {
+		t.Fatalf("keyed claim = %#v, %v", c, err)
+	}
+	o, err := db.ClaimResearchTask(ctx, 60, "OAuth dispatcher", "oauth-dispatcher")
+	if err != nil || o == nil || o.Task.ID != byOAuth.ID {
+		t.Fatalf("oauth claim = %#v, %v", o, err)
+	}
+
+	if _, err := db.RevokeAPIKey(ctx, key.ID); err != nil {
+		t.Fatal(err)
+	}
+	stopped, _ := db.ResearchTask(ctx, keyed.ID)
+	if stopped.State != "ready" || stopped.Failures != 0 || stopped.LeaseUntil != nil || stopped.Runner != "" {
+		t.Fatalf("after key revoke = %#v", stopped)
+	}
+	if _, _, err := db.ResearchRun(ctx, c.Token); !store.IsNotFound(err) {
+		t.Fatalf("revoked key's run token still works: %v", err)
+	}
+	pack, _ := db.ResearchContext(ctx, keyed.ID, nil)
+	if last := pack.Thread[len(pack.Thread)-1]; !strings.Contains(last.Body, "API key was revoked") {
+		t.Fatalf("thread = %#v", pack.Thread)
+	}
+	if _, err := db.ClaimResearchTaskWithKey(ctx, key.ID, 60, key.Name); !errors.Is(err, store.ErrAPIKeyRevoked) {
+		t.Fatalf("claim with a revoked key = %v", err)
+	}
+	if still, _ := db.ResearchTask(ctx, byOAuth.ID); still.State != "in_progress" {
+		t.Fatalf("another dispatcher's run was stopped: %#v", still)
+	}
+
+	if _, err := db.Revoke(ctx, "oauth-dispatcher", false); err != nil {
+		t.Fatal(err)
+	}
+	if oauthStopped, _ := db.ResearchTask(ctx, byOAuth.ID); oauthStopped.State != "ready" || oauthStopped.Failures != 0 {
+		t.Fatalf("after OAuth revoke = %#v", oauthStopped)
+	}
+	if _, _, err := db.ResearchRun(ctx, o.Token); !store.IsNotFound(err) {
+		t.Fatalf("revoked client's run token still works: %v", err)
+	}
+	if again := claim(t, db, ctx); again == nil || again.Reason != "restarted" {
+		t.Fatalf("requeued claim = %#v", again)
+	}
+}

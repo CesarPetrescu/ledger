@@ -3,8 +3,10 @@ package store
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"time"
 	"unicode/utf8"
 
@@ -14,6 +16,11 @@ import (
 // ScopeResearchDispatch is the only permission an API key can hold: claim research tasks, renew and end
 // their runs, and read their status.
 const ScopeResearchDispatch = "research:dispatch"
+
+var ErrAPIKeyRevoked = errors.New("API key revoked")
+
+// APIKeyClientID is how runs claimed with a key record their claimant.
+func APIKeyClientID(id int64) string { return "apikey:" + strconv.FormatInt(id, 10) }
 
 // APIKey is an owner-created credential for the plain JSON API. The key itself is never stored.
 type APIKey struct {
@@ -61,9 +68,22 @@ func (db *DB) ListAPIKeys(ctx context.Context) ([]APIKey, error) {
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (APIKey, error) { return scanAPIKey(row) })
 }
 
-// RevokeAPIKey stops a key working at once. Revoking twice is harmless.
+// RevokeAPIKey stops a key working at once, and stops the research runs it claimed: their tokens die and
+// the tasks are queued again. Revoking twice is harmless.
 func (db *DB) RevokeAPIKey(ctx context.Context, id int64) (APIKey, error) {
-	return scanAPIKey(db.Pool.QueryRow(ctx, `UPDATE api_key SET revoked_at=COALESCE(revoked_at,now()) WHERE id=$1 RETURNING `+apiKeyColumns, id))
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return APIKey{}, err
+	}
+	defer tx.Rollback(ctx)
+	key, err := scanAPIKey(tx.QueryRow(ctx, `UPDATE api_key SET revoked_at=COALESCE(revoked_at,now()) WHERE id=$1 RETURNING `+apiKeyColumns, id))
+	if err != nil {
+		return APIKey{}, err
+	}
+	if err := stopRunsClaimedBy(ctx, tx, APIKeyClientID(id), false, "its dispatcher's API key was revoked"); err != nil {
+		return APIKey{}, err
+	}
+	return key, tx.Commit(ctx)
 }
 
 // LookupAPIKey resolves a live key. Last use is recorded at most once a minute, since a dispatcher

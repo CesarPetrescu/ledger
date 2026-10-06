@@ -120,7 +120,7 @@ function ApiKeys() {
       </table>
     )}
     <ConfirmDialog open={target !== null} title={`Revoke ${target?.name ?? ''}?`} confirmLabel="Revoke" busy={busy} onCancel={() => setTarget(null)} onConfirm={() => void revoke()}>
-      <p>The key stops working immediately. A server using it can no longer pick up or renew research runs; runs it already started end when their leases run out.</p>
+      <p>The key stops working immediately. Research runs it started are stopped and queued again, and their chats lose access to Ledger.</p>
     </ConfirmDialog>
   </section>
 }

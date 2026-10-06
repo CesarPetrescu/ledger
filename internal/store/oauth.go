@@ -115,6 +115,10 @@ func (db *DB) Revoke(ctx context.Context, clientID string, all bool) (int64, err
 	if err != nil {
 		return 0, err
 	}
+	// A dispatcher's access ends with its research runs, so their run tokens cannot outlive it.
+	if err := stopRunsClaimedBy(ctx, tx, clientID, all, "its dispatcher's access was revoked"); err != nil {
+		return 0, err
+	}
 	return result.RowsAffected(), tx.Commit(ctx)
 }
 

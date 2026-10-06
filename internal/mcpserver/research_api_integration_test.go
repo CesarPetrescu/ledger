@@ -157,6 +157,38 @@ func TestResearchAPIDispatchesWithKeys(t *testing.T) {
 	if status, _ := apiCall(t, "GET", api+"/ping", otherKey, ""); status != http.StatusUnauthorized {
 		t.Fatalf("revoked key = %d", status)
 	}
+
+	// A claim already waiting when its key is revoked must not pick up a task queued afterwards.
+	_, waitingKey, _ := db.CreateAPIKey(ctx, "Revoked mid-wait", []string{store.ScopeResearchDispatch})
+	waiting := make(chan int, 1)
+	go func() {
+		status, _ := apiCall(t, "POST", api+"/research/claim", waitingKey, `{"wait_seconds":10}`)
+		waiting <- status
+	}()
+	time.Sleep(time.Second)
+	keys, _ := db.ListAPIKeys(ctx)
+	for _, k := range keys {
+		if k.Name == "Revoked mid-wait" {
+			if _, err := db.RevokeAPIKey(ctx, k.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	late, err := db.CreateResearchTask(ctx, store.NewResearchTask{Title: "After revoke", Source: "claude", ClientID: "c", Spec: store.ResearchSpec{Objective: "x", Acceptance: []string{"y"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case status := <-waiting:
+		if status != http.StatusUnauthorized {
+			t.Fatalf("waiting claim after revoke = %d", status)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("waiting claim did not end")
+	}
+	if after, _ := db.ResearchTask(ctx, late.ID); after.State != "ready" {
+		t.Fatalf("a revoked key claimed a task: %#v", after)
+	}
 }
 
 func strconvID(id int64) string {

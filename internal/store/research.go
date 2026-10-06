@@ -290,6 +290,16 @@ FROM handoff_message m WHERE m.handoff_id=$1 AND m.work_state<>'draft'`, task.ID
 // ClaimResearchTask leases the oldest ready task whose dependencies are done, or returns nil when none
 // is. The token it returns works for this run only.
 func (db *DB) ClaimResearchTask(ctx context.Context, leaseSeconds int, source, clientID string) (*ResearchClaim, error) {
+	return db.claimResearchTask(ctx, leaseSeconds, source, clientID, 0)
+}
+
+// ClaimResearchTaskWithKey claims for an API key, checking in the same transaction that the key is still
+// live: once a revocation commits, no claim made with that key can succeed, even one already waiting.
+func (db *DB) ClaimResearchTaskWithKey(ctx context.Context, keyID int64, leaseSeconds int, source string) (*ResearchClaim, error) {
+	return db.claimResearchTask(ctx, leaseSeconds, source, APIKeyClientID(keyID), keyID)
+}
+
+func (db *DB) claimResearchTask(ctx context.Context, leaseSeconds int, source, clientID string, keyID int64) (*ResearchClaim, error) {
 	if leaseSeconds == 0 {
 		leaseSeconds = ResearchLeaseDefault
 	}
@@ -307,6 +317,15 @@ func (db *DB) ClaimResearchTask(ctx context.Context, leaseSeconds int, source, c
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
+	if keyID != 0 {
+		// Holding the key row stops a concurrent revocation from committing until this claim does.
+		if err := tx.QueryRow(ctx, `SELECT id FROM api_key WHERE id=$1 AND revoked_at IS NULL FOR SHARE`, keyID).Scan(&keyID); err != nil {
+			if IsNotFound(err) {
+				return nil, ErrAPIKeyRevoked
+			}
+			return nil, err
+		}
+	}
 	var id, messageID int64
 	var reason string
 	err = tx.QueryRow(ctx, `SELECT t.handoff_id,t.message_id,t.requeue_reason FROM research_task t JOIN handoff h ON h.id=t.handoff_id JOIN handoff_message m ON m.id=t.message_id
@@ -358,6 +377,39 @@ WHERE handoff_id=$1 RETURNING attempt`, id, leaseSeconds).Scan(&attempt); err !=
 		reason = "first_run"
 	}
 	return &ResearchClaim{Task: task, Token: token, Reason: reason, Available: available}, nil
+}
+
+// stopRunsClaimedBy requeues, without counting a failure, every run a dispatcher credential claimed: one
+// client ID, or with allOAuth every run claimed through OAuth. Their run tokens die with the runs.
+func stopRunsClaimedBy(ctx context.Context, tx pgx.Tx, clientID string, allOAuth bool, why string) error {
+	rows, err := tx.Query(ctx, `SELECT t.handoff_id FROM research_task t JOIN handoff_message m ON m.id=t.message_id
+WHERE m.work_state='in_progress' AND (m.claimed_client_id=$1 OR $2 AND m.claimed_client_id NOT LIKE 'apikey:%')`, clientID, allOAuth)
+	if err != nil {
+		return err
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		l, err := lockResearch(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if l.State != "in_progress" || !allOAuth && l.ClaimedClientID != clientID {
+			continue
+		}
+		if _, err := tx.Exec(ctx, `UPDATE research_task SET lease_until=NULL,progress='',requeue_reason='restarted' WHERE handoff_id=$1`, id); err != nil {
+			return err
+		}
+		if err := setBrief(ctx, tx, l.MessageID, "ready", researchNoteSource, researchNoteSource); err != nil {
+			return err
+		}
+		if err := researchNote(ctx, tx, id, fmt.Sprintf("Run %d stopped: %s. The task is queued again.", l.Attempt, why)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // failRun ends a locked in-progress run that produced nothing: one more failure, then the brief goes

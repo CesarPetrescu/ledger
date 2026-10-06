@@ -45,7 +45,7 @@ func decodeAPI(r *http.Request, value any) error {
 func apiHandler(db *store.DB, publicURL string) http.Handler {
 	mux := http.NewServeMux()
 	key := func(r *http.Request) store.APIKey { return r.Context().Value(apiKeyContext{}).(store.APIKey) }
-	client := func(r *http.Request) string { return "apikey:" + strconv.FormatInt(key(r).ID, 10) }
+	client := func(r *http.Request) string { return store.APIKeyClientID(key(r).ID) }
 	taskID := func(w http.ResponseWriter, r *http.Request) (int64, bool) {
 		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 		if err != nil || id < 1 {
@@ -80,7 +80,11 @@ func apiHandler(db *store.DB, publicURL string) http.Handler {
 		}
 		deadline := time.Now().Add(wait)
 		for {
-			claim, err := db.ClaimResearchTask(r.Context(), input.LeaseSeconds, key(r).Name, client(r))
+			claim, err := db.ClaimResearchTaskWithKey(r.Context(), key(r).ID, input.LeaseSeconds, key(r).Name)
+			if errors.Is(err, store.ErrAPIKeyRevoked) {
+				apiUnauthorized(w)
+				return
+			}
 			if err != nil {
 				if r.Context().Err() == nil {
 					apiError(w, http.StatusInternalServerError, "server_error", "could not claim a task")
