@@ -921,7 +921,7 @@ const maxPublishedExcerpt = 3200
 
 // publishResearch writes an accepted task's result into its project's log, so every agent finds it with
 // search and get_project. It runs inside the owner's Accept, holding the task's handoff lock.
-func publishResearch(ctx context.Context, tx pgx.Tx, id int64) error {
+func publishResearch(ctx context.Context, tx pgx.Tx, id int64, acceptedBy string) error {
 	var title, slug string
 	if err := tx.QueryRow(ctx, `SELECT title,COALESCE(project_slug,'') FROM handoff WHERE id=$1`, id).Scan(&title, &slug); err != nil {
 		return err
@@ -961,8 +961,51 @@ ON CONFLICT (slug) DO NOTHING`, slug); err != nil {
 		fmt.Fprintf(&b, " and %d file(s) (%s)", len(files), strings.Join(files, ", "))
 	}
 	fmt.Fprintf(&b, ": get_research_task with id \"%d\".", id)
-	_, _, err = insertEntry(ctx, tx, NewEntry{Slug: slug, Kind: "note", Body: b.String(), Source: OwnerSource, ClientID: researchNoteSource, Context: fmt.Sprintf("research task #%d, accepted", id)})
+	context := fmt.Sprintf("research task #%d, accepted", id)
+	if acceptedBy != OwnerSource {
+		context += " by " + acceptedBy
+	}
+	_, _, err = insertEntry(ctx, tx, NewEntry{Slug: slug, Kind: "note", Body: b.String(), Source: OwnerSource, ClientID: researchNoteSource, Context: context})
 	return err
+}
+
+// ErrResearchNotReviewable refuses a review of a task that has no result or question waiting.
+var ErrResearchNotReviewable = errors.New("research task has no result waiting for review")
+
+// ReviewResearch lets an agent do what the owner's review buttons do: accept a submitted result (which
+// publishes it), or send it back with feedback, which also answers a question. The feedback becomes a
+// thread note the next run reads.
+func (db *DB) ReviewResearch(ctx context.Context, id int64, action, feedback, source, clientID string) (ResearchTask, error) {
+	task, err := db.ResearchTask(ctx, id)
+	if err != nil {
+		return ResearchTask{}, err
+	}
+	feedback = strings.TrimSpace(feedback)
+	switch action {
+	case "accept":
+		if task.State != "blocked" || task.Phase != "review" {
+			return ResearchTask{}, ErrResearchNotReviewable
+		}
+	case "send_back":
+		if task.State != "blocked" || task.Phase != "review" && task.Phase != "question" {
+			return ResearchTask{}, ErrResearchNotReviewable
+		}
+		if feedback == "" {
+			return ResearchTask{}, fmt.Errorf("send_back needs feedback: what to change, or the answer to the question")
+		}
+	default:
+		return ResearchTask{}, fmt.Errorf("action must be accept or send_back")
+	}
+	if feedback != "" {
+		if _, err := db.AppendHandoffMessage(ctx, HandoffMessage{HandoffID: id, Body: feedback, WorkState: "ready", Source: source, ClientID: clientID}, true); err != nil {
+			return ResearchTask{}, err
+		}
+	}
+	move := map[string]string{"accept": "complete", "send_back": "release"}[action]
+	if _, err := db.UpdateHandoffMessage(ctx, task.MessageID, move, "", source, clientID, true); err != nil {
+		return ResearchTask{}, err
+	}
+	return db.ResearchTask(ctx, id)
 }
 
 // ResearchFile returns one attachment from this task's own thread, for the run's read_file tool.

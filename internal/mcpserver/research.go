@@ -269,8 +269,8 @@ var reasonTitles = map[string]string{"retry_after_failure": "retry", "revision":
 var reasonSentences = map[string]string{
 	"first_run":           "This is the task's first run.",
 	"retry_after_failure": "The previous run ended without a result (%s). Continue from its checkpoint instead of starting over.",
-	"revision":            "The owner sent the last result back with feedback. Revise it as the feedback asks.",
-	"answered":            "The previous run asked the owner a question, and the owner has answered. Continue with the answer.",
+	"revision":            "The last result was sent back with review feedback. Revise it as the feedback asks.",
+	"answered":            "The previous run asked a question, and it has been answered. Continue with the answer.",
 	"retry":               "The task had stopped after repeated failures (last: %s), and the owner restarted it.",
 	"restarted":           "The owner stopped the previous run and queued the task again.",
 	"reopened":            "The owner had accepted this task and reopened it for another run.",
@@ -311,7 +311,7 @@ func chatFor(claim *store.ResearchClaim, endpoint string) *chatBrief {
 	holds := []string{"the full spec (objective, acceptance checklist, deliverable)"}
 	switch claim.Reason {
 	case "revision":
-		holds = append(holds, "the owner's feedback in the thread")
+		holds = append(holds, "the review feedback in the thread")
 	case "answered":
 		holds = append(holds, "the owner's answer in the thread")
 	}
@@ -481,12 +481,44 @@ func addResearchReadTools(server *mcp.Server, db *store.DB) {
 		})
 }
 
+func addResearchReviewTool(server *mcp.Server, db *store.DB) {
+	type reviewInput struct {
+		ID       string `json:"id" jsonschema:"research task ID"`
+		Action   string `json:"action" jsonschema:"accept (publish the result to the project log) or send_back (queue another run with your feedback, or answer the task's question)"`
+		Feedback string `json:"feedback,omitempty" jsonschema:"required for send_back: what to change or the answer; optional note for accept"`
+	}
+	mcp.AddTool(server, &mcp.Tool{Name: "review_research_task", OutputSchema: outputSchema[researchTaskOutput](), Description: "Review a research result like the owner's buttons. accept: the latest result is accepted and published to the project log (search and get_project find it). send_back: your feedback goes to the next run, which revises the result, or continues with your answer when the task asked a question. Read the result with get_research_task first and check it against the acceptance list. " + ResearchDescriptionSuffix, Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: boolPointer(false)}},
+		func(ctx context.Context, request *mcp.CallToolRequest, input reviewInput) (*mcp.CallToolResult, any, error) {
+			if !canWrite(ctx) {
+				return scopeError(), nil, nil
+			}
+			who, name, err := handoffActor(ctx, request)
+			if err != nil {
+				return nil, nil, err
+			}
+			id, err := parseTaskID(input.ID)
+			if err != nil {
+				return nil, nil, err
+			}
+			task, err := db.ReviewResearch(ctx, id, input.Action, input.Feedback, name, who.ClientID)
+			if errors.Is(err, store.ErrResearchNotReviewable) || store.IsNotFound(err) {
+				body, _ := json.Marshal(map[string]string{"error": err.Error()})
+				return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: string(body)}}}, nil, nil
+			}
+			if err != nil {
+				return nil, nil, err
+			}
+			return nil, taskOutput(task), nil
+		})
+}
+
 type researchTaskList struct {
 	Tasks []store.ResearchSummary `json:"tasks"`
 }
 
 func addResearchCreateTool(server *mcp.Server, db *store.DB) {
 	addResearchReadTools(server, db)
+	addResearchReviewTool(server, db)
 	type createInput struct {
 		ContinueFromTaskID string   `json:"continue_from_task_id,omitempty" jsonschema:"accepted research task ID to continue; must use the same project; copies only the accepted submission and attachments"`
 		ProjectSlug        string   `json:"project_slug,omitempty" jsonschema:"optional project slug"`

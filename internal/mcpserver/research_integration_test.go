@@ -305,3 +305,65 @@ func TestAgentsSeeResearchThroughReviewAndPublication(t *testing.T) {
 		t.Fatalf("research project = %#v", research)
 	}
 }
+
+// An agent reviews like the owner: send_back needs feedback and queues a revision the next run reads;
+// accept publishes the result and records which agent accepted it; nothing waiting means nothing to review.
+func TestAgentsReviewResearch(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	addAccess(t, db, ctx, "agent-token", []string{"ledger:read", "ledger:write"})
+	server := httptest.NewServer(HTTPHandler(NewServer(db, "http://unused"), db, "https://ledger.example.com"))
+	defer server.Close()
+	agent := connectMCP(t, server.URL+"/mcp", "agent-token", "claude-code")
+	task := callTool[researchTaskOutput](t, agent, "create_research_task", map[string]any{"project_slug": "atlas", "title": "Engines", "objective": "Compare engines", "acceptance": []string{"Cite code"}})
+	id, _ := strconv.ParseInt(task.ID, 10, 64)
+	review := func(arguments map[string]any) *mcp.CallToolResult {
+		t.Helper()
+		arguments["id"] = task.ID
+		result, err := agent.CallTool(ctx, &mcp.CallToolParams{Name: "review_research_task", Arguments: arguments})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	if early := review(map[string]any{"action": "accept"}); !early.IsError {
+		t.Fatal("accepted a task with no result")
+	}
+	c, _ := db.ClaimResearchTask(ctx, 60, "Adastrion", "dispatcher")
+	if _, err := db.SubmitResearch(ctx, id, 1, "First draft without citations", nil); err != nil {
+		t.Fatal(err)
+	}
+	if bare := review(map[string]any{"action": "send_back"}); !bare.IsError {
+		t.Fatal("sent back without feedback")
+	}
+	if sent := review(map[string]any{"action": "send_back", "feedback": "Cite file paths with line numbers."}); sent.IsError {
+		t.Fatalf("send_back = %#v", sent)
+	}
+	next, err := db.ClaimResearchTask(ctx, 60, "Adastrion", "dispatcher")
+	if err != nil || next == nil || next.Reason != "revision" || next.Task.Attempt != 2 || c.Task.ID != id {
+		t.Fatalf("revision claim = %#v, %v", next, err)
+	}
+	pack, _ := db.ResearchContext(ctx, id, nil)
+	var feedback bool
+	for _, note := range pack.Thread {
+		feedback = feedback || note.From == "agent" && note.Body == "Cite file paths with line numbers."
+	}
+	if !feedback {
+		t.Fatalf("thread lacks the agent's feedback: %#v", pack.Thread)
+	}
+	if _, err := db.SubmitResearch(ctx, id, 2, "Final, cited: vllm/core/scheduler.py:120", nil); err != nil {
+		t.Fatal(err)
+	}
+	if accepted := review(map[string]any{"action": "accept"}); accepted.IsError {
+		t.Fatalf("accept = %#v", accepted)
+	}
+	project := callTool[store.ProjectWithEntries](t, agent, "get_project", map[string]any{"slug": "atlas"})
+	if len(project.Entries) != 1 || !strings.Contains(project.Entries[0].Body, "Final, cited") || project.Entries[0].Context != "research task #"+task.ID+", accepted by claude-code" {
+		t.Fatalf("published = %#v", project.Entries)
+	}
+	if again := review(map[string]any{"action": "accept"}); !again.IsError {
+		t.Fatal("accepted twice")
+	}
+}

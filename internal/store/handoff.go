@@ -530,7 +530,7 @@ requeue_reason=CASE WHEN $2 THEN $3 ELSE requeue_reason END WHERE handoff_id=$1 
 		// ponytail: takes the project lock after the handoff lock; a project deleted at the same instant can
 		// deadlock with it, and Postgres then aborts one of the two for a retry.
 		if action == "complete" {
-			if err := publishResearch(ctx, tx, state.HandoffID); err != nil {
+			if err := publishResearch(ctx, tx, state.HandoffID, source); err != nil {
 				return HandoffMessage{}, err
 			}
 		}
