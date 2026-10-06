@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/cesarpetrescu/ledger/internal/store"
 	"github.com/cesarpetrescu/ledger/internal/testdb"
+	"github.com/cesarpetrescu/ledger/migrations"
 )
 
 func newResearch(t *testing.T, db *store.DB, ctx context.Context, title string, maxAttempts int, depends ...int64) store.ResearchTask {
@@ -665,5 +667,31 @@ func TestRevokingATokenFamilyStopsItsRuns(t *testing.T) {
 	}
 	if _, _, err := db.ResearchRun(ctx, c.Token); !store.IsNotFound(err) {
 		t.Fatalf("revoked family's run token still works: %v", err)
+	}
+}
+
+// Migration 0019 requeues runs in flight when it is applied: they were claimed without a recorded token
+// family, so a later family revocation could not find them. This runs that statement from the file.
+func TestMigrationRequeuesRunsInFlight(t *testing.T) {
+	db, ctx := researchDB(t)
+	task := newResearch(t, db, ctx, "In flight", 3)
+	c := claim(t, db, ctx)
+	sql, err := fs.ReadFile(migrations.Files, "0019_api_keys.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	statement := string(sql[strings.Index(string(sql), "WITH stopped AS"):])
+	if _, err := db.Pool.Exec(ctx, statement); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := db.ResearchTask(ctx, task.ID)
+	if after.State != "ready" || after.LeaseUntil != nil || after.Runner != "" || after.Failures != 0 {
+		t.Fatalf("after migration = %#v", after)
+	}
+	if _, _, err := db.ResearchRun(ctx, c.Token); !store.IsNotFound(err) {
+		t.Fatalf("in-flight run token survived the migration: %v", err)
+	}
+	if next := claim(t, db, ctx); next == nil || next.Reason != "restarted" || next.Task.Attempt != 2 {
+		t.Fatalf("claim after migration = %#v", next)
 	}
 }

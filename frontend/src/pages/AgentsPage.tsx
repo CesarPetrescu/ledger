@@ -46,7 +46,7 @@ export function AgentsPage() {
 
 /** API keys let a server use /api/v1 without signing in, such as Adastrion Core dispatching research. */
 function ApiKeys() {
-  const keys = useResource(api.listApiKeys, 'api-keys')
+  const keys = useResource(api.listApiKeys, 'api-keys', 'api_key')
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
   const [created, setCreated] = useState<{ name: string; secret: string } | null>(null)
