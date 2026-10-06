@@ -211,6 +211,12 @@ func (s *Server) validateAuthorization(ctx context.Context, request authorizatio
 	if !ok {
 		return client, nil, "invalid scope"
 	}
+	// Approving an app grants every agent permission (projects and calendars), whatever subset it asked
+	// for: ChatGPT and claude.ai only ever ask for project access. The approval page lists all of it.
+	// research:dispatch is for dispatchers and stays exactly as requested.
+	if !HasScope(scopes, ScopeResearchDispatch) {
+		scopes = slices.Sorted(slices.Values(MCPScopes))
+	}
 	if request.Resource != "" && request.Resource != s.config.PublicURL+"/mcp" {
 		return client, nil, "invalid_target"
 	}

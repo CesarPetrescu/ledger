@@ -152,7 +152,7 @@ func TestProtectedResourceMetadataIsPublicButMCPIsNot(t *testing.T) {
 	}
 	unauthenticated := httptest.NewRecorder()
 	handler.ServeHTTP(unauthenticated, httptest.NewRequest(http.MethodPost, "/mcp", nil))
-	if unauthenticated.Code != http.StatusUnauthorized || unauthenticated.Header().Get("WWW-Authenticate") != `Bearer resource_metadata="https://ledger.example.com/.well-known/oauth-protected-resource"` {
+	if unauthenticated.Code != http.StatusUnauthorized || unauthenticated.Header().Get("WWW-Authenticate") != `Bearer resource_metadata="https://ledger.example.com/.well-known/oauth-protected-resource", scope="ledger:read ledger:write calendar:read calendar:write"` {
 		t.Fatalf("unauthenticated MCP = %d, %q", unauthenticated.Code, unauthenticated.Header().Get("WWW-Authenticate"))
 	}
 }

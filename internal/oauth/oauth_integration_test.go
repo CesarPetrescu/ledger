@@ -68,7 +68,8 @@ func TestAuthorizationCodeAndRefreshRotationRevokeFamilyOnReuse(t *testing.T) {
 		t.Fatalf("authorization redirect = %s", location)
 	}
 	pair1 := exchange(t, server, url.Values{"grant_type": {"authorization_code"}, "client_id": {client.ClientID}, "code": {location.Query().Get("code")}, "redirect_uri": {client.RedirectURIs[0]}, "code_verifier": {verifier}}, http.StatusOK)
-	if pair1.Scope != "ledger:read ledger:write" {
+	// Approval grants every agent permission, not just the subset the client asked for.
+	if pair1.Scope != "calendar:read calendar:write ledger:read ledger:write" {
 		t.Fatalf("token scope = %q", pair1.Scope)
 	}
 	if _, err := db.Pool.Exec(ctx, `DELETE FROM oauth_code`); err != nil {
@@ -466,7 +467,47 @@ func TestLANAppRegistersApprovesAndExchanges(t *testing.T) {
 		t.Fatalf("return link = %q, %v", link, err)
 	}
 	pair := exchange(t, server, url.Values{"grant_type": {"authorization_code"}, "client_id": {client.ClientID}, "code": {location.Query().Get("code")}, "redirect_uri": {callback}, "code_verifier": {verifier}}, http.StatusOK)
-	if pair.Scope != "ledger:read ledger:write" {
+	if pair.Scope != "calendar:read calendar:write ledger:read ledger:write" {
 		t.Fatalf("token scope = %q", pair.Scope)
+	}
+}
+
+// A dispatcher asking for research:dispatch gets exactly that; every other approval grants all agent
+// permissions, which the approval page lists.
+func TestApprovalGrantsAllAgentPermissionsExceptForDispatchers(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	client, err := db.PutClient(ctx, store.OAuthClient{ClientID: "chat-app", Kind: "dcr", Name: "Chat app", RedirectURIs: []string{"https://chat.example.com/cb"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	password, _ := HashPassword("secret")
+	server := NewServer(Config{PublicURL: "https://ledger.example.com", PasswordHash: password}, db)
+	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	authorize := func(scope string) (string, string) {
+		form := url.Values{"client_id": {client.ClientID}, "redirect_uri": {client.RedirectURIs[0]}, "response_type": {"code"},
+			"code_challenge": {PKCEChallenge(verifier)}, "code_challenge_method": {"S256"}, "scope": {scope}, "state": {"s"}, "password": {"secret"}, "action": {"approve"}}
+		page := httptest.NewRecorder()
+		server.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/oauth/authorize?"+form.Encode(), nil))
+		req := httptest.NewRequest(http.MethodPost, "/oauth/authorize", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		res := httptest.NewRecorder()
+		server.ServeHTTP(res, req)
+		location, _ := url.Parse(res.Header().Get("Location"))
+		pair := exchange(t, server, url.Values{"grant_type": {"authorization_code"}, "client_id": {client.ClientID}, "code": {location.Query().Get("code")}, "redirect_uri": {client.RedirectURIs[0]}, "code_verifier": {verifier}}, http.StatusOK)
+		return page.Body.String(), pair.Scope
+	}
+	for _, requested := range []string{"ledger:read ledger:write", "ledger:read", ""} {
+		page, granted := authorize(requested)
+		if granted != "calendar:read calendar:write ledger:read ledger:write" {
+			t.Errorf("requested %q, granted %q", requested, granted)
+		}
+		for _, shown := range []string{"Read project memory", "Add and update memory", "Read selected calendars", "Change selected calendars"} {
+			if !strings.Contains(page, shown) {
+				t.Errorf("requested %q: approval page does not list %q", requested, shown)
+			}
+		}
+	}
+	if page, granted := authorize("research:dispatch"); granted != "research:dispatch" || strings.Contains(page, "Read selected calendars") {
+		t.Errorf("dispatcher granted %q", granted)
 	}
 }

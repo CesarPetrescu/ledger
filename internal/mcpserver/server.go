@@ -417,7 +417,8 @@ func bearerToken(header http.Header) (string, bool) {
 }
 
 func unauthorized(w http.ResponseWriter, publicURL string) {
-	w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="`+publicURL+`/.well-known/oauth-protected-resource"`)
+	// The challenge names every agent permission, so clients that follow it ask for all of them at once.
+	w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="`+publicURL+`/.well-known/oauth-protected-resource", scope="`+strings.Join(oauth.MCPScopes, " ")+`"`)
 	http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 }
 
