@@ -4,6 +4,38 @@ import { describe, expect, it } from 'vitest'
 import { authenticatedSession, clients, mockApi, overview, renderApp } from './helpers'
 
 describe('oauth clients', () => {
+  it('creates an API key, shows its secret once, and revokes it', async () => {
+    const key = { id: 7, name: 'Adastrion Core', prefix: 'ledger_AbCdEfG', scopes: ['research:dispatch'], created_at: '2026-10-06T08:00:00Z' }
+    const { calls } = mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/oauth/clients': { body: { clients: [] } },
+      'GET /admin/api/agents': { body: { agents: [] } },
+      'GET /admin/api/api-keys': [{ body: { keys: [] } }, { body: { keys: [key] } }, { body: { keys: [{ ...key, revoked_at: '2026-10-06T09:00:00Z' }] } }],
+      'POST /admin/api/api-keys': { status: 201, body: { key, secret: 'ledger_AbCdEfGsecret-value' } },
+      'DELETE /admin/api/api-keys/7': { body: { ...key, revoked_at: '2026-10-06T09:00:00Z' } },
+    })
+    renderApp('/admin/agents')
+    const section = await screen.findByRole('region', { name: 'API keys' })
+    expect(await within(section).findByText('No API keys yet.')).toBeInTheDocument()
+    const user = userEvent.setup()
+    await user.type(within(section).getByLabelText('Key name'), 'Adastrion Core')
+    await user.click(within(section).getByRole('button', { name: 'Create key' }))
+    const reveal = await within(section).findByRole('status')
+    expect(reveal).toHaveTextContent('ledger_AbCdEfGsecret-value')
+    expect(reveal).toHaveTextContent(/will not show it again/i)
+    expect(calls.find((call) => call.method === 'POST' && call.path === '/admin/api/api-keys')?.body).toEqual({ name: 'Adastrion Core' })
+    const table = await within(section).findByRole('table', { name: 'API keys' })
+    expect(table).toHaveTextContent('ledger_AbCdEfG…')
+    expect(table).toHaveTextContent('Dispatch research')
+    expect(table.textContent).not.toContain('secret-value')
+    await user.click(within(section).getByRole('button', { name: 'Done' }))
+    expect(within(section).queryByText('ledger_AbCdEfGsecret-value')).not.toBeInTheDocument()
+    await user.click(within(table).getByRole('button', { name: 'Revoke' }))
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Revoke' }))
+    await waitFor(() => expect(calls.some((call) => call.method === 'DELETE' && call.path === '/admin/api/api-keys/7')).toBe(true))
+    expect(await within(section).findByText(/^Revoked/)).toBeInTheDocument()
+  })
+
   it('lists safe metadata only', async () => {
     mockApi({ 'GET /admin/api/session': authenticatedSession, 'GET /admin/api/oauth/clients': { body: { clients } }, 'GET /admin/api/overview': { body: overview } })
     renderApp('/admin/clients')

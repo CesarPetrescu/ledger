@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -384,5 +385,146 @@ func TestConcurrentDispatchersNeverShareATask(t *testing.T) {
 	wg.Wait()
 	if won != 1 {
 		t.Fatalf("%d dispatchers claimed the one task", won)
+	}
+}
+
+func TestAPIKeysAreHashedRevocableAndScoped(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	if _, _, err := db.CreateAPIKey(ctx, "Bad", []string{"ledger:write"}); err == nil {
+		t.Fatal("a key with another scope was created")
+	}
+	key, secret, err := db.CreateAPIKey(ctx, "Adastrion Core", []string{store.ScopeResearchDispatch})
+	if err != nil || !strings.HasPrefix(secret, "ledger_") || key.Prefix != secret[:14] || key.LastUsedAt != nil {
+		t.Fatalf("created = %#v %q, %v", key, secret, err)
+	}
+	var stored int
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM api_key WHERE hash=sha256($1::bytea)`, []byte(secret)).Scan(&stored); err != nil || stored != 1 {
+		t.Fatalf("hash stored = %d, %v", stored, err)
+	}
+	found, err := db.LookupAPIKey(ctx, secret)
+	if err != nil || found.ID != key.ID {
+		t.Fatalf("lookup = %#v, %v", found, err)
+	}
+	if keys, _ := db.ListAPIKeys(ctx); len(keys) != 1 || keys[0].LastUsedAt == nil {
+		t.Fatalf("listed = %#v", keys)
+	}
+	if _, err := db.LookupAPIKey(ctx, secret+"x"); !store.IsNotFound(err) {
+		t.Fatalf("wrong secret = %v", err)
+	}
+	revoked, err := db.RevokeAPIKey(ctx, key.ID)
+	if err != nil || revoked.RevokedAt == nil {
+		t.Fatalf("revoke = %#v, %v", revoked, err)
+	}
+	if _, err := db.LookupAPIKey(ctx, secret); !store.IsNotFound(err) {
+		t.Fatalf("revoked key still works: %v", err)
+	}
+	if _, err := db.RevokeAPIKey(ctx, 999999); !store.IsNotFound(err) {
+		t.Fatalf("revoke missing = %v", err)
+	}
+}
+
+// Every way back to the queue is recorded, so the next run's chat can say what it continues.
+func TestClaimsSayWhyTheRunExists(t *testing.T) {
+	db, ctx := researchDB(t)
+	task := newResearch(t, db, ctx, "Reasons", 3)
+	owner := func(action string) {
+		t.Helper()
+		if _, err := db.UpdateHandoffMessage(ctx, task.MessageID, action, "", store.OwnerSource, "owner", true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	expect := func(reason string) *store.ResearchClaim {
+		t.Helper()
+		c := claim(t, db, ctx)
+		if c == nil || c.Reason != reason {
+			t.Fatalf("claim reason = %#v, want %s", c, reason)
+		}
+		return c
+	}
+	c := expect("first_run")
+	if c.Available.Notes != 0 || c.Available.Files != 0 || c.Available.CheckpointAttempt != nil || c.Available.ProjectName != "Atlas" || c.Available.ProjectShared {
+		t.Fatalf("first available = %#v", c.Available)
+	}
+	if _, err := db.SaveResearchCheckpoint(ctx, task.ID, 1, "half done"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.EndResearchRun(ctx, task.ID, 1, "dispatch-client", "exit 1"); err != nil {
+		t.Fatal(err)
+	}
+	c = expect("retry_after_failure")
+	if c.Available.CheckpointAttempt == nil || *c.Available.CheckpointAttempt != 1 || c.Available.Notes != 0 {
+		t.Fatalf("retry available = %#v", c.Available)
+	}
+	if _, err := db.SubmitResearch(ctx, task.ID, 2, "draft result", []store.ResearchFile{{Filename: "a.txt", Data: []byte("a")}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.AppendHandoffMessage(ctx, store.HandoffMessage{HandoffID: task.ID, Body: "More sources.", WorkState: "ready", Source: store.OwnerSource, ClientID: "owner"}, true); err != nil {
+		t.Fatal(err)
+	}
+	owner("release")
+	c = expect("revision")
+	if c.Available.OwnerNotes != 1 || c.Available.Notes != 2 || c.Available.Files != 1 {
+		t.Fatalf("revision available = %#v", c.Available)
+	}
+	if err := db.AskResearchOwner(ctx, task.ID, 3, "Which year?"); err != nil {
+		t.Fatal(err)
+	}
+	owner("release")
+	expect("answered")
+	owner("release")
+	expect("restarted")
+	if _, err := db.SubmitResearch(ctx, task.ID, 5, "final", nil); err != nil {
+		t.Fatal(err)
+	}
+	owner("complete")
+	owner("reopen")
+	expect("reopened")
+}
+
+func TestResearchOverviewAndSharedProjectContext(t *testing.T) {
+	db, ctx := researchDB(t)
+	queued := newResearch(t, db, ctx, "Queued", 3)
+	running := newResearch(t, db, ctx, "Running", 3)
+	if c := claim(t, db, ctx); c == nil || c.Task.ID != queued.ID {
+		t.Fatalf("claim = %#v", c)
+	}
+	if _, err := db.SubmitResearch(ctx, queued.ID, 1, "result", nil); err != nil {
+		t.Fatal(err)
+	}
+	claim(t, db, ctx)
+	statuses := map[string]string{}
+	all, err := db.ListResearchTasks(ctx, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, task := range all {
+		statuses[task.Title] = task.Status
+	}
+	if len(all) != 2 || statuses["Queued"] != "review" || statuses["Running"] != "running" {
+		t.Fatalf("overview = %#v", all)
+	}
+	if review, _ := db.ListResearchTasks(ctx, "review", 10); len(review) != 1 || review[0].ID != strconv.FormatInt(queued.ID, 10) {
+		t.Fatalf("review filter = %#v", review)
+	}
+	if _, err := db.ListResearchTasks(ctx, "bogus", 0); err == nil {
+		t.Fatal("unknown status accepted")
+	}
+
+	if _, err := db.AppendEntry(ctx, "atlas", "decision", "Use pgvector for search", "claude", "c"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.AppendEntry(ctx, "atlas", "note", "Random note", "claude", "c"); err != nil {
+		t.Fatal(err)
+	}
+	pack, _ := db.ResearchContext(ctx, running.ID, nil)
+	if len(pack.Project.Recent) != 0 {
+		t.Fatalf("unshared project leaked entries: %#v", pack.Project.Recent)
+	}
+	if err := db.SetProjectResearchVisible(ctx, "atlas", true); err != nil {
+		t.Fatal(err)
+	}
+	pack, _ = db.ResearchContext(ctx, running.ID, nil)
+	if len(pack.Project.Recent) != 1 || pack.Project.Recent[0].Body != "Use pgvector for search" || pack.Project.Recent[0].Kind != "decision" {
+		t.Fatalf("shared recent = %#v", pack.Project.Recent)
 	}
 }

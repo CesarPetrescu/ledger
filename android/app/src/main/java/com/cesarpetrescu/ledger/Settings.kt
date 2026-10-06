@@ -42,6 +42,7 @@ fun Settings(model: LedgerModel) {
         item { ThemeChoice(model) }
         item { NotificationsChoice(model) }
         item { SummaryCard("Connected apps", body = "Review ChatGPT, Claude, CLI, and other apps. Revoke access when needed.") { model.go("clients") } }
+        item { SummaryCard("API keys", body = "Keys that let a server such as Adastrion Core pick up research. Create them in the web console; revoke them here.") { model.go("api-keys") } }
         item { SummaryCard("Approve a device", body = "Enter the code shown by the Ledger CLI.") { model.go("device") } }
         item { SummaryCard("Calendars", body = "Connect Nextcloud and choose visible calendars.") { model.go("calendar-settings") } }
         item { OutlinedButton(onClick = { openBrowser(context, "https://github.com/CesarPetrescu/ledger/releases/latest", model) }) { Text("Check for updates") } }
@@ -125,6 +126,26 @@ fun Clients(model: LedgerModel) {
                 if (offset > 0) TextButton(onClick = { offset = (offset - 50).coerceAtLeast(0) }) { Text("Previous") }
                 if (!data.isNull("next_offset")) TextButton(onClick = { offset = data.getInt("next_offset") }) { Text("Next") }
             } }
+        }
+    }
+}
+
+/** API keys: listed and revocable here; created in the web console, which can show the secret once. */
+@Composable
+fun ApiKeys(model: LedgerModel) {
+    Load(model, "api-keys", { it.request("GET", "/api-keys") }) { data ->
+        Page {
+            if (data.rows("keys").isEmpty()) item { Empty("No API keys yet. Create one in the web console under Agents › API keys.") }
+            items(data.rows("keys"), key = { it.text("id") }) { key ->
+                val revoked = key.text("revoked_at").isNotBlank()
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SummaryCard(key.text("name"), if (revoked) "Revoked ${displayTime(key.text("revoked_at"))}" else "Dispatch research",
+                        "Key ${key.text("prefix")}…\nCreated: ${displayTime(key.text("created_at"))}\nLast used: ${displayTime(key.text("last_used_at")).ifBlank { "Never" }}")
+                    if (!revoked) ConfirmButton("Revoke key", "Revoke ${key.text("name")}? It stops working immediately.", !model.busy) {
+                        model.act("API key revoked") { it.request("DELETE", "/api-keys/${segment(key.text("id"))}") }
+                    }
+                }
+            }
         }
     }
 }

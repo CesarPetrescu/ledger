@@ -254,6 +254,37 @@ func researcherClient(id int64, attempt int) string {
 type ResearchClaim struct {
 	Task  ResearchTask `json:"task"`
 	Token string       `json:"token"`
+	// Reason says why this run exists: first_run, retry_after_failure, revision, answered, retry,
+	// restarted, or reopened.
+	Reason    string            `json:"reason"`
+	Available ResearchAvailable `json:"available"`
+}
+
+// ResearchAvailable says what is waiting in Ledger for a run, so its chat knows what get_task holds.
+type ResearchAvailable struct {
+	CheckpointAttempt *int `json:"checkpoint_attempt,omitempty"`
+	// Notes counts thread messages from runs and the owner; Ledger's own run notes are left out.
+	Notes         int    `json:"notes"`
+	OwnerNotes    int    `json:"owner_notes"`
+	Files         int    `json:"files"`
+	ProjectName   string `json:"project_name,omitempty"`
+	ProjectShared bool   `json:"project_shared"`
+}
+
+func (db *DB) researchAvailable(ctx context.Context, task ResearchTask) (ResearchAvailable, error) {
+	a := ResearchAvailable{CheckpointAttempt: task.CheckpointAttempt}
+	if task.Checkpoint == "" {
+		a.CheckpointAttempt = nil
+	}
+	err := db.Pool.QueryRow(ctx, `SELECT
+ count(*) FILTER (WHERE m.id<>$2 AND m.client_id<>'ledger'),
+ count(*) FILTER (WHERE m.id<>$2 AND m.source=$3),
+ (SELECT count(*) FROM handoff_file f JOIN handoff_message fm ON fm.id=f.message_id WHERE fm.handoff_id=$1 AND fm.work_state<>'draft'),
+ COALESCE((SELECT p.name FROM project p WHERE p.slug=$4),''),
+ COALESCE((SELECT p.research_visible FROM project p WHERE p.slug=$4),false)
+FROM handoff_message m WHERE m.handoff_id=$1 AND m.work_state<>'draft'`, task.ID, task.MessageID, OwnerSource, task.ProjectSlug).
+		Scan(&a.Notes, &a.OwnerNotes, &a.Files, &a.ProjectName, &a.ProjectShared)
+	return a, err
 }
 
 // ClaimResearchTask leases the oldest ready task whose dependencies are done, or returns nil when none
@@ -277,10 +308,11 @@ func (db *DB) ClaimResearchTask(ctx context.Context, leaseSeconds int, source, c
 	}
 	defer tx.Rollback(ctx)
 	var id, messageID int64
-	err = tx.QueryRow(ctx, `SELECT t.handoff_id,t.message_id FROM research_task t JOIN handoff h ON h.id=t.handoff_id JOIN handoff_message m ON m.id=t.message_id
+	var reason string
+	err = tx.QueryRow(ctx, `SELECT t.handoff_id,t.message_id,t.requeue_reason FROM research_task t JOIN handoff h ON h.id=t.handoff_id JOIN handoff_message m ON m.id=t.message_id
 WHERE m.work_state='ready' AND NOT EXISTS (SELECT 1 FROM unnest(t.depends_on) d(id)
   LEFT JOIN research_task dt ON dt.handoff_id=d.id LEFT JOIN handoff_message dm ON dm.id=dt.message_id WHERE dm.work_state IS DISTINCT FROM 'done')
-ORDER BY m.status_updated_at,t.handoff_id LIMIT 1 FOR UPDATE OF h,m SKIP LOCKED`).Scan(&id, &messageID)
+ORDER BY m.status_updated_at,t.handoff_id LIMIT 1 FOR UPDATE OF h,m SKIP LOCKED`).Scan(&id, &messageID, &reason)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -318,7 +350,14 @@ WHERE handoff_id=$1 RETURNING attempt`, id, leaseSeconds).Scan(&attempt); err !=
 	if err != nil {
 		return nil, err
 	}
-	return &ResearchClaim{Task: task, Token: token}, nil
+	available, err := db.researchAvailable(ctx, task)
+	if err != nil {
+		return nil, err
+	}
+	if reason == "" {
+		reason = "first_run"
+	}
+	return &ResearchClaim{Task: task, Token: token, Reason: reason, Available: available}, nil
 }
 
 // failRun ends a locked in-progress run that produced nothing: one more failure, then the brief goes
@@ -328,7 +367,7 @@ func failRun(ctx context.Context, tx pgx.Tx, id int64, l researchLock, reason st
 		reason = string(runes[:2000])
 	}
 	var failures, maxAttempts int
-	if err := tx.QueryRow(ctx, `UPDATE research_task SET failures=failures+1,last_error=$2,lease_until=NULL,progress='',
+	if err := tx.QueryRow(ctx, `UPDATE research_task SET failures=failures+1,last_error=$2,lease_until=NULL,progress='',requeue_reason='retry_after_failure',
 phase=CASE WHEN failures+1>=max_attempts THEN 'dead' END WHERE handoff_id=$1 RETURNING failures,max_attempts`, id, reason).Scan(&failures, &maxAttempts); err != nil {
 		return err
 	}
@@ -569,7 +608,19 @@ type ResearchProject struct {
 	Goal        string `json:"goal,omitempty"`
 	Description string `json:"description,omitempty"`
 	Stack       string `json:"stack,omitempty"`
+	// Recent is the project's newest decisions and status updates, so a run builds on what is already
+	// decided. Only for projects the owner shared with research.
+	Recent []ResearchEntry `json:"recent,omitempty"`
 }
+
+type ResearchEntry struct {
+	ID   string    `json:"id"`
+	Kind string    `json:"kind"`
+	Body string    `json:"body"`
+	At   time.Time `json:"at"`
+}
+
+const researchRecentEntries = 10
 
 type ResearchNote struct {
 	From  string        `json:"from"`
@@ -610,6 +661,19 @@ CASE WHEN research_visible THEN description ELSE '' END,CASE WHEN research_visib
 			Scan(&p.Slug, &p.Name, &p.Shared, &p.Type, &p.Goal, &p.Description, &p.Stack)
 		if err != nil && !IsNotFound(err) {
 			return ResearchContext{}, err
+		}
+		if err == nil && p.Shared {
+			rows, err := db.Pool.Query(ctx, `SELECT id::text,kind,body,created_at FROM entry WHERE slug=$1 AND kind IN ('decision','status') ORDER BY created_at DESC,id DESC LIMIT $2`, p.Slug, researchRecentEntries)
+			if err != nil {
+				return ResearchContext{}, err
+			}
+			p.Recent, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (ResearchEntry, error) {
+				var e ResearchEntry
+				return e, row.Scan(&e.ID, &e.Kind, &e.Body, &e.At)
+			})
+			if err != nil {
+				return ResearchContext{}, err
+			}
 		}
 		if err == nil {
 			out.Project = &p
@@ -656,6 +720,55 @@ WHERE handoff_id=$1 AND id<>$2 AND work_state<>'draft' AND ($3::bigint IS NULL O
 		out.Thread = append(out.Thread, ResearchNote{From: from, Body: m.Body, At: m.CreatedAt, Files: m.Files})
 	}
 	return out, nil
+}
+
+// ResearchSummary is a research task as the overview lists it, without the spec or checkpoint.
+type ResearchSummary struct {
+	ID          string     `json:"id"`
+	Title       string     `json:"title"`
+	ProjectSlug string     `json:"project_slug,omitempty"`
+	Status      string     `json:"status"`
+	Attempt     int        `json:"attempt"`
+	Failures    int        `json:"failures"`
+	MaxAttempts int        `json:"max_attempts"`
+	Runner      string     `json:"runner,omitempty"`
+	LeaseUntil  *time.Time `json:"lease_until,omitempty"`
+	HeartbeatAt *time.Time `json:"heartbeat_at,omitempty"`
+	Progress    string     `json:"progress,omitempty"`
+	LastError   string     `json:"last_error,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+}
+
+// ResearchStatuses name the brief's state and phase for people: what a task is doing or waiting for.
+var ResearchStatuses = []string{"draft", "queued", "running", "review", "question", "stopped", "accepted"}
+
+const researchStatusSQL = `CASE m.work_state WHEN 'draft' THEN 'draft' WHEN 'ready' THEN 'queued' WHEN 'in_progress' THEN 'running' WHEN 'done' THEN 'accepted'
+ ELSE CASE t.phase WHEN 'review' THEN 'review' WHEN 'question' THEN 'question' ELSE 'stopped' END END`
+
+// ListResearchTasks lists tasks by status, newest activity first. status "" means every task that is
+// not a draft or accepted; "all" means every task.
+func (db *DB) ListResearchTasks(ctx context.Context, status string, limit int) ([]ResearchSummary, error) {
+	if status != "" && status != "all" && !slices.Contains(ResearchStatuses, status) {
+		return nil, fmt.Errorf("status must be one of %s, or all", strings.Join(ResearchStatuses, ", "))
+	}
+	if limit == 0 {
+		limit = 50
+	}
+	if limit < 1 || limit > 100 {
+		return nil, fmt.Errorf("limit must be between 1 and 100")
+	}
+	rows, err := db.Pool.Query(ctx, `SELECT * FROM (SELECT t.handoff_id::text AS id,h.title,COALESCE(h.project_slug,''),`+researchStatusSQL+` AS status,t.attempt,t.failures,t.max_attempts,
+ COALESCE(m.claimed_source,''),t.lease_until,t.heartbeat_at,t.progress,t.last_error,h.created_at,h.updated_at
+FROM research_task t JOIN handoff h ON h.id=t.handoff_id JOIN handoff_message m ON m.id=t.message_id) s
+WHERE ($1='all' OR ($1='' AND s.status NOT IN ('draft','accepted')) OR s.status=$1) ORDER BY s.updated_at DESC,s.id::bigint DESC LIMIT $2`, status, limit)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (ResearchSummary, error) {
+		var r ResearchSummary
+		return r, row.Scan(&r.ID, &r.Title, &r.ProjectSlug, &r.Status, &r.Attempt, &r.Failures, &r.MaxAttempts, &r.Runner, &r.LeaseUntil, &r.HeartbeatAt, &r.Progress, &r.LastError, &r.CreatedAt, &r.UpdatedAt)
+	})
 }
 
 // ResearchFile returns one attachment from this task's own thread, for the run's read_file tool.

@@ -136,6 +136,7 @@ fun LedgerApp(model: LedgerModel = viewModel(), opened: MutableState<Pair<String
         "calendar", "event", "event-new", "calendar-settings" -> "Calendar"
         "search" -> "Search"
         "clients" -> "Connected apps"
+        "api-keys" -> "API keys"
         "agents" -> "Agents"
         "help" -> "Help"
         "device" -> "Approve a device"
@@ -219,6 +220,7 @@ fun LedgerApp(model: LedgerModel = viewModel(), opened: MutableState<Pair<String
                             "calendar-settings" -> CalendarSettings(model)
                             "search" -> SearchScreen(model)
                             "clients" -> Clients(model)
+                            "api-keys" -> ApiKeys(model)
                             "device" -> Device(model)
                             else -> Settings(model)
                         }

@@ -3,7 +3,7 @@
 Ledger is the control plane and the memory for sandboxed research. It holds each task's spec, its lease, the run's checkpoint, the result, and the owner's review. Ledger does not run anything itself. A dispatcher, outside Ledger, claims tasks and starts one sandbox per run. The agent in that sandbox never sees the queue. It gets one task and a token that works only for that task, and only while that run holds the lease.
 
 ```text
-agent (/mcp) ──create_research_task──▶ Ledger ◀──claim / renew / end── dispatcher (/mcp/dispatch)
+agent (/mcp) ──create_research_task──▶ Ledger ◀──claim / renew / end── dispatcher (/api/v1 or /mcp/dispatch)
                                          ▲                                   │ starts a sandbox with
 owner (console) ──review: accept,        │                                   ▼ LEDGER_RESEARCH_URL + token
    send back, answer, retry──────────────┘◀──get_task, heartbeat, checkpoint, submit, ask_owner── run (/mcp/research)
@@ -50,9 +50,81 @@ Research threads are owner-only. `list_handoffs`, `get_handoff`, and the other h
 - The run token works only while its task is `in_progress` under the same attempt with a live lease. It stops working the moment the run ends.
 - `checkpoint` stores up to 64 KiB of state. The next run gets it from `get_task` (`checkpoint` and `checkpoint_attempt`) and should resume from it.
 
-## Dispatcher: `/mcp/dispatch`
+## Dispatcher API: `/api/v1` (API keys)
 
-The dispatcher authenticates with OAuth and the `research:dispatch` scope. Ledger never advertises that scope and never grants it by default, so only a client that asks for it by name, and that you approve, gets it. One way to set it up:
+This is the simplest way for a server, such as Adastrion Core, to run research. It's plain JSON over HTTPS, with no OAuth. In the console, create a key under **Agents › API keys**. Ledger shows the key once and stores only its hash. A key can only dispatch research. Send it as `Authorization: Bearer <key>`.
+
+A dispatcher loop:
+
+1. Respect your concurrency limit. Then claim, waiting up to 25 seconds for a task:
+
+   ```sh
+   curl -s -X POST https://ledger.example.com/api/v1/research/claim \
+     -H "Authorization: Bearer $LEDGER_API_KEY" -H 'Content-Type: application/json' \
+     -d '{"wait_seconds": 25, "lease_seconds": 300}'
+   ```
+
+   `204 No Content` means the queue stayed empty, so claim again. `200` returns the run:
+
+   ```json
+   {
+     "claimed": true,
+     "task": {"id": "12", "title": "Vector DB survey", "project_slug": "atlas", "attempt": 2, "spec": {"objective": "…", "acceptance": ["…"], "deliverable": "report", "budget": {"minutes": 30}}},
+     "token": "…run token…",
+     "endpoint": "https://ledger.example.com/mcp/research",
+     "reason": "revision",
+     "available": {"checkpoint_attempt": 1, "notes": 3, "owner_notes": 1, "files": 2, "project_name": "Atlas", "project_shared": true},
+     "chat": {"title": "Research #12 · Vector DB survey (run 2, revision)", "opening": "You are running Ledger research task #12, …"}
+   }
+   ```
+
+2. Open a chat titled `chat.title`, with `chat.opening` as its first message. Add an MCP server `endpoint` with header `Authorization: Bearer <token>` to that chat's agent. The opening already says why this run exists (`reason`) and which research tool holds what, so the agent knows where to look.
+3. Every `lease_seconds / 3`, renew:
+
+   ```sh
+   curl -s -X POST https://ledger.example.com/api/v1/research/tasks/12/renew \
+     -H "Authorization: Bearer $LEDGER_API_KEY" -d '{"attempt": 2}'
+   ```
+
+   `409 lease_lost` means the run is over: it submitted, asked you, lapsed, or you stopped it. Close the chat's MCP session.
+4. When the chat ends, report it:
+
+   ```sh
+   curl -s -X POST https://ledger.example.com/api/v1/research/tasks/12/end \
+     -H "Authorization: Bearer $LEDGER_API_KEY" -d '{"attempt": 2, "error": "chat closed without submitting"}'
+   ```
+
+   A run that never submitted or asked counts as a failure and is retried.
+
+| Call | Purpose |
+|---|---|
+| `GET /api/v1/ping` | Checks the key; returns its name and scopes |
+| `POST /api/v1/research/claim` | `{"wait_seconds": 0-25, "lease_seconds": 30-3600}`; returns `200` with the run as above, or `204` |
+| `POST /api/v1/research/tasks/{id}/renew` | `{"attempt": n}`; returns `{"lease_until"}`, or `409 lease_lost` |
+| `POST /api/v1/research/tasks/{id}/end` | `{"attempt": n, "error": "…"}`; returns the task |
+| `GET /api/v1/research/tasks?status=&limit=` | Overview. `status` is `queued`, `running`, `review`, `question`, `stopped`, `accepted`, `draft`, or `all`; the default is everything in flight |
+| `GET /api/v1/research/tasks/{id}` | One task with its spec, counters, progress, and checkpoint |
+
+`reason` is one of:
+- `first_run`;
+- `retry_after_failure`: the last run failed, and its error is in the opening;
+- `revision`: you sent the result back;
+- `answered`: you answered its question;
+- `retry`: you restarted a stopped task;
+- `restarted`: you stopped a running run;
+- `reopened`: you reopened an accepted task.
+
+Errors are JSON, `{"error": "...", "message": "..."}`:
+- 401: the key is missing, wrong, or revoked;
+- 400: bad input;
+- 404: unknown task;
+- 403: another dispatcher's run.
+
+API keys don't work on `/mcp`, and agents' OAuth tokens don't work on `/api`.
+
+## Dispatcher over MCP: `/mcp/dispatch` (OAuth)
+
+This is the same dispatching as `/api/v1`, for MCP clients that sign in with OAuth. Its claim returns the same fields, `chat` included. The dispatcher authenticates with OAuth and the `research:dispatch` scope. Ledger never advertises that scope and never grants it by default, so only a client that asks for it by name, and that you approve, gets it. One way to set it up:
 
 1. Register a device client at `POST /oauth/register` with `grant_types: ["urn:ietf:params:oauth:grant-type:device_code", "refresh_token"]` and a recognisable `client_name`.
 2. Start the device flow at `POST /oauth/device` with `scope=research:dispatch`, then approve the code in the Ledger console.

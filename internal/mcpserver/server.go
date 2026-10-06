@@ -371,6 +371,7 @@ func HTTPHandler(server *mcp.Server, db *store.DB, publicURL string) http.Handle
 	mux.Handle("/mcp", oauthProtected(db, publicURL, transport, ""))
 	mux.Handle("/mcp/dispatch", oauthProtected(db, publicURL, dispatchTransport, oauth.ScopeResearchDispatch))
 	mux.Handle("/mcp/research", researchHandler(db))
+	mux.Handle("/api/", apiHandler(db, publicURL))
 	return mux
 }
 

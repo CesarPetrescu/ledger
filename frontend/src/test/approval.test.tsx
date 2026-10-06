@@ -55,6 +55,7 @@ it('resets the approval password from Agents using the owner password and clears
     'GET /admin/api/agents': { body: { agents: [] } },
     'GET /admin/api/oauth/clients': { body: { clients: [] } },
     'GET /admin/api/overview': { body: overview },
+    'GET /admin/api/api-keys': { body: { keys: [] } },
     'PUT /admin/api/oauth/password': [
       { status: 403, body: { error: 'Password not accepted.' } },
       { status: 204 },
