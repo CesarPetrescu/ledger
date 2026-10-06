@@ -700,8 +700,8 @@ func TestResearchContinuationCopiesOnlyAcceptedSubmission(t *testing.T) {
 	db, ctx := researchDB(t)
 	parent := newResearch(t, db, ctx, "Initial survey", 3)
 	next := store.NewResearchTask{ProjectSlug: "atlas", Title: "Refresh survey", Source: "owner", ClientID: "owner", ContinueFromTaskID: parent.ID, Spec: store.ResearchSpec{Objective: "Refresh the findings", Acceptance: []string{"Cite new evidence"}}}
-	if _, err := db.CreateResearchTask(ctx, next); err == nil {
-		t.Fatal("continued an unaccepted task")
+	if _, err := db.CreateResearchTask(ctx, next); !errors.Is(err, store.ErrNotAccepted) {
+		t.Fatalf("continued an unaccepted task: %v", err)
 	}
 	claim(t, db, ctx)
 	submitted, err := db.SubmitResearch(ctx, parent.ID, 1, "Accepted findings", []store.ResearchFile{{Filename: "result.csv", Data: []byte("accepted")}})

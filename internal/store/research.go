@@ -28,6 +28,8 @@ const (
 
 var (
 	ErrResearchLease = errors.New("research lease not held")
+	// ErrNotAccepted refuses a continuation whose predecessor is not (or no longer) accepted.
+	ErrNotAccepted = errors.New("continue_from_task_id must be an accepted research task")
 
 	ResearchDeliverables = []string{"report", "answer", "dataset", "code"}
 )
@@ -205,7 +207,7 @@ func (db *DB) CreateResearchTask(ctx context.Context, n NewResearchTask) (Resear
 			return ResearchTask{}, err
 		}
 		if parent.State != "done" {
-			return ResearchTask{}, fmt.Errorf("continue_from_task_id must be an accepted research task")
+			return ResearchTask{}, ErrNotAccepted
 		}
 		var slug string
 		if err = tx.QueryRow(ctx, `SELECT COALESCE(project_slug,'') FROM handoff WHERE id=$1`, n.ContinueFromTaskID).Scan(&slug); err != nil {
