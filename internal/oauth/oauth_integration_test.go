@@ -507,7 +507,9 @@ func TestApprovalGrantsAllAgentPermissionsExceptForDispatchers(t *testing.T) {
 			}
 		}
 	}
-	if page, granted := authorize("research:dispatch"); granted != "research:dispatch" || strings.Contains(page, "Read selected calendars") {
-		t.Errorf("dispatcher granted %q", granted)
+	for _, requested := range []string{"research:dispatch", "research:dispatch ledger:read calendar:write"} {
+		if page, granted := authorize(requested); granted != "research:dispatch" || strings.Contains(page, "Read selected calendars") || strings.Contains(page, "Read project memory") {
+			t.Errorf("dispatcher asked %q, granted %q", requested, granted)
+		}
 	}
 }
