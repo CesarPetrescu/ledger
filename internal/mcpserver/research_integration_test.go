@@ -396,6 +396,13 @@ func TestDraftResearchStaysWithItsCreator(t *testing.T) {
 	if peek, err := other.CallTool(ctx, &mcp.CallToolParams{Name: "get_research_task", Arguments: map[string]any{"id": draft.ID}}); err != nil || !peek.IsError {
 		t.Fatalf("another client reads the draft: %#v, %v", peek, err)
 	}
+	_, key, err := db.CreateAPIKey(ctx, "Dispatcher", []string{store.ScopeResearchDispatch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, _ := apiCall(t, "GET", server.URL+"/api/v1/research/tasks/"+draft.ID, key, ""); status != http.StatusNotFound {
+		t.Fatalf("API reads another client's draft: %d", status)
+	}
 	// Files in a draft task (such as a continuation's copied result) are the creator's too.
 	id, _ := strconv.ParseInt(draft.ID, 10, 64)
 	var noteID int64

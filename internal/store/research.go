@@ -927,13 +927,13 @@ const (
 )
 
 // researchProject returns the slug of Ledger's catch-all research project, creating it on first use under
-// the first free slug. Which project it is lives in research_catchall, which only Ledger writes.
+// the first free slug. The project.research_catchall mark, which only Ledger sets, says which one it is.
 func researchProject(ctx context.Context, tx pgx.Tx) (string, error) {
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('ledger:research-catchall'))`); err != nil {
 		return "", err
 	}
 	var slug string
-	err := tx.QueryRow(ctx, `SELECT project_slug FROM research_catchall`).Scan(&slug)
+	err := tx.QueryRow(ctx, `SELECT slug FROM project WHERE research_catchall ORDER BY slug LIMIT 1`).Scan(&slug)
 	if err == nil || !IsNotFound(err) {
 		return slug, err
 	}
@@ -942,18 +942,17 @@ func researchProject(ctx context.Context, tx pgx.Tx) (string, error) {
 		if i > 0 {
 			slug = fmt.Sprintf("ledger-research-%d", i)
 		}
-		tag, err := tx.Exec(ctx, `INSERT INTO project(slug,name,tier,type,goal,description) VALUES($1,'Research','park',$2,
-'Accepted research results that belong to no other project','Ledger publishes accepted research here when the task named no project. Each entry links to the full result through get_research_task.')
-ON CONFLICT (slug) DO NOTHING`, slug, ResearchProjectType)
+		// A slug held by a project in Trash stays free for its restore.
+		tag, err := tx.Exec(ctx, `INSERT INTO project(slug,name,tier,type,goal,description,research_catchall) SELECT $1,'Research','park',$2,
+'Accepted research results that belong to no other project','Ledger publishes accepted research here when the task named no project. Each entry links to the full result through get_research_task.',true
+WHERE NOT EXISTS (SELECT 1 FROM trash WHERE kind='project' AND project_slug=$1) ON CONFLICT (slug) DO NOTHING`, slug, ResearchProjectType)
 		if err != nil {
 			return "", err
 		}
 		if tag.RowsAffected() == 1 {
-			break
+			return slug, nil
 		}
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO research_catchall(project_slug) VALUES($1)`, slug)
-	return slug, err
 }
 
 const maxPublishedExcerpt = 3200

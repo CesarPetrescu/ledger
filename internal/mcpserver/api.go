@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/cesarpetrescu/ledger/internal/store"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -132,6 +133,10 @@ func apiHandler(db *store.DB, publicURL string) http.Handler {
 			return
 		}
 		task, err := db.ResearchTask(r.Context(), id)
+		// A draft belongs to its creator until it is queued.
+		if err == nil && task.State == "draft" && task.CreatorClientID != client(r) {
+			err = pgx.ErrNoRows
+		}
 		if store.IsNotFound(err) {
 			apiError(w, http.StatusNotFound, "not_found", "no research task with that id")
 			return

@@ -880,4 +880,34 @@ func TestPublishingCatchesUpAndKeepsOutOfOwnerProjects(t *testing.T) {
 	if again, _ := db.GetProject(ctx, "ledger-research-2", 5); len(again.Entries) != 2 {
 		t.Fatalf("second result went elsewhere: %#v", again.Entries)
 	}
+	// Trashed, the catch-all keeps its slug free for a restore; restored, it is the catch-all again.
+	trashID, _, err := db.TrashProject(ctx, "ledger-research-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	accept := func(title string) {
+		t.Helper()
+		next, err := db.CreateResearchTask(ctx, store.NewResearchTask{Title: title, Source: "c", ClientID: "c", Spec: store.ResearchSpec{Objective: "x", Acceptance: []string{"y"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		claim(t, db, ctx)
+		if _, err := db.SubmitResearch(ctx, next.ID, 1, title+" findings", nil); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ReviewResearch(ctx, next.ID, "accept", "", "claude-code", "claude-client"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	accept("While trashed")
+	if stand, err := db.GetProject(ctx, "ledger-research-3", 5); err != nil || len(stand.Entries) != 1 {
+		t.Fatalf("stand-in catch-all = %#v, %v", stand, err)
+	}
+	if err := db.RestoreTrash(ctx, trashID); err != nil {
+		t.Fatalf("restore = %v", err)
+	}
+	accept("After restore")
+	if restored, _ := db.GetProject(ctx, "ledger-research-2", 5); len(restored.Entries) != 3 {
+		t.Fatalf("restored catch-all = %#v", restored.Entries)
+	}
 }
