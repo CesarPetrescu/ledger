@@ -355,7 +355,10 @@ func NewDispatchServer(db *store.DB, publicURL string) *mcp.Server {
 			if err != nil {
 				return nil, nil, err
 			}
-			claim, err := db.ClaimResearchTask(ctx, input.LeaseSeconds, name, id.ClientID)
+			claim, err := db.ClaimResearchTaskWithAccess(ctx, id.Token, input.LeaseSeconds, name, id.ClientID)
+			if errors.Is(err, store.ErrAccessRevoked) {
+				return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: `{"error":"access_revoked"}`}}}, nil, nil
+			}
 			if err != nil {
 				return nil, nil, err
 			}

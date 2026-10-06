@@ -598,3 +598,37 @@ func TestTasksThatRanBeforeAreNeverAFirstRun(t *testing.T) {
 		t.Fatalf("claim = %#v", c)
 	}
 }
+
+// An OAuth dispatcher's claim holds its access token: a revoked token cannot claim, and revoking every
+// OAuth client leaves runs claimed with API keys alone.
+func TestOAuthClaimsHoldTheirAccessToken(t *testing.T) {
+	db, ctx := researchDB(t)
+	if _, err := db.PutClient(ctx, store.OAuthClient{ClientID: "oauth-dispatcher", Kind: "device", Name: "Dispatcher", RedirectURIs: []string{}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO oauth_token(hash,kind,client_id,scope,family,expires_at) VALUES(sha256('access-1'::bytea),'access','oauth-dispatcher','research:dispatch','00000000-0000-4000-8000-000000000009',now()+interval '15 minutes')`); err != nil {
+		t.Fatal(err)
+	}
+	key, _, _ := db.CreateAPIKey(ctx, "Keyed dispatcher", []string{store.ScopeResearchDispatch})
+	newResearch(t, db, ctx, "By OAuth", 3)
+	keyed := newResearch(t, db, ctx, "By key", 3)
+	if c, err := db.ClaimResearchTaskWithAccess(ctx, "access-1", 60, "Dispatcher", "oauth-dispatcher"); err != nil || c == nil {
+		t.Fatalf("OAuth claim = %#v, %v", c, err)
+	}
+	if c, err := db.ClaimResearchTaskWithKey(ctx, key.ID, 60, key.Name); err != nil || c == nil || c.Task.ID != keyed.ID {
+		t.Fatalf("key claim = %#v, %v", c, err)
+	}
+	if _, err := db.Revoke(ctx, "", true); err != nil {
+		t.Fatal(err)
+	}
+	if still, _ := db.ResearchTask(ctx, keyed.ID); still.State != "in_progress" {
+		t.Fatalf("revoking all OAuth clients stopped an API-key run: %#v", still)
+	}
+	newResearch(t, db, ctx, "After revoke", 3)
+	if _, err := db.ClaimResearchTaskWithAccess(ctx, "access-1", 60, "Dispatcher", "oauth-dispatcher"); !errors.Is(err, store.ErrAccessRevoked) {
+		t.Fatalf("claim with a revoked token = %v", err)
+	}
+	if _, err := db.ClaimResearchTaskWithAccess(ctx, "never-issued", 60, "Dispatcher", "oauth-dispatcher"); !errors.Is(err, store.ErrAccessRevoked) {
+		t.Fatalf("claim with an unknown token = %v", err)
+	}
+}

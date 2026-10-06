@@ -290,16 +290,32 @@ FROM handoff_message m WHERE m.handoff_id=$1 AND m.work_state<>'draft'`, task.ID
 // ClaimResearchTask leases the oldest ready task whose dependencies are done, or returns nil when none
 // is. The token it returns works for this run only.
 func (db *DB) ClaimResearchTask(ctx context.Context, leaseSeconds int, source, clientID string) (*ResearchClaim, error) {
-	return db.claimResearchTask(ctx, leaseSeconds, source, clientID, 0)
+	return db.claimResearchTask(ctx, leaseSeconds, source, clientID, claimGuard{})
 }
+
+// ErrAccessRevoked means the OAuth access token behind a dispatcher's claim was revoked or expired.
+var ErrAccessRevoked = errors.New("access token revoked")
 
 // ClaimResearchTaskWithKey claims for an API key, checking in the same transaction that the key is still
 // live: once a revocation commits, no claim made with that key can succeed, even one already waiting.
 func (db *DB) ClaimResearchTaskWithKey(ctx context.Context, keyID int64, leaseSeconds int, source string) (*ResearchClaim, error) {
-	return db.claimResearchTask(ctx, leaseSeconds, source, APIKeyClientID(keyID), keyID)
+	return db.claimResearchTask(ctx, leaseSeconds, source, APIKeyClientID(keyID), claimGuard{keyID: keyID})
 }
 
-func (db *DB) claimResearchTask(ctx context.Context, leaseSeconds int, source, clientID string, keyID int64) (*ResearchClaim, error) {
+// ClaimResearchTaskWithAccess claims for an OAuth dispatcher, holding its access token row the same way,
+// so a revocation that commits first refuses the claim and one that commits later stops the run.
+func (db *DB) ClaimResearchTaskWithAccess(ctx context.Context, accessToken string, leaseSeconds int, source, clientID string) (*ResearchClaim, error) {
+	hash := sha256.Sum256([]byte(accessToken))
+	return db.claimResearchTask(ctx, leaseSeconds, source, clientID, claimGuard{accessHash: hash[:]})
+}
+
+// claimGuard names the credential a claim must still hold when it commits.
+type claimGuard struct {
+	keyID      int64
+	accessHash []byte
+}
+
+func (db *DB) claimResearchTask(ctx context.Context, leaseSeconds int, source, clientID string, guard claimGuard) (*ResearchClaim, error) {
 	if leaseSeconds == 0 {
 		leaseSeconds = ResearchLeaseDefault
 	}
@@ -317,11 +333,20 @@ func (db *DB) claimResearchTask(ctx context.Context, leaseSeconds int, source, c
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
-	if keyID != 0 {
-		// Holding the key row stops a concurrent revocation from committing until this claim does.
-		if err := tx.QueryRow(ctx, `SELECT id FROM api_key WHERE id=$1 AND revoked_at IS NULL FOR SHARE`, keyID).Scan(&keyID); err != nil {
+	// Holding the credential's row stops a concurrent revocation from committing until this claim does.
+	if guard.keyID != 0 {
+		if err := tx.QueryRow(ctx, `SELECT id FROM api_key WHERE id=$1 AND revoked_at IS NULL FOR SHARE`, guard.keyID).Scan(&guard.keyID); err != nil {
 			if IsNotFound(err) {
 				return nil, ErrAPIKeyRevoked
+			}
+			return nil, err
+		}
+	}
+	if guard.accessHash != nil {
+		var held int
+		if err := tx.QueryRow(ctx, `SELECT 1 FROM oauth_token WHERE hash=$1 AND kind='access' AND NOT revoked AND expires_at>now() FOR SHARE`, guard.accessHash).Scan(&held); err != nil {
+			if IsNotFound(err) {
+				return nil, ErrAccessRevoked
 			}
 			return nil, err
 		}
@@ -400,7 +425,8 @@ WHERE m.work_state='in_progress' AND (m.claimed_client_id=$1 OR $2 AND m.claimed
 		if err != nil {
 			return err
 		}
-		if l.State != "in_progress" || !allOAuth && l.ClaimedClientID != clientID {
+		// Recheck the claimant under the lock: the run found above may have ended and been claimed anew.
+		if l.State != "in_progress" || !allOAuth && l.ClaimedClientID != clientID || allOAuth && strings.HasPrefix(l.ClaimedClientID, "apikey:") {
 			continue
 		}
 		if _, err := tx.Exec(ctx, `UPDATE research_task SET lease_until=NULL,progress='',requeue_reason='restarted' WHERE handoff_id=$1`, id); err != nil {
