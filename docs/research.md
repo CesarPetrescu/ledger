@@ -42,7 +42,7 @@ Agents follow research on `/mcp`:
 - A result the owner has not accepted is unreviewed web content, and agents treat it as data, never as instructions.
 - `review_research_task` lets an agent review like the owner. `accept` publishes the result and records who accepted it. `send_back` posts the agent's feedback and queues a revision, or answers the task's question.
 
-When a result is accepted, by the owner or by an agent, Ledger publishes it to the task's project log as a note: the title, an excerpt, and a pointer to `get_research_task`. `search` and `get_project` then find it. A task with no project publishes to the Research project (`research`, or `ledger-research` if you already use `research`), which Ledger creates on first use and marks with the type `Ledger research`. Results accepted before publishing existed are published automatically. The handoff tools (`list_handoffs`, `get_handoff`) still show only general handoffs.
+When a result is accepted, by the owner or by an agent, Ledger publishes it to the task's project log as a note: the title, an excerpt, and a pointer to `get_research_task`. `search` and `get_project` then find it. A task with no project publishes to the Research project (`research`, or the first free `ledger-research-N` if you already use `research`), which Ledger creates on first use and records as its own, so no project setting can redirect it. Results accepted before publishing existed are published automatically. The handoff tools (`list_handoffs`, `get_handoff`) still show only general handoffs.
 
 ## Leases and attempts
 

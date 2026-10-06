@@ -919,38 +919,41 @@ WHERE ($1='all' OR ($1='' AND s.status NOT IN ('draft','accepted')) OR s.status=
 	})
 }
 
-// ResearchProjectSlug is where accepted results that belong to no project are published, unless the owner
-// already uses that slug: Ledger's own catch-all is marked by ResearchProjectType and never shares a
-// project with the owner's data.
+// ResearchProjectSlug is the preferred slug for the project that receives accepted results with no project
+// of their own; if the owner already uses it, the catch-all takes the next free ledger-research-N slug.
 const (
 	ResearchProjectSlug = "research"
 	ResearchProjectType = "Ledger research"
 )
 
-// researchProject returns the slug of Ledger's catch-all research project, creating it on first use.
+// researchProject returns the slug of Ledger's catch-all research project, creating it on first use under
+// the first free slug. Which project it is lives in research_catchall, which only Ledger writes.
 func researchProject(ctx context.Context, tx pgx.Tx) (string, error) {
-	for i := 0; i < 10; i++ {
-		slug := ResearchProjectSlug
-		switch {
-		case i == 1:
-			slug = "ledger-research"
-		case i > 1:
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('ledger:research-catchall'))`); err != nil {
+		return "", err
+	}
+	var slug string
+	err := tx.QueryRow(ctx, `SELECT project_slug FROM research_catchall`).Scan(&slug)
+	if err == nil || !IsNotFound(err) {
+		return slug, err
+	}
+	for i := 0; ; i++ {
+		slug = ResearchProjectSlug
+		if i > 0 {
 			slug = fmt.Sprintf("ledger-research-%d", i)
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO project(slug,name,tier,type,goal,description) VALUES($1,'Research','park',$2,
+		tag, err := tx.Exec(ctx, `INSERT INTO project(slug,name,tier,type,goal,description) VALUES($1,'Research','park',$2,
 'Accepted research results that belong to no other project','Ledger publishes accepted research here when the task named no project. Each entry links to the full result through get_research_task.')
-ON CONFLICT (slug) DO NOTHING`, slug, ResearchProjectType); err != nil {
+ON CONFLICT (slug) DO NOTHING`, slug, ResearchProjectType)
+		if err != nil {
 			return "", err
 		}
-		var kind string
-		if err := tx.QueryRow(ctx, `SELECT type FROM project WHERE slug=$1 FOR KEY SHARE`, slug).Scan(&kind); err != nil {
-			return "", err
-		}
-		if kind == ResearchProjectType {
-			return slug, nil
+		if tag.RowsAffected() == 1 {
+			break
 		}
 	}
-	return "", fmt.Errorf("no free slug for the research project")
+	_, err = tx.Exec(ctx, `INSERT INTO research_catchall(project_slug) VALUES($1)`, slug)
+	return slug, err
 }
 
 const maxPublishedExcerpt = 3200
@@ -1032,6 +1035,7 @@ func (db *DB) PublishAcceptedResearch(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	published := 0
+	var failed error
 	for _, id := range ids {
 		tx, err := db.Pool.Begin(ctx)
 		if err != nil {
@@ -1051,10 +1055,10 @@ func (db *DB) PublishAcceptedResearch(ctx context.Context) (int, error) {
 		}
 		tx.Rollback(ctx)
 		if err != nil {
-			return published, err
+			failed = fmt.Errorf("publish research task %d: %w", id, err) // one failure does not hold up the rest
 		}
 	}
-	return published, nil
+	return published, failed
 }
 
 // ErrResearchNotReviewable refuses a review of a task that has no result or question waiting.

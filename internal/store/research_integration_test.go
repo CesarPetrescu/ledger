@@ -829,7 +829,11 @@ func TestAcceptPublishesWithinTheEntryLimit(t *testing.T) {
 // never publishes into an owner project that happens to use its slug.
 func TestPublishingCatchesUpAndKeepsOutOfOwnerProjects(t *testing.T) {
 	db, ctx := researchDB(t)
+	// The owner holds the preferred slug, and another project even claims the catch-all's type.
 	if _, err := db.UpsertProject(ctx, store.Project{Slug: "research", Name: "My research notes", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "ledger-research-1", Name: "Lookalike", Tier: "park", Type: store.ResearchProjectType}); err != nil {
 		t.Fatal(err)
 	}
 	task, err := db.CreateResearchTask(ctx, store.NewResearchTask{Title: "Legacy", Source: "c", ClientID: "c", Spec: store.ResearchSpec{Objective: "x", Acceptance: []string{"y"}}})
@@ -854,8 +858,26 @@ func TestPublishingCatchesUpAndKeepsOutOfOwnerProjects(t *testing.T) {
 	if len(mine.Entries) != 0 || mine.Project.Name != "My research notes" {
 		t.Fatalf("owner project touched: %#v", mine)
 	}
-	catchAll, err := db.GetProject(ctx, "ledger-research", 5)
+	catchAll, err := db.GetProject(ctx, "ledger-research-2", 5)
 	if err != nil || catchAll.Project.Type != store.ResearchProjectType || len(catchAll.Entries) != 1 || !strings.Contains(catchAll.Entries[0].Body, "Legacy findings") {
 		t.Fatalf("catch-all = %#v, %v", catchAll, err)
+	}
+	if lookalike, _ := db.GetProject(ctx, "ledger-research-1", 5); len(lookalike.Entries) != 0 {
+		t.Fatalf("published into a lookalike project: %#v", lookalike.Entries)
+	}
+	// Later results go to the same catch-all.
+	second, err := db.CreateResearchTask(ctx, store.NewResearchTask{Title: "Second", Source: "c", ClientID: "c", Spec: store.ResearchSpec{Objective: "x", Acceptance: []string{"y"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim(t, db, ctx)
+	if _, err := db.SubmitResearch(ctx, second.ID, 1, "Second findings", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ReviewResearch(ctx, second.ID, "accept", "", "claude-code", "claude-client"); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := db.GetProject(ctx, "ledger-research-2", 5); len(again.Entries) != 2 {
+		t.Fatalf("second result went elsewhere: %#v", again.Entries)
 	}
 }
