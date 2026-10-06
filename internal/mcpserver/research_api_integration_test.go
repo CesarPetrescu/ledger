@@ -195,3 +195,37 @@ func strconvID(id int64) string {
 	b, _ := json.Marshal(id)
 	return string(b)
 }
+
+func TestResearchAPIContinuesAcceptedResult(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	_, key, err := db.CreateAPIKey(ctx, "Dispatcher", []string{store.ScopeResearchDispatch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := db.CreateResearchTask(ctx, store.NewResearchTask{Title: "First survey", Source: "owner", ClientID: "owner", Spec: store.ResearchSpec{Objective: "Find evidence", Acceptance: []string{"Cite sources"}, Budget: store.ResearchBudget{Rounds: 5}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(HTTPHandler(NewServer(db, "http://unused"), db, "https://ledger.example.com"))
+	defer server.Close()
+	url := server.URL + "/api/v1/research/tasks/" + strconvID(parent.ID) + "/continue"
+	body := `{"title":"Refresh survey","objective":"Find newer evidence","acceptance":["Cite changes"]}`
+	if status, _ := apiCall(t, "POST", url, key, body); status != 409 {
+		t.Fatalf("unaccepted status = %d", status)
+	}
+	if _, err = db.ClaimResearchTask(ctx, 60, "Dispatcher", "dispatcher"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.SubmitResearch(ctx, parent.ID, 1, "Verified result", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.UpdateHandoffMessage(ctx, parent.MessageID, "complete", "", store.OwnerSource, "owner", true); err != nil {
+		t.Fatal(err)
+	}
+	if status, result := apiCall(t, "POST", url, key, body); status != 201 || result["continue_from_task_id"] != strconvID(parent.ID) || result["continue_from_attempt"] != float64(1) {
+		t.Fatalf("continued = %d %v", status, result)
+	}
+	if status, _ := apiCall(t, "POST", url, "wrong", body); status != 401 {
+		t.Fatal("unauthenticated continuation")
+	}
+}
