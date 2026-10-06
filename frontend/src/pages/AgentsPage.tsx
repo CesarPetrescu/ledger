@@ -1,6 +1,6 @@
 import { Link } from '../router'
 import { useState, type FormEvent } from 'react'
-import { api, describeError, type AgentSummary, type Client } from '../api'
+import { api, describeError, type AgentSummary, type ApiKey, type Client } from '../api'
 import { titleOf } from '../components/entries'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { useToast } from '../components/Toast'
@@ -38,9 +38,91 @@ export function AgentsPage() {
       )}
       <ConnectGuide />
       <ConnectedApps />
+      <ApiKeys />
       <ApprovalPassword />
     </>
   )
+}
+
+/** API keys let a server use /api/v1 without signing in, such as Adastrion Core dispatching research. */
+function ApiKeys() {
+  const keys = useResource(api.listApiKeys, 'api-keys', 'api_key')
+  const [name, setName] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [created, setCreated] = useState<{ name: string; secret: string } | null>(null)
+  const [target, setTarget] = useState<ApiKey | null>(null)
+  const toast = useToast()
+
+  async function create(event: FormEvent) {
+    event.preventDefault()
+    if (busy || !name.trim()) return
+    setBusy(true)
+    try {
+      const result = await api.createApiKey(name.trim())
+      setCreated({ name: result.key.name, secret: result.secret })
+      setName('')
+      keys.reload()
+    } catch (failure) { toast(describeError(failure), 'error') }
+    finally { setBusy(false) }
+  }
+
+  async function copy(secret: string) {
+    try {
+      await navigator.clipboard.writeText(secret)
+      toast('Key copied.')
+    } catch { toast('Clipboard access failed; select the key and copy it.', 'error') }
+  }
+
+  async function revoke() {
+    if (!target) return
+    setBusy(true)
+    try {
+      await api.revokeApiKey(target.id)
+      toast(`Revoked ${target.name}.`)
+      setTarget(null)
+      keys.reload()
+    } catch (failure) { toast(describeError(failure), 'error') }
+    finally { setBusy(false) }
+  }
+
+  return <section className="connected-apps" aria-labelledby="api-keys-title">
+    <h2 id="api-keys-title" className="section-title">API keys</h2>
+    <p className="muted small">A key lets a server use Ledger's research API without signing in, for example Adastrion Core picking up research tasks and opening a chat for each. A key can only dispatch research, and Ledger shows it once.</p>
+    {created && <div className="key-reveal" role="status">
+      <p><strong>Copy the key for {created.name} now.</strong> Ledger will not show it again.</p>
+      <code className="break">{created.secret}</code>
+      <div className="form-actions"><button type="button" className="btn btn-primary" onClick={() => void copy(created.secret)}>Copy key</button><button type="button" className="btn" onClick={() => setCreated(null)}>Done</button></div>
+    </div>}
+    <form className="inline-form" onSubmit={event => void create(event)}>
+      <label htmlFor="api-key-name">Key name</label>
+      <input id="api-key-name" value={name} onChange={event => setName(event.target.value)} maxLength={100} placeholder="Adastrion Core" disabled={busy} required />
+      <button className="btn" disabled={busy || !name.trim()}>Create key</button>
+    </form>
+    {keys.loading && <Loading label="Loading API keys…" />}
+    {!keys.loading && !keys.data && <ErrorState message="Couldn't load API keys." onRetry={keys.reload} />}
+    {keys.data && keys.data.length === 0 && <p className="muted">No API keys yet.</p>}
+    {keys.data && keys.data.length > 0 && (
+      <table className="table clients">
+        <caption className="visually-hidden">API keys</caption>
+        <thead><tr><th scope="col">Name</th><th scope="col">Key</th><th scope="col">Can</th><th scope="col">Created</th><th scope="col">Last used</th><th scope="col"><span className="visually-hidden">Actions</span></th></tr></thead>
+        <tbody>
+          {keys.data.map((key) => (
+            <tr key={key.id} className={key.revoked_at ? 'muted' : undefined}>
+              <td data-label="Name">{key.name}</td>
+              <td data-label="Key"><code>{key.prefix}…</code></td>
+              <td data-label="Can">Dispatch research</td>
+              <td data-label="Created"><Timestamp iso={key.created_at} /></td>
+              <td data-label="Last used">{key.last_used_at ? <Timestamp iso={key.last_used_at} /> : <span className="muted">never</span>}</td>
+              <td data-label="Actions">{key.revoked_at ? <span className="muted small">Revoked <Timestamp iso={key.revoked_at} /></span> : <button type="button" className="btn btn-danger-quiet" onClick={() => setTarget(key)}>Revoke</button>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )}
+    <ConfirmDialog open={target !== null} title={`Revoke ${target?.name ?? ''}?`} confirmLabel="Revoke" busy={busy} onCancel={() => setTarget(null)} onConfirm={() => void revoke()}>
+      <p>The key stops working immediately. Research runs it started are stopped and queued again, and their chats lose access to Ledger.</p>
+    </ConfirmDialog>
+  </section>
 }
 
 function ApprovalPassword() {

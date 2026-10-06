@@ -159,7 +159,7 @@ func (db *DB) RevokeToken(ctx context.Context, raw, clientID string) error {
 	if err = lockTokenFamily(ctx, tx, family); err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, `UPDATE oauth_token SET revoked=true WHERE family=$1::uuid`, family); err != nil {
+	if err = revokeTokenFamily(ctx, tx, family); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

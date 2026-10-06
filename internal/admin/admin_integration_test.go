@@ -1853,3 +1853,45 @@ func TestOwnerSharesAProjectWithResearchAndSeesRunStatus(t *testing.T) {
 		t.Fatalf("research detail = %s, %v", res.Body.String(), err)
 	}
 }
+
+// The owner creates an API key, sees its secret once, and revokes it; the key then stops working.
+func TestOwnerManagesAPIKeys(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
+	_, s := login(t, server, "correct horse", "")
+	if res := request(t, server, http.MethodPost, "/admin/api/api-keys", `{"name":"Adastrion Core"}`, map[string]string{"Cookie": s.cookie}); res.Code != http.StatusForbidden {
+		t.Fatalf("create without CSRF = %d", res.Code)
+	}
+	if res := request(t, server, http.MethodPost, "/admin/api/api-keys", `{"name":""}`, authed(s, true)); res.Code != http.StatusBadRequest {
+		t.Fatalf("create without name = %d", res.Code)
+	}
+	created := request(t, server, http.MethodPost, "/admin/api/api-keys", `{"name":"Adastrion Core"}`, authed(s, true))
+	var payload struct {
+		Key struct {
+			ID     int64    `json:"id"`
+			Prefix string   `json:"prefix"`
+			Scopes []string `json:"scopes"`
+		} `json:"key"`
+		Secret string `json:"secret"`
+	}
+	if created.Code != http.StatusCreated || json.Unmarshal(created.Body.Bytes(), &payload) != nil || !strings.HasPrefix(payload.Secret, payload.Key.Prefix) || len(payload.Key.Scopes) != 1 || payload.Key.Scopes[0] != "research:dispatch" {
+		t.Fatalf("create = %d %s", created.Code, created.Body.String())
+	}
+	listed := request(t, server, http.MethodGet, "/admin/api/api-keys", "", authed(s, false))
+	if listed.Code != http.StatusOK || strings.Contains(listed.Body.String(), payload.Secret) || strings.Contains(listed.Body.String(), "hash") || !strings.Contains(listed.Body.String(), "Adastrion Core") {
+		t.Fatalf("list = %d %s", listed.Code, listed.Body.String())
+	}
+	if _, err := db.LookupAPIKey(ctx, payload.Secret); err != nil {
+		t.Fatalf("new key does not work: %v", err)
+	}
+	revoked := request(t, server, http.MethodDelete, "/admin/api/api-keys/"+strconv.FormatInt(payload.Key.ID, 10), "", authed(s, true))
+	if revoked.Code != http.StatusOK || !strings.Contains(revoked.Body.String(), "revoked_at") {
+		t.Fatalf("revoke = %d %s", revoked.Code, revoked.Body.String())
+	}
+	if _, err := db.LookupAPIKey(ctx, payload.Secret); !store.IsNotFound(err) {
+		t.Fatalf("revoked key still works: %v", err)
+	}
+	if res := request(t, server, http.MethodDelete, "/admin/api/api-keys/999999", "", authed(s, true)); res.Code != http.StatusNotFound {
+		t.Fatalf("revoke missing = %d", res.Code)
+	}
+}

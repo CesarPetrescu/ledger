@@ -101,7 +101,8 @@ func TestResearchTokensAreConfinedToTheirOwnTask(t *testing.T) {
 	}
 	dispatcher := connectMCP(t, server.URL+"/mcp/dispatch", "dispatch-token", "Adastrion dispatcher")
 	claim := callTool[dispatchClaim](t, dispatcher, "claim_research_task", map[string]any{"lease_seconds": 120})
-	if !claim.Claimed || claim.Task.ID != created["Mine"].ID || claim.Token == "" || claim.Endpoint != "https://ledger.example.com/mcp/research" {
+	if !claim.Claimed || claim.Task.ID != created["Mine"].ID || claim.Token == "" || claim.Endpoint != "https://ledger.example.com/mcp/research" ||
+		claim.Reason != "first_run" || claim.Chat == nil || !strings.Contains(claim.Chat.Opening, "Call get_task first") || claim.Available == nil {
 		t.Fatalf("claim = %#v", claim)
 	}
 

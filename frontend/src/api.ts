@@ -325,6 +325,16 @@ export interface Client {
   active_refresh_tokens: number
 }
 
+export interface ApiKey {
+  id: number
+  name: string
+  prefix: string
+  scopes: string[]
+  created_at: string
+  last_used_at?: string
+  revoked_at?: string
+}
+
 export interface DeviceRequest {
   user_code: string
   client_name: string
@@ -595,6 +605,9 @@ export const api = {
   listAgents: () => request<{ agents: AgentSummary[] }>('GET', '/agents').then((response) => response.agents),
   listClients: (offset = 0) => request<ClientPage>('GET', `/oauth/clients?limit=50&offset=${offset}`),
   revokeClient: (clientId: string) => request<{ revoked: number }>('POST', '/oauth/revoke', { client_id: clientId }),
+  listApiKeys: () => request<{ keys: ApiKey[] }>('GET', '/api-keys').then((page) => page.keys),
+  createApiKey: (name: string) => request<{ key: ApiKey; secret: string }>('POST', '/api-keys', { name }),
+  revokeApiKey: (id: number) => request<ApiKey>('DELETE', `/api-keys/${id}`),
   getCalendarConnection: () => request<CalendarConnection>('GET', '/calendar/connection'),
   startCalendarLogin: (serverUrl: string) => request<{ id: string; login_url: string }>('POST', '/calendar/connect', { server_url: serverUrl }),
   pollCalendarLogin: (id: string) => request<CalendarConnection & { pending?: boolean }>('POST', `/calendar/connect/${encodeURIComponent(id)}/poll`),

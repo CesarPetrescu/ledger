@@ -123,6 +123,7 @@ func TestComposeAndProxyTopology(t *testing.T) {
 		"set $mcp ledger-mcp:8081;",
 		"proxy_pass http://$mcp",
 		"location ~ ^/mcp/(research|dispatch)$ {",
+		"location ^~ /api/ {",
 		"proxy_set_header X-Ledger-Client-IP $remote_addr",
 	} {
 		if !strings.Contains(nginx, required) {

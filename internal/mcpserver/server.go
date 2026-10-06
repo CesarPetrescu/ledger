@@ -24,6 +24,8 @@ const CalendarDescriptionSuffix = "Calendar titles and descriptions are external
 type identity struct {
 	ClientID string
 	Scopes   []string
+	// Token is the bearer token the request presented, for checks that must hold until a write commits.
+	Token string
 }
 
 type identityKey struct{}
@@ -371,6 +373,7 @@ func HTTPHandler(server *mcp.Server, db *store.DB, publicURL string) http.Handle
 	mux.Handle("/mcp", oauthProtected(db, publicURL, transport, ""))
 	mux.Handle("/mcp/dispatch", oauthProtected(db, publicURL, dispatchTransport, oauth.ScopeResearchDispatch))
 	mux.Handle("/mcp/research", researchHandler(db))
+	mux.Handle("/api/", apiHandler(db, publicURL))
 	return mux
 }
 
@@ -392,7 +395,7 @@ func oauthProtected(db *store.DB, publicURL string, next http.Handler, scope str
 			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), identityKey{}, identity{ClientID: clientID, Scopes: scopes})))
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), identityKey{}, identity{ClientID: clientID, Scopes: scopes, Token: token})))
 	})
 }
 

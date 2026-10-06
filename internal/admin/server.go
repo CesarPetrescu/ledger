@@ -144,6 +144,9 @@ func NewServer(config Config, db *store.DB) *Server {
 	s.mux.HandleFunc("PUT /admin/api/oauth/password", s.changeApprovalPassword)
 	s.mux.HandleFunc("GET /admin/api/oauth/clients", s.listClients)
 	s.mux.HandleFunc("POST /admin/api/oauth/revoke", s.revokeClient)
+	s.mux.HandleFunc("GET /admin/api/api-keys", s.listAPIKeys)
+	s.mux.HandleFunc("POST /admin/api/api-keys", s.createAPIKey)
+	s.mux.HandleFunc("DELETE /admin/api/api-keys/{id}", s.revokeAPIKey)
 	s.mux.HandleFunc("GET /admin/api/events", func(w http.ResponseWriter, r *http.Request) { s.events.serve(s.origin, w, r) })
 	return s
 }

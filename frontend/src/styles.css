@@ -1689,3 +1689,11 @@ label > textarea {
 .research-badge { margin-right: 6px; vertical-align: 1px; }
 .research-share { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 16px; }
 .research-share > span { display: flex; flex-direction: column; gap: 2px; }
+
+/* API keys: the one-time key reveal and the create form. */
+.key-reveal { border: 1px solid var(--border-strong); border-left: 3px solid var(--accent); border-radius: var(--radius); background: var(--surface-accent); padding: 12px 16px; margin: 0 0 12px; }
+.key-reveal p { margin: 0 0 8px; }
+.key-reveal code { display: block; padding: 8px; background: var(--surface); border: 1px solid var(--border); font-size: 0.95rem; }
+.inline-form { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; margin: 0 0 12px; }
+.inline-form label { flex-basis: 100%; }
+.inline-form input { flex: 1 1 220px; min-width: 0; }

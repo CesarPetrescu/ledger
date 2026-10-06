@@ -76,7 +76,7 @@ nginx :8080 (only published port)
 
 ## MCP surface
 
-The server exposes 22 tools on `/mcp`. Project, handoff, change-feed, and transcription tools require `ledger:read`; project, handoff, and research-task mutations require `ledger:write`. Calendar tools use `calendar:read` and `calendar:write`. If a client omits `scope`, `ledger:read` is the default. Research runs use two more endpoints, `/mcp/dispatch` and `/mcp/research`; see [research.md](research.md).
+The server exposes 22 tools on `/mcp`. Project, handoff, change-feed, and transcription tools require `ledger:read`; project, handoff, and research-task mutations require `ledger:write`. Calendar tools use `calendar:read` and `calendar:write`. If a client omits `scope`, `ledger:read` is the default. Research runs use `/mcp/research`, and are dispatched either through `/mcp/dispatch` (OAuth) or the plain JSON API `/api/v1` with an owner-created API key. See [research.md](research.md).
 
 Every tool advertises an object output schema and validates successful structured results against it. `list_projects`, `list_calendars`, and `list_calendar_events` return their lists under `projects`, `calendars`, and `events`, respectively. Handoff IDs and cursors are strings. Tool errors use MCP's `isError` result.
 

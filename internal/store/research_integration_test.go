@@ -6,12 +6,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/cesarpetrescu/ledger/internal/store"
 	"github.com/cesarpetrescu/ledger/internal/testdb"
+	"github.com/cesarpetrescu/ledger/migrations"
 )
 
 func newResearch(t *testing.T, db *store.DB, ctx context.Context, title string, maxAttempts int, depends ...int64) store.ResearchTask {
@@ -384,5 +387,311 @@ func TestConcurrentDispatchersNeverShareATask(t *testing.T) {
 	wg.Wait()
 	if won != 1 {
 		t.Fatalf("%d dispatchers claimed the one task", won)
+	}
+}
+
+func TestAPIKeysAreHashedRevocableAndScoped(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	if _, _, err := db.CreateAPIKey(ctx, "Bad", []string{"ledger:write"}); err == nil {
+		t.Fatal("a key with another scope was created")
+	}
+	key, secret, err := db.CreateAPIKey(ctx, "Adastrion Core", []string{store.ScopeResearchDispatch})
+	if err != nil || !strings.HasPrefix(secret, "ledger_") || key.Prefix != secret[:14] || key.LastUsedAt != nil {
+		t.Fatalf("created = %#v %q, %v", key, secret, err)
+	}
+	var stored int
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM api_key WHERE hash=sha256($1::bytea)`, []byte(secret)).Scan(&stored); err != nil || stored != 1 {
+		t.Fatalf("hash stored = %d, %v", stored, err)
+	}
+	found, err := db.LookupAPIKey(ctx, secret)
+	if err != nil || found.ID != key.ID {
+		t.Fatalf("lookup = %#v, %v", found, err)
+	}
+	if keys, _ := db.ListAPIKeys(ctx); len(keys) != 1 || keys[0].LastUsedAt == nil {
+		t.Fatalf("listed = %#v", keys)
+	}
+	if _, err := db.LookupAPIKey(ctx, secret+"x"); !store.IsNotFound(err) {
+		t.Fatalf("wrong secret = %v", err)
+	}
+	revoked, err := db.RevokeAPIKey(ctx, key.ID)
+	if err != nil || revoked.RevokedAt == nil {
+		t.Fatalf("revoke = %#v, %v", revoked, err)
+	}
+	if _, err := db.LookupAPIKey(ctx, secret); !store.IsNotFound(err) {
+		t.Fatalf("revoked key still works: %v", err)
+	}
+	if _, err := db.RevokeAPIKey(ctx, 999999); !store.IsNotFound(err) {
+		t.Fatalf("revoke missing = %v", err)
+	}
+}
+
+// Every way back to the queue is recorded, so the next run's chat can say what it continues.
+func TestClaimsSayWhyTheRunExists(t *testing.T) {
+	db, ctx := researchDB(t)
+	task := newResearch(t, db, ctx, "Reasons", 3)
+	owner := func(action string) {
+		t.Helper()
+		if _, err := db.UpdateHandoffMessage(ctx, task.MessageID, action, "", store.OwnerSource, "owner", true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	expect := func(reason string) *store.ResearchClaim {
+		t.Helper()
+		c := claim(t, db, ctx)
+		if c == nil || c.Reason != reason {
+			t.Fatalf("claim reason = %#v, want %s", c, reason)
+		}
+		return c
+	}
+	c := expect("first_run")
+	if c.Available.Notes != 0 || c.Available.Files != 0 || c.Available.CheckpointAttempt != nil || c.Available.ProjectName != "Atlas" || c.Available.ProjectShared {
+		t.Fatalf("first available = %#v", c.Available)
+	}
+	if _, err := db.SaveResearchCheckpoint(ctx, task.ID, 1, "half done"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.EndResearchRun(ctx, task.ID, 1, "dispatch-client", "exit 1"); err != nil {
+		t.Fatal(err)
+	}
+	c = expect("retry_after_failure")
+	if c.Available.CheckpointAttempt == nil || *c.Available.CheckpointAttempt != 1 || c.Available.Notes != 0 {
+		t.Fatalf("retry available = %#v", c.Available)
+	}
+	if _, err := db.SubmitResearch(ctx, task.ID, 2, "draft result", []store.ResearchFile{{Filename: "a.txt", Data: []byte("a")}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.AppendHandoffMessage(ctx, store.HandoffMessage{HandoffID: task.ID, Body: "More sources.", WorkState: "ready", Source: store.OwnerSource, ClientID: "owner"}, true); err != nil {
+		t.Fatal(err)
+	}
+	owner("release")
+	c = expect("revision")
+	if c.Available.OwnerNotes != 1 || c.Available.Notes != 2 || c.Available.Files != 1 {
+		t.Fatalf("revision available = %#v", c.Available)
+	}
+	if err := db.AskResearchOwner(ctx, task.ID, 3, "Which year?"); err != nil {
+		t.Fatal(err)
+	}
+	owner("release")
+	expect("answered")
+	owner("release")
+	expect("restarted")
+	if _, err := db.SubmitResearch(ctx, task.ID, 5, "final", nil); err != nil {
+		t.Fatal(err)
+	}
+	owner("complete")
+	owner("reopen")
+	expect("reopened")
+}
+
+func TestResearchOverviewAndSharedProjectContext(t *testing.T) {
+	db, ctx := researchDB(t)
+	queued := newResearch(t, db, ctx, "Queued", 3)
+	running := newResearch(t, db, ctx, "Running", 3)
+	if c := claim(t, db, ctx); c == nil || c.Task.ID != queued.ID {
+		t.Fatalf("claim = %#v", c)
+	}
+	if _, err := db.SubmitResearch(ctx, queued.ID, 1, "result", nil); err != nil {
+		t.Fatal(err)
+	}
+	claim(t, db, ctx)
+	statuses := map[string]string{}
+	all, err := db.ListResearchTasks(ctx, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, task := range all {
+		statuses[task.Title] = task.Status
+	}
+	if len(all) != 2 || statuses["Queued"] != "review" || statuses["Running"] != "running" {
+		t.Fatalf("overview = %#v", all)
+	}
+	if review, _ := db.ListResearchTasks(ctx, "review", 10); len(review) != 1 || review[0].ID != strconv.FormatInt(queued.ID, 10) {
+		t.Fatalf("review filter = %#v", review)
+	}
+	if _, err := db.ListResearchTasks(ctx, "bogus", 0); err == nil {
+		t.Fatal("unknown status accepted")
+	}
+
+	if _, err := db.AppendEntry(ctx, "atlas", "decision", "Use pgvector for search", "claude", "c"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.AppendEntry(ctx, "atlas", "note", "Random note", "claude", "c"); err != nil {
+		t.Fatal(err)
+	}
+	pack, _ := db.ResearchContext(ctx, running.ID, nil)
+	if len(pack.Project.Recent) != 0 {
+		t.Fatalf("unshared project leaked entries: %#v", pack.Project.Recent)
+	}
+	if err := db.SetProjectResearchVisible(ctx, "atlas", true); err != nil {
+		t.Fatal(err)
+	}
+	pack, _ = db.ResearchContext(ctx, running.ID, nil)
+	if len(pack.Project.Recent) != 1 || pack.Project.Recent[0].Body != "Use pgvector for search" || pack.Project.Recent[0].Kind != "decision" {
+		t.Fatalf("shared recent = %#v", pack.Project.Recent)
+	}
+}
+
+// Revoking a dispatcher's credential, key or OAuth, stops the runs it claimed: they go back to the queue
+// without a failure, their tokens die, and no further claim succeeds with a revoked key.
+func TestRevokingADispatcherStopsItsRuns(t *testing.T) {
+	db, ctx := researchDB(t)
+	key, _, err := db.CreateAPIKey(ctx, "Adastrion Core", []string{store.ScopeResearchDispatch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyed := newResearch(t, db, ctx, "Keyed", 3)
+	byOAuth := newResearch(t, db, ctx, "OAuth", 3)
+	c, err := db.ClaimResearchTaskWithKey(ctx, key.ID, 60, key.Name)
+	if err != nil || c == nil || c.Task.ID != keyed.ID {
+		t.Fatalf("keyed claim = %#v, %v", c, err)
+	}
+	o, err := db.ClaimResearchTask(ctx, 60, "OAuth dispatcher", "oauth-dispatcher")
+	if err != nil || o == nil || o.Task.ID != byOAuth.ID {
+		t.Fatalf("oauth claim = %#v, %v", o, err)
+	}
+
+	if _, err := db.RevokeAPIKey(ctx, key.ID); err != nil {
+		t.Fatal(err)
+	}
+	stopped, _ := db.ResearchTask(ctx, keyed.ID)
+	if stopped.State != "ready" || stopped.Failures != 0 || stopped.LeaseUntil != nil || stopped.Runner != "" {
+		t.Fatalf("after key revoke = %#v", stopped)
+	}
+	if _, _, err := db.ResearchRun(ctx, c.Token); !store.IsNotFound(err) {
+		t.Fatalf("revoked key's run token still works: %v", err)
+	}
+	pack, _ := db.ResearchContext(ctx, keyed.ID, nil)
+	if last := pack.Thread[len(pack.Thread)-1]; !strings.Contains(last.Body, "API key was revoked") {
+		t.Fatalf("thread = %#v", pack.Thread)
+	}
+	if _, err := db.ClaimResearchTaskWithKey(ctx, key.ID, 60, key.Name); !errors.Is(err, store.ErrAPIKeyRevoked) {
+		t.Fatalf("claim with a revoked key = %v", err)
+	}
+	if still, _ := db.ResearchTask(ctx, byOAuth.ID); still.State != "in_progress" {
+		t.Fatalf("another dispatcher's run was stopped: %#v", still)
+	}
+
+	if _, err := db.Revoke(ctx, "oauth-dispatcher", false); err != nil {
+		t.Fatal(err)
+	}
+	if oauthStopped, _ := db.ResearchTask(ctx, byOAuth.ID); oauthStopped.State != "ready" || oauthStopped.Failures != 0 {
+		t.Fatalf("after OAuth revoke = %#v", oauthStopped)
+	}
+	if _, _, err := db.ResearchRun(ctx, o.Token); !store.IsNotFound(err) {
+		t.Fatalf("revoked client's run token still works: %v", err)
+	}
+	if again := claim(t, db, ctx); again == nil || again.Reason != "restarted" {
+		t.Fatalf("requeued claim = %#v", again)
+	}
+}
+
+// A task that ran before requeue reasons were recorded is never presented to its next run as new.
+func TestTasksThatRanBeforeAreNeverAFirstRun(t *testing.T) {
+	db, ctx := researchDB(t)
+	task := newResearch(t, db, ctx, "Old", 3)
+	claim(t, db, ctx)
+	if _, err := db.UpdateHandoffMessage(ctx, task.MessageID, "release", "", store.OwnerSource, "owner", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, `UPDATE research_task SET requeue_reason='' WHERE handoff_id=$1`, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	if c := claim(t, db, ctx); c == nil || c.Reason != "requeued" {
+		t.Fatalf("claim = %#v", c)
+	}
+}
+
+// An OAuth dispatcher's claim holds its access token: a revoked token cannot claim, and revoking every
+// OAuth client leaves runs claimed with API keys alone.
+func TestOAuthClaimsHoldTheirAccessToken(t *testing.T) {
+	db, ctx := researchDB(t)
+	if _, err := db.PutClient(ctx, store.OAuthClient{ClientID: "oauth-dispatcher", Kind: "device", Name: "Dispatcher", RedirectURIs: []string{}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO oauth_token(hash,kind,client_id,scope,family,expires_at) VALUES(sha256('access-1'::bytea),'access','oauth-dispatcher','research:dispatch','00000000-0000-4000-8000-000000000009',now()+interval '15 minutes')`); err != nil {
+		t.Fatal(err)
+	}
+	key, _, _ := db.CreateAPIKey(ctx, "Keyed dispatcher", []string{store.ScopeResearchDispatch})
+	newResearch(t, db, ctx, "By OAuth", 3)
+	keyed := newResearch(t, db, ctx, "By key", 3)
+	if c, err := db.ClaimResearchTaskWithAccess(ctx, "access-1", 60, "Dispatcher", "oauth-dispatcher"); err != nil || c == nil {
+		t.Fatalf("OAuth claim = %#v, %v", c, err)
+	}
+	if c, err := db.ClaimResearchTaskWithKey(ctx, key.ID, 60, key.Name); err != nil || c == nil || c.Task.ID != keyed.ID {
+		t.Fatalf("key claim = %#v, %v", c, err)
+	}
+	if _, err := db.Revoke(ctx, "", true); err != nil {
+		t.Fatal(err)
+	}
+	if still, _ := db.ResearchTask(ctx, keyed.ID); still.State != "in_progress" {
+		t.Fatalf("revoking all OAuth clients stopped an API-key run: %#v", still)
+	}
+	newResearch(t, db, ctx, "After revoke", 3)
+	if _, err := db.ClaimResearchTaskWithAccess(ctx, "access-1", 60, "Dispatcher", "oauth-dispatcher"); !errors.Is(err, store.ErrAccessRevoked) {
+		t.Fatalf("claim with a revoked token = %v", err)
+	}
+	if _, err := db.ClaimResearchTaskWithAccess(ctx, "never-issued", 60, "Dispatcher", "oauth-dispatcher"); !errors.Is(err, store.ErrAccessRevoked) {
+		t.Fatalf("claim with an unknown token = %v", err)
+	}
+}
+
+// Revoking an OAuth token family (the dispatcher logging out, or replay detected) stops the runs that
+// family claimed, and only those.
+func TestRevokingATokenFamilyStopsItsRuns(t *testing.T) {
+	db, ctx := researchDB(t)
+	if _, err := db.PutClient(ctx, store.OAuthClient{ClientID: "oauth-dispatcher", Kind: "device", Name: "Dispatcher", RedirectURIs: []string{}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, token := range []struct{ raw, family string }{{"access-a", "00000000-0000-4000-8000-00000000000a"}, {"access-b", "00000000-0000-4000-8000-00000000000b"}} {
+		if _, err := db.Pool.Exec(ctx, `INSERT INTO oauth_token(hash,kind,client_id,scope,family,expires_at) VALUES(sha256($1::bytea),'access','oauth-dispatcher','research:dispatch',$2,now()+interval '15 minutes')`, []byte(token.raw), token.family); err != nil {
+			t.Fatal(err)
+		}
+	}
+	task := newResearch(t, db, ctx, "Family", 3)
+	c, err := db.ClaimResearchTaskWithAccess(ctx, "access-a", 60, "Dispatcher", "oauth-dispatcher")
+	if err != nil || c == nil {
+		t.Fatalf("claim = %#v, %v", c, err)
+	}
+	if err := db.RevokeToken(ctx, "access-b", "oauth-dispatcher"); err != nil {
+		t.Fatal(err)
+	}
+	if still, _ := db.ResearchTask(ctx, task.ID); still.State != "in_progress" {
+		t.Fatalf("another family's revocation stopped the run: %#v", still)
+	}
+	if err := db.RevokeToken(ctx, "access-a", "oauth-dispatcher"); err != nil {
+		t.Fatal(err)
+	}
+	stopped, _ := db.ResearchTask(ctx, task.ID)
+	if stopped.State != "ready" || stopped.Failures != 0 {
+		t.Fatalf("after family revoke = %#v", stopped)
+	}
+	if _, _, err := db.ResearchRun(ctx, c.Token); !store.IsNotFound(err) {
+		t.Fatalf("revoked family's run token still works: %v", err)
+	}
+}
+
+// Migration 0019 requeues runs in flight when it is applied: they were claimed without a recorded token
+// family, so a later family revocation could not find them. This runs that statement from the file.
+func TestMigrationRequeuesRunsInFlight(t *testing.T) {
+	db, ctx := researchDB(t)
+	task := newResearch(t, db, ctx, "In flight", 3)
+	c := claim(t, db, ctx)
+	sql, err := fs.ReadFile(migrations.Files, "0019_api_keys.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	statement := string(sql[strings.Index(string(sql), "WITH stopped AS"):])
+	if _, err := db.Pool.Exec(ctx, statement); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := db.ResearchTask(ctx, task.ID)
+	if after.State != "ready" || after.LeaseUntil != nil || after.Runner != "" || after.Failures != 0 {
+		t.Fatalf("after migration = %#v", after)
+	}
+	if _, _, err := db.ResearchRun(ctx, c.Token); !store.IsNotFound(err) {
+		t.Fatalf("in-flight run token survived the migration: %v", err)
+	}
+	if next := claim(t, db, ctx); next == nil || next.Reason != "restarted" || next.Task.Attempt != 2 {
+		t.Fatalf("claim after migration = %#v", next)
 	}
 }
