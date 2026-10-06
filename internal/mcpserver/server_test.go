@@ -43,7 +43,7 @@ func TestToolsListIsExactAndAnnotated(t *testing.T) {
 		"list_calendars": true, "list_calendar_events": true, "create_calendar_event": false, "update_calendar_event": false, "delete_calendar_event": false,
 		"list_handoffs": true, "get_handoff": true, "create_handoff": false, "append_handoff_message": false,
 		"update_handoff_message": false, "attach_handoff_file": false, "read_handoff_file": true,
-		"create_research_task": false,
+		"create_research_task": false, "list_research_tasks": true, "get_research_task": true, "review_research_task": false,
 	}
 	if len(result.Tools) != len(want) {
 		t.Fatalf("got %d tools", len(result.Tools))
@@ -77,6 +77,9 @@ func TestToolsListIsExactAndAnnotated(t *testing.T) {
 		"attach_handoff_file":    {handoffFileOutput(file)},
 		"read_handoff_file":      {map[string]string{"id": "9007199254740993", "filename": "note.txt", "uri": "ledger://handoff-file/9007199254740993"}},
 		"create_research_task":   {taskOutput(researchSample(now))},
+		"review_research_task":   {taskOutput(researchSample(now))},
+		"list_research_tasks":    {researchTaskList{Tasks: []store.ResearchSummary{}}, researchTaskList{Tasks: []store.ResearchSummary{{ID: "9", Title: "Survey", Status: "review", Attempt: 1, MaxAttempts: 3, CreatedAt: now, UpdatedAt: now, HeartbeatAt: &now}}}},
+		"get_research_task":      {researchView{researchContextOutput: contextOutput(store.ResearchContext{Task: researchSample(now), Files: []store.HandoffFile{}, Thread: []store.ResearchNote{{From: "researcher", Body: "# Result", At: now, Files: []store.HandoffFile{}}}}), Result: "awaiting_review"}},
 	}
 	for name, key := range map[string]string{"list_projects": "projects", "list_calendars": "calendars", "list_calendar_events": "events"} {
 		for i, value := range samples[name] {

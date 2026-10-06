@@ -402,6 +402,16 @@ func (db *DB) UpdateHandoffMessage(ctx context.Context, id int64, action, target
 		return HandoffMessage{}, err
 	}
 	defer tx.Rollback(ctx)
+	message, err := updateHandoffMessage(ctx, tx, id, action, target, source, clientID, admin)
+	if err != nil {
+		return HandoffMessage{}, err
+	}
+	return message, tx.Commit(ctx)
+}
+
+// updateHandoffMessage applies an action inside the caller's transaction.
+func updateHandoffMessage(ctx context.Context, tx pgx.Tx, id int64, action, target, source, clientID string, admin bool) (HandoffMessage, error) {
+	var err error
 	var state messageState
 	var briefID int64
 	var phase string
@@ -526,6 +536,14 @@ requeue_reason=CASE WHEN $2 THEN $3 ELSE requeue_reason END WHERE handoff_id=$1 
 				return HandoffMessage{}, err
 			}
 		}
+		// Accepting publishes the result to the project's log, in the same transaction.
+		// ponytail: takes the project lock after the handoff lock; a project deleted at the same instant can
+		// deadlock with it, and Postgres then aborts one of the two for a retry.
+		if action == "complete" {
+			if err := publishResearch(ctx, tx, state.HandoffID, source); err != nil {
+				return HandoffMessage{}, err
+			}
+		}
 	}
 	messages := []HandoffMessage{message}
 	if err := addFilesToMessages(ctx, tx, messages); err != nil {
@@ -537,7 +555,7 @@ WHEN EXISTS (SELECT 1 FROM handoff_message WHERE handoff_id=$1 AND work_state<>'
 ELSE COALESCE(archived_at,now()) END WHERE id=$1`, state.HandoffID); err != nil {
 		return HandoffMessage{}, err
 	}
-	return message, tx.Commit(ctx)
+	return message, nil
 }
 
 func nullableString(value string) any {
@@ -632,7 +650,9 @@ func (db *DB) GetHandoffFile(ctx context.Context, id int64, viewerClientID strin
 	var file HandoffFile
 	err := db.Pool.QueryRow(ctx, `SELECT f.id,f.message_id,m.handoff_id,h.title,f.filename,f.media_type,f.size_bytes,encode(f.sha256,'hex'),f.created_at,f.data
 FROM handoff_file f JOIN handoff_message m ON m.id=f.message_id JOIN handoff h ON h.id=m.handoff_id
-WHERE f.id=$1 AND ($2 OR (h.kind='general' AND (m.work_state<>'draft' OR m.client_id=$3)))`, id, admin, viewerClientID).
+WHERE f.id=$1 AND ($2 OR (m.work_state<>'draft' OR m.client_id=$3)
+  -- A draft research task, and the files copied into it, belong to its creator until it is queued.
+  AND NOT EXISTS (SELECT 1 FROM research_task t JOIN handoff_message b ON b.id=t.message_id WHERE t.handoff_id=h.id AND b.work_state='draft' AND h.client_id<>$3))`, id, admin, viewerClientID).
 		Scan(&file.ID, &file.MessageID, &file.HandoffID, &file.HandoffTitle, &file.Filename, &file.MediaType, &file.SizeBytes, &file.SHA256, &file.CreatedAt, &file.Data)
 	return file, err
 }

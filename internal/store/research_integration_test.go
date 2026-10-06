@@ -496,7 +496,7 @@ func TestResearchOverviewAndSharedProjectContext(t *testing.T) {
 	}
 	claim(t, db, ctx)
 	statuses := map[string]string{}
-	all, err := db.ListResearchTasks(ctx, "", 0)
+	all, err := db.ListResearchTasks(ctx, "", "", "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -506,10 +506,10 @@ func TestResearchOverviewAndSharedProjectContext(t *testing.T) {
 	if len(all) != 2 || statuses["Queued"] != "review" || statuses["Running"] != "running" {
 		t.Fatalf("overview = %#v", all)
 	}
-	if review, _ := db.ListResearchTasks(ctx, "review", 10); len(review) != 1 || review[0].ID != strconv.FormatInt(queued.ID, 10) {
+	if review, _ := db.ListResearchTasks(ctx, "review", "", "", 10); len(review) != 1 || review[0].ID != strconv.FormatInt(queued.ID, 10) {
 		t.Fatalf("review filter = %#v", review)
 	}
-	if _, err := db.ListResearchTasks(ctx, "bogus", 0); err == nil {
+	if _, err := db.ListResearchTasks(ctx, "bogus", "", "", 0); err == nil {
 		t.Fatal("unknown status accepted")
 	}
 
@@ -795,5 +795,119 @@ func TestOldBudgetsNoLongerGovernResearch(t *testing.T) {
 	var version int
 	if err := db.Pool.QueryRow(ctx, `SELECT spec::text,spec_version FROM research_task WHERE handoff_id=$1`, task.ID).Scan(&stored, &version); err != nil || strings.Contains(stored, "budget") || !strings.Contains(stored, `"execution_mode": "until_done"`) || version != 2 {
 		t.Fatalf("migrated spec = %s v%d, %v", stored, version, err)
+	}
+}
+
+// The longest valid result, title, and attachments still publish on accept, inside the entry limit.
+func TestAcceptPublishesWithinTheEntryLimit(t *testing.T) {
+	db, ctx := researchDB(t)
+	task, err := db.CreateResearchTask(ctx, store.NewResearchTask{ProjectSlug: "atlas", Title: strings.Repeat("T", 200), Source: "c", ClientID: "c", Spec: store.ResearchSpec{Objective: "x", Acceptance: []string{"y"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim(t, db, ctx)
+	var files []store.ResearchFile
+	for i := 0; i < 10; i++ {
+		files = append(files, store.ResearchFile{Filename: fmt.Sprintf("%d%s.csv", i, strings.Repeat("n", 246)), Data: []byte("x")})
+	}
+	if _, err := db.SubmitResearch(ctx, task.ID, 1, strings.Repeat("r", 100000), files); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ReviewResearch(ctx, task.ID, "accept", "", "claude-code", "claude-client"); err != nil {
+		t.Fatalf("accept = %v", err)
+	}
+	project, _ := db.GetProject(ctx, "atlas", 5)
+	if len(project.Entries) != 1 || len([]rune(project.Entries[0].Body)) > 4000 || !strings.Contains(project.Entries[0].Body, "10 file(s)") {
+		t.Fatalf("published %d entries, body %d runes", len(project.Entries), len([]rune(project.Entries[0].Body)))
+	}
+	if again, _ := db.ResearchTask(ctx, task.ID); again.State != "done" {
+		t.Fatalf("state = %s", again.State)
+	}
+}
+
+// Accepted results from before publishing existed are published by the sweep, once; and the catch-all
+// never publishes into an owner project that happens to use its slug.
+func TestPublishingCatchesUpAndKeepsOutOfOwnerProjects(t *testing.T) {
+	db, ctx := researchDB(t)
+	// The owner holds the preferred slug, and another project even claims the catch-all's type.
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "research", Name: "My research notes", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "ledger-research-1", Name: "Lookalike", Tier: "park", Type: store.ResearchProjectType}); err != nil {
+		t.Fatal(err)
+	}
+	task, err := db.CreateResearchTask(ctx, store.NewResearchTask{Title: "Legacy", Source: "c", ClientID: "c", Spec: store.ResearchSpec{Objective: "x", Acceptance: []string{"y"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim(t, db, ctx)
+	if _, err := db.SubmitResearch(ctx, task.ID, 1, "Legacy findings", nil); err != nil {
+		t.Fatal(err)
+	}
+	// Accepted the way an older Ledger did: the brief done, nothing published.
+	if _, err := db.Pool.Exec(ctx, `UPDATE handoff_message SET work_state='done' WHERE id=$1`, task.MessageID); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := db.PublishAcceptedResearch(ctx); err != nil || n != 1 {
+		t.Fatalf("catch-up published %d, %v", n, err)
+	}
+	if n, _ := db.PublishAcceptedResearch(ctx); n != 0 {
+		t.Fatalf("published again: %d", n)
+	}
+	mine, _ := db.GetProject(ctx, "research", 5)
+	if len(mine.Entries) != 0 || mine.Project.Name != "My research notes" {
+		t.Fatalf("owner project touched: %#v", mine)
+	}
+	catchAll, err := db.GetProject(ctx, "ledger-research-2", 5)
+	if err != nil || catchAll.Project.Type != store.ResearchProjectType || len(catchAll.Entries) != 1 || !strings.Contains(catchAll.Entries[0].Body, "Legacy findings") {
+		t.Fatalf("catch-all = %#v, %v", catchAll, err)
+	}
+	if lookalike, _ := db.GetProject(ctx, "ledger-research-1", 5); len(lookalike.Entries) != 0 {
+		t.Fatalf("published into a lookalike project: %#v", lookalike.Entries)
+	}
+	// Later results go to the same catch-all.
+	second, err := db.CreateResearchTask(ctx, store.NewResearchTask{Title: "Second", Source: "c", ClientID: "c", Spec: store.ResearchSpec{Objective: "x", Acceptance: []string{"y"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim(t, db, ctx)
+	if _, err := db.SubmitResearch(ctx, second.ID, 1, "Second findings", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ReviewResearch(ctx, second.ID, "accept", "", "claude-code", "claude-client"); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := db.GetProject(ctx, "ledger-research-2", 5); len(again.Entries) != 2 {
+		t.Fatalf("second result went elsewhere: %#v", again.Entries)
+	}
+	// Trashed, the catch-all keeps its slug free for a restore; restored, it is the catch-all again.
+	trashID, _, err := db.TrashProject(ctx, "ledger-research-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	accept := func(title string) {
+		t.Helper()
+		next, err := db.CreateResearchTask(ctx, store.NewResearchTask{Title: title, Source: "c", ClientID: "c", Spec: store.ResearchSpec{Objective: "x", Acceptance: []string{"y"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		claim(t, db, ctx)
+		if _, err := db.SubmitResearch(ctx, next.ID, 1, title+" findings", nil); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ReviewResearch(ctx, next.ID, "accept", "", "claude-code", "claude-client"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	accept("While trashed")
+	if stand, err := db.GetProject(ctx, "ledger-research-3", 5); err != nil || len(stand.Entries) != 1 {
+		t.Fatalf("stand-in catch-all = %#v, %v", stand, err)
+	}
+	if err := db.RestoreTrash(ctx, trashID); err != nil {
+		t.Fatalf("restore = %v", err)
+	}
+	accept("After restore")
+	if restored, _ := db.GetProject(ctx, "ledger-research-2", 5); len(restored.Entries) != 3 {
+		t.Fatalf("restored catch-all = %#v", restored.Entries)
 	}
 }

@@ -76,7 +76,7 @@ nginx :8080 (only published port)
 
 ## MCP surface
 
-The server exposes 22 tools on `/mcp`. Project, handoff, change-feed, and transcription tools require `ledger:read`; project, handoff, and research-task mutations require `ledger:write`. Calendar tools use `calendar:read` and `calendar:write`. Approving an app in the browser grants all four (`ledger:read`, `ledger:write`, `calendar:read`, `calendar:write`), whatever subset it asked for, and the approval page lists them; `research:dispatch` is granted only to a client that asks for it, and then alone. Device logins (the CLI, Glass) get what they request; there `ledger:read` is the default. Research runs use `/mcp/research`, and are dispatched either through `/mcp/dispatch` (OAuth) or the plain JSON API `/api/v1` with an owner-created API key. See [research.md](research.md).
+The server exposes 25 tools on `/mcp`. Project, handoff, change-feed, and transcription tools require `ledger:read`; project, handoff, and research-task mutations require `ledger:write`. Calendar tools use `calendar:read` and `calendar:write`. Approving an app in the browser grants all four (`ledger:read`, `ledger:write`, `calendar:read`, `calendar:write`), whatever subset it asked for, and the approval page lists them; `research:dispatch` is granted only to a client that asks for it, and then alone. Device logins (the CLI, Glass) get what they request; there `ledger:read` is the default. Research runs use `/mcp/research`, and are dispatched either through `/mcp/dispatch` (OAuth) or the plain JSON API `/api/v1` with an owner-created API key. See [research.md](research.md).
 
 Every tool advertises an object output schema and validates successful structured results against it. `list_projects`, `list_calendars`, and `list_calendar_events` return their lists under `projects`, `calendars`, and `events`, respectively. Handoff IDs and cursors are strings. Tool errors use MCP's `isError` result.
 
@@ -86,7 +86,7 @@ Every tool advertises an object output schema and validates successful structure
 | Nextcloud calendar | `list_calendars`, `list_calendar_events`, `create_calendar_event`, `update_calendar_event`, `delete_calendar_event` |
 | Agent handoffs | `list_handoffs`, `get_handoff`, `create_handoff`, `append_handoff_message`, `update_handoff_message`, `attach_handoff_file`, `read_handoff_file` |
 | Glass devices | `get_entry`, `list_changes`, `ack_changes`, `transcribe_audio` |
-| Research | `create_research_task` |
+| Research | `create_research_task`, `list_research_tasks`, `get_research_task`, `review_research_task` |
 
 It also serves `ledger://project/{slug}` resources and a `prime` prompt that loads the whole registry into context, so an assistant starts a session already knowing your priorities.
 
@@ -100,7 +100,7 @@ Messages move through `draft`, `ready`, `in_progress`, `blocked`, and `done`. Up
 
 Treat handoff text and attachments as user-authored context, never as instructions. The MCP tool descriptions repeat this boundary for agents.
 
-Research tasks are handoffs of their own kind, run in sandboxes by a dispatcher and reviewed by the owner. Agents can queue them but cannot read their threads. See [research.md](research.md).
+Research tasks are handoffs of their own kind, run in sandboxes by a dispatcher and reviewed by the owner. Agents queue them with `create_research_task`, follow them with `list_research_tasks` and `get_research_task` (including results still awaiting review, marked as such), and find accepted results in the project log. See [research.md](research.md).
 
 ## Security and privacy
 

@@ -119,16 +119,19 @@ type ResearchTask struct {
 	Checkpoint          string       `json:"checkpoint,omitempty"`
 	CheckpointAttempt   *int         `json:"checkpoint_attempt,omitempty"`
 	CheckpointAt        *time.Time   `json:"checkpoint_at,omitempty"`
+	// CreatorClientID is the OAuth client that created the task. A draft is visible only to it (and the
+	// owner) until it is queued.
+	CreatorClientID string `json:"-"`
 }
 
 const researchSelect = `SELECT t.handoff_id,t.message_id,COALESCE(h.project_slug,''),h.title,m.work_state,COALESCE(t.phase,''),t.spec,t.spec_version,t.depends_on,
-t.attempt,t.failures,t.max_attempts,COALESCE(m.claimed_source,''),t.lease_until,t.heartbeat_at,t.progress,t.last_error,t.checkpoint,t.checkpoint_attempt,t.checkpoint_at,COALESCE(t.continue_from_task_id,0),COALESCE(t.continue_from_attempt,0)
+t.attempt,t.failures,t.max_attempts,COALESCE(m.claimed_source,''),t.lease_until,t.heartbeat_at,t.progress,t.last_error,t.checkpoint,t.checkpoint_attempt,t.checkpoint_at,COALESCE(t.continue_from_task_id,0),COALESCE(t.continue_from_attempt,0),h.client_id
 FROM research_task t JOIN handoff h ON h.id=t.handoff_id JOIN handoff_message m ON m.id=t.message_id`
 
 func (db *DB) ResearchTask(ctx context.Context, id int64) (ResearchTask, error) {
 	var t ResearchTask
 	err := db.Pool.QueryRow(ctx, researchSelect+` WHERE t.handoff_id=$1`, id).Scan(&t.ID, &t.MessageID, &t.ProjectSlug, &t.Title, &t.State, &t.Phase, &t.Spec, &t.SpecVersion, &t.DependsOn,
-		&t.Attempt, &t.Failures, &t.MaxAttempts, &t.Runner, &t.LeaseUntil, &t.HeartbeatAt, &t.Progress, &t.LastError, &t.Checkpoint, &t.CheckpointAttempt, &t.CheckpointAt, &t.ContinueFromTaskID, &t.ContinueFromAttempt)
+		&t.Attempt, &t.Failures, &t.MaxAttempts, &t.Runner, &t.LeaseUntil, &t.HeartbeatAt, &t.Progress, &t.LastError, &t.Checkpoint, &t.CheckpointAttempt, &t.CheckpointAt, &t.ContinueFromTaskID, &t.ContinueFromAttempt, &t.CreatorClientID)
 	// The policy is fixed, so every task reads as until done, whatever an older stored spec held.
 	t.Spec.ExecutionMode = ExecutionUntilDone
 	return t, err
@@ -891,7 +894,8 @@ const researchStatusSQL = `CASE m.work_state WHEN 'draft' THEN 'draft' WHEN 'rea
 
 // ListResearchTasks lists tasks by status, newest activity first. status "" means every task that is
 // not a draft or accepted; "all" means every task.
-func (db *DB) ListResearchTasks(ctx context.Context, status string, limit int) ([]ResearchSummary, error) {
+// viewer, when set, hides other clients' drafts: a draft belongs to its creator until it is queued.
+func (db *DB) ListResearchTasks(ctx context.Context, status, projectSlug, viewer string, limit int) ([]ResearchSummary, error) {
 	if status != "" && status != "all" && !slices.Contains(ResearchStatuses, status) {
 		return nil, fmt.Errorf("status must be one of %s, or all", strings.Join(ResearchStatuses, ", "))
 	}
@@ -901,17 +905,210 @@ func (db *DB) ListResearchTasks(ctx context.Context, status string, limit int) (
 	if limit < 1 || limit > 100 {
 		return nil, fmt.Errorf("limit must be between 1 and 100")
 	}
-	rows, err := db.Pool.Query(ctx, `SELECT * FROM (SELECT t.handoff_id::text AS id,h.title,COALESCE(h.project_slug,''),`+researchStatusSQL+` AS status,t.attempt,t.failures,t.max_attempts,
- COALESCE(m.claimed_source,''),t.lease_until,t.heartbeat_at,t.progress,t.last_error,h.created_at,h.updated_at
+	rows, err := db.Pool.Query(ctx, `SELECT * FROM (SELECT t.handoff_id::text AS id,h.title,COALESCE(h.project_slug,'') AS project_slug,`+researchStatusSQL+` AS status,t.attempt,t.failures,t.max_attempts,
+ COALESCE(m.claimed_source,''),t.lease_until,t.heartbeat_at,t.progress,t.last_error,h.created_at,h.updated_at,h.client_id AS creator
 FROM research_task t JOIN handoff h ON h.id=t.handoff_id JOIN handoff_message m ON m.id=t.message_id) s
-WHERE ($1='all' OR ($1='' AND s.status NOT IN ('draft','accepted')) OR s.status=$1) ORDER BY s.updated_at DESC,s.id::bigint DESC LIMIT $2`, status, limit)
+WHERE ($1='all' OR ($1='' AND s.status NOT IN ('draft','accepted')) OR s.status=$1) AND ($3='' OR s.project_slug=$3) AND (s.status<>'draft' OR $4='' OR s.creator=$4) ORDER BY s.updated_at DESC,s.id::bigint DESC LIMIT $2`, status, limit, projectSlug, viewer)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (ResearchSummary, error) {
 		var r ResearchSummary
-		return r, row.Scan(&r.ID, &r.Title, &r.ProjectSlug, &r.Status, &r.Attempt, &r.Failures, &r.MaxAttempts, &r.Runner, &r.LeaseUntil, &r.HeartbeatAt, &r.Progress, &r.LastError, &r.CreatedAt, &r.UpdatedAt)
+		var creator string
+		return r, row.Scan(&r.ID, &r.Title, &r.ProjectSlug, &r.Status, &r.Attempt, &r.Failures, &r.MaxAttempts, &r.Runner, &r.LeaseUntil, &r.HeartbeatAt, &r.Progress, &r.LastError, &r.CreatedAt, &r.UpdatedAt, &creator)
 	})
+}
+
+// ResearchProjectSlug is the preferred slug for the project that receives accepted results with no project
+// of their own; if the owner already uses it, the catch-all takes the next free ledger-research-N slug.
+const (
+	ResearchProjectSlug = "research"
+	ResearchProjectType = "Ledger research"
+)
+
+// researchProject returns the slug of Ledger's catch-all research project, creating it on first use under
+// the first free slug. The project.research_catchall mark, which only Ledger sets, says which one it is.
+func researchProject(ctx context.Context, tx pgx.Tx) (string, error) {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('ledger:research-catchall'))`); err != nil {
+		return "", err
+	}
+	var slug string
+	err := tx.QueryRow(ctx, `SELECT slug FROM project WHERE research_catchall ORDER BY slug LIMIT 1`).Scan(&slug)
+	if err == nil || !IsNotFound(err) {
+		return slug, err
+	}
+	for i := 0; ; i++ {
+		slug = ResearchProjectSlug
+		if i > 0 {
+			slug = fmt.Sprintf("ledger-research-%d", i)
+		}
+		// A slug held by a project in Trash stays free for its restore.
+		tag, err := tx.Exec(ctx, `INSERT INTO project(slug,name,tier,type,goal,description,research_catchall) SELECT $1,'Research','park',$2,
+'Accepted research results that belong to no other project','Ledger publishes accepted research here when the task named no project. Each entry links to the full result through get_research_task.',true
+WHERE NOT EXISTS (SELECT 1 FROM trash WHERE kind='project' AND project_slug=$1) ON CONFLICT (slug) DO NOTHING`, slug, ResearchProjectType)
+		if err != nil {
+			return "", err
+		}
+		if tag.RowsAffected() == 1 {
+			return slug, nil
+		}
+	}
+}
+
+const maxPublishedExcerpt = 3200
+
+// publishResearch writes an accepted task's result into its project's log, so every agent finds it with
+// search and get_project. It runs inside the owner's Accept, holding the task's handoff lock.
+func publishResearch(ctx context.Context, tx pgx.Tx, id int64, acceptedBy string) error {
+	var title, slug string
+	if err := tx.QueryRow(ctx, `SELECT title,COALESCE(project_slug,'') FROM handoff WHERE id=$1`, id).Scan(&title, &slug); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE research_task SET published_at=now() WHERE handoff_id=$1`, id); err != nil {
+		return err
+	}
+	var result string
+	var resultID int64
+	err := tx.QueryRow(ctx, `SELECT id,body FROM handoff_message WHERE handoff_id=$1 AND client_id LIKE 'research:%' AND work_state='done' ORDER BY id DESC LIMIT 1`, id).Scan(&resultID, &result)
+	if IsNotFound(err) {
+		return nil // nothing was submitted, so there is nothing to publish
+	}
+	if err != nil {
+		return err
+	}
+	var files []string
+	rows, err := tx.Query(ctx, `SELECT filename FROM handoff_file WHERE message_id=$1 ORDER BY id`, resultID)
+	if err != nil {
+		return err
+	}
+	if files, err = pgx.CollectRows(rows, pgx.RowTo[string]); err != nil {
+		return err
+	}
+	if slug == "" {
+		if slug, err = researchProject(ctx, tx); err != nil {
+			return err
+		}
+	}
+	// The note must fit an entry, so the excerpt gets whatever the title and pointer leave of the limit,
+	// and the file names are dropped if even they do not fit.
+	head := fmt.Sprintf("Accepted research #%d: %s\n\n", id, title)
+	pointer := func(names bool) string {
+		tail := "\n\nFull result"
+		if len(files) > 0 && names {
+			tail += fmt.Sprintf(" and %d file(s) (%s)", len(files), strings.Join(files, ", "))
+		} else if len(files) > 0 {
+			tail += fmt.Sprintf(" and %d file(s)", len(files))
+		}
+		return tail + fmt.Sprintf(": get_research_task with id \"%d\".", id)
+	}
+	tail := pointer(true)
+	room := maxEntryBodyRunes - utf8.RuneCountInString(head) - utf8.RuneCountInString(tail) - 1
+	if room < 400 {
+		tail = pointer(false)
+		room = maxEntryBodyRunes - utf8.RuneCountInString(head) - utf8.RuneCountInString(tail) - 1
+	}
+	room = min(room, maxPublishedExcerpt)
+	excerpt := strings.TrimSpace(result)
+	if runes := []rune(excerpt); len(runes) > room {
+		excerpt = strings.TrimSpace(string(runes[:room])) + "…"
+	}
+	var b strings.Builder
+	b.WriteString(head + excerpt + tail)
+	context := fmt.Sprintf("research task #%d, accepted", id)
+	if acceptedBy != OwnerSource {
+		context += " by " + acceptedBy
+	}
+	_, _, err = insertEntry(ctx, tx, NewEntry{Slug: slug, Kind: "note", Body: b.String(), Source: OwnerSource, ClientID: researchNoteSource, Context: context})
+	return err
+}
+
+// PublishAcceptedResearch publishes accepted results that were never published (accepted before
+// publishing existed). The research sweep runs it, so an upgrade catches up on its own.
+func (db *DB) PublishAcceptedResearch(ctx context.Context) (int, error) {
+	rows, err := db.Pool.Query(ctx, `SELECT t.handoff_id FROM research_task t JOIN handoff_message m ON m.id=t.message_id WHERE m.work_state='done' AND t.published_at IS NULL`)
+	if err != nil {
+		return 0, err
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+	if err != nil {
+		return 0, err
+	}
+	published := 0
+	var failed error
+	for _, id := range ids {
+		tx, err := db.Pool.Begin(ctx)
+		if err != nil {
+			return published, err
+		}
+		l, err := lockResearch(ctx, tx, id)
+		var unpublished bool
+		if err == nil && l.State == "done" {
+			err = tx.QueryRow(ctx, `SELECT published_at IS NULL FROM research_task WHERE handoff_id=$1`, id).Scan(&unpublished)
+		}
+		if err == nil && unpublished {
+			if err = publishResearch(ctx, tx, id, OwnerSource); err == nil {
+				if err = tx.Commit(ctx); err == nil {
+					published++
+				}
+			}
+		}
+		tx.Rollback(ctx)
+		if err != nil {
+			failed = fmt.Errorf("publish research task %d: %w", id, err) // one failure does not hold up the rest
+		}
+	}
+	return published, failed
+}
+
+// ErrResearchNotReviewable refuses a review of a task that has no result or question waiting.
+var ErrResearchNotReviewable = errors.New("research task has no result waiting for review")
+
+// ReviewResearch lets an agent do what the owner's review buttons do: accept a submitted result (which
+// publishes it), or send it back with feedback, which also answers a question. The feedback becomes a
+// thread note the next run reads.
+func (db *DB) ReviewResearch(ctx context.Context, id int64, action, feedback, source, clientID string) (ResearchTask, error) {
+	feedback = strings.TrimSpace(feedback)
+	move := map[string]string{"accept": "complete", "send_back": "release"}[action]
+	if move == "" {
+		return ResearchTask{}, fmt.Errorf("action must be accept or send_back")
+	}
+	if action == "send_back" && feedback == "" {
+		return ResearchTask{}, fmt.Errorf("send_back needs feedback: what to change, or the answer to the question")
+	}
+	if feedback != "" {
+		if err := ValidateHandoffMessage(feedback, "", "done"); err != nil {
+			return ResearchTask{}, err
+		}
+	}
+	if err := validateHandoffAttribution(source, clientID); err != nil {
+		return ResearchTask{}, err
+	}
+	// The check, the feedback, and the decision commit together, so a concurrent review or a failed
+	// publish leaves no stray feedback behind.
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return ResearchTask{}, err
+	}
+	defer tx.Rollback(ctx)
+	l, err := lockResearch(ctx, tx, id)
+	if err != nil {
+		return ResearchTask{}, err
+	}
+	if l.State != "blocked" || l.Phase != "review" && (action == "accept" || l.Phase != "question") {
+		return ResearchTask{}, ErrResearchNotReviewable
+	}
+	if feedback != "" {
+		if _, err := insertHandoffMessage(ctx, tx, HandoffMessage{HandoffID: id, Body: feedback, WorkState: "done", Source: source, ClientID: clientID}); err != nil {
+			return ResearchTask{}, err
+		}
+	}
+	if _, err := updateHandoffMessage(ctx, tx, l.MessageID, move, "", source, clientID, true); err != nil {
+		return ResearchTask{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return ResearchTask{}, err
+	}
+	return db.ResearchTask(ctx, id)
 }
 
 // ResearchFile returns one attachment from this task's own thread, for the run's read_file tool.

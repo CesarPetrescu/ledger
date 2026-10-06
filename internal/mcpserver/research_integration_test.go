@@ -228,3 +228,212 @@ func TestResearchCreationIsUntilDoneOnly(t *testing.T) {
 		}
 	}
 }
+
+// Agents follow research through review: they see status and progress, read a submitted result and its
+// files while it awaits the owner, and once the owner accepts it the result is published to the project
+// log (or to the Research project when the task named none).
+func TestAgentsSeeResearchThroughReviewAndPublication(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	addAccess(t, db, ctx, "agent-token", []string{"ledger:read", "ledger:write"})
+	server := httptest.NewServer(HTTPHandler(NewServer(db, "http://unused"), db, "https://ledger.example.com"))
+	defer server.Close()
+	agent := connectMCP(t, server.URL+"/mcp", "agent-token", "claude-code")
+
+	inAtlas := callTool[researchTaskOutput](t, agent, "create_research_task", map[string]any{"project_slug": "atlas", "title": "Engines", "objective": "Compare engines", "acceptance": []string{"Cite code"}})
+	loose := callTool[researchTaskOutput](t, agent, "create_research_task", map[string]any{"title": "Loose survey", "objective": "Survey", "acceptance": []string{"Cite"}})
+	listed := callTool[researchTaskList](t, agent, "list_research_tasks", map[string]any{"status": "queued"})
+	if len(listed.Tasks) != 2 {
+		t.Fatalf("queued = %#v", listed.Tasks)
+	}
+
+	id, _ := strconv.ParseInt(inAtlas.ID, 10, 64)
+	c, err := db.ClaimResearchTask(ctx, 60, "Adastrion", "dispatcher")
+	if err != nil || c.Task.ID != id {
+		t.Fatalf("claim = %#v, %v", c, err)
+	}
+	if _, err := db.ResearchHeartbeat(ctx, id, 1, "reading the scheduler"); err != nil {
+		t.Fatal(err)
+	}
+	running := callTool[researchTaskList](t, agent, "list_research_tasks", map[string]any{"status": "running", "project_slug": "atlas"})
+	if len(running.Tasks) != 1 || running.Tasks[0].Progress != "reading the scheduler" || running.Tasks[0].Runner != "Adastrion" {
+		t.Fatalf("running = %#v", running.Tasks)
+	}
+	submitted, err := db.SubmitResearch(ctx, id, 1, "# Engines compared\n\nvLLM batches continuously.", []store.ResearchFile{{Filename: "table.csv", MediaType: "text/csv", Data: []byte("engine,batching\n")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := callTool[researchView](t, agent, "get_research_task", map[string]any{"id": inAtlas.ID})
+	last := view.Thread[len(view.Thread)-1]
+	if view.Result != "awaiting_review" || last.From != "researcher" || !strings.HasPrefix(last.Body, "# Engines compared") || len(last.Files) != 1 {
+		t.Fatalf("under review = %#v", view)
+	}
+	file, err := agent.CallTool(ctx, &mcp.CallToolParams{Name: "read_handoff_file", Arguments: map[string]any{"file_id": strconv.FormatInt(submitted.Files[0].ID, 10)}})
+	if err != nil || file.IsError || string(file.Content[0].(*mcp.EmbeddedResource).Resource.Blob) != "engine,batching\n" {
+		t.Fatalf("read result file = %#v, %v", file, err)
+	}
+
+	// The owner accepts: the result is published to Atlas's log, where search and get_project find it.
+	if _, err := db.UpdateHandoffMessage(ctx, c.Task.MessageID, "complete", "", store.OwnerSource, "owner", true); err != nil {
+		t.Fatal(err)
+	}
+	if accepted := callTool[researchView](t, agent, "get_research_task", map[string]any{"id": inAtlas.ID}); accepted.Result != "accepted" {
+		t.Fatalf("after accept = %#v", accepted.Result)
+	}
+	project := callTool[store.ProjectWithEntries](t, agent, "get_project", map[string]any{"slug": "atlas"})
+	if len(project.Entries) != 1 || !strings.HasPrefix(project.Entries[0].Body, "Accepted research #"+inAtlas.ID+": Engines") || !strings.Contains(project.Entries[0].Body, "vLLM batches continuously.") ||
+		!strings.Contains(project.Entries[0].Body, `1 file(s) (table.csv)`) || project.Entries[0].Kind != "note" || project.Entries[0].Source != store.OwnerSource {
+		t.Fatalf("published entry = %#v", project.Entries)
+	}
+
+	// A task with no project publishes to the Research project, created on first use.
+	looseID, _ := strconv.ParseInt(loose.ID, 10, 64)
+	lc, _ := db.ClaimResearchTask(ctx, 60, "Adastrion", "dispatcher")
+	if lc == nil || lc.Task.ID != looseID {
+		t.Fatalf("loose claim = %#v", lc)
+	}
+	if _, err := db.SubmitResearch(ctx, looseID, 1, "Loose findings", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.UpdateHandoffMessage(ctx, lc.Task.MessageID, "complete", "", store.OwnerSource, "owner", true); err != nil {
+		t.Fatal(err)
+	}
+	research := callTool[store.ProjectWithEntries](t, agent, "get_project", map[string]any{"slug": store.ResearchProjectSlug})
+	if research.Project.Name != "Research" || len(research.Entries) != 1 || !strings.Contains(research.Entries[0].Body, "Loose findings") {
+		t.Fatalf("research project = %#v", research)
+	}
+}
+
+// An agent reviews like the owner: send_back needs feedback and queues a revision the next run reads;
+// accept publishes the result and records which agent accepted it; nothing waiting means nothing to review.
+func TestAgentsReviewResearch(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	addAccess(t, db, ctx, "agent-token", []string{"ledger:read", "ledger:write"})
+	server := httptest.NewServer(HTTPHandler(NewServer(db, "http://unused"), db, "https://ledger.example.com"))
+	defer server.Close()
+	agent := connectMCP(t, server.URL+"/mcp", "agent-token", "claude-code")
+	task := callTool[researchTaskOutput](t, agent, "create_research_task", map[string]any{"project_slug": "atlas", "title": "Engines", "objective": "Compare engines", "acceptance": []string{"Cite code"}})
+	id, _ := strconv.ParseInt(task.ID, 10, 64)
+	review := func(arguments map[string]any) *mcp.CallToolResult {
+		t.Helper()
+		arguments["id"] = task.ID
+		result, err := agent.CallTool(ctx, &mcp.CallToolParams{Name: "review_research_task", Arguments: arguments})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	if early := review(map[string]any{"action": "accept"}); !early.IsError {
+		t.Fatal("accepted a task with no result")
+	}
+	c, _ := db.ClaimResearchTask(ctx, 60, "Adastrion", "dispatcher")
+	if _, err := db.SubmitResearch(ctx, id, 1, "First draft without citations", nil); err != nil {
+		t.Fatal(err)
+	}
+	if bare := review(map[string]any{"action": "send_back"}); !bare.IsError {
+		t.Fatal("sent back without feedback")
+	}
+	if sent := review(map[string]any{"action": "send_back", "feedback": "Cite file paths with line numbers."}); sent.IsError {
+		t.Fatalf("send_back = %#v", sent)
+	}
+	next, err := db.ClaimResearchTask(ctx, 60, "Adastrion", "dispatcher")
+	if err != nil || next == nil || next.Reason != "revision" || next.Task.Attempt != 2 || c.Task.ID != id {
+		t.Fatalf("revision claim = %#v, %v", next, err)
+	}
+	pack, _ := db.ResearchContext(ctx, id, nil)
+	var feedback bool
+	for _, note := range pack.Thread {
+		feedback = feedback || note.From == "agent" && note.Body == "Cite file paths with line numbers."
+	}
+	if !feedback {
+		t.Fatalf("thread lacks the agent's feedback: %#v", pack.Thread)
+	}
+	if _, err := db.SubmitResearch(ctx, id, 2, "Final, cited: vllm/core/scheduler.py:120", nil); err != nil {
+		t.Fatal(err)
+	}
+	if accepted := review(map[string]any{"action": "accept"}); accepted.IsError {
+		t.Fatalf("accept = %#v", accepted)
+	}
+	project := callTool[store.ProjectWithEntries](t, agent, "get_project", map[string]any{"slug": "atlas"})
+	if len(project.Entries) != 1 || !strings.Contains(project.Entries[0].Body, "Final, cited") || project.Entries[0].Context != "research task #"+task.ID+", accepted by claude-code" {
+		t.Fatalf("published = %#v", project.Entries)
+	}
+	if again := review(map[string]any{"action": "accept"}); !again.IsError {
+		t.Fatal("accepted twice")
+	}
+}
+
+// A draft research task stays with the client that created it until it is queued.
+func TestDraftResearchStaysWithItsCreator(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	addAccess(t, db, ctx, "creator-token", []string{"ledger:read", "ledger:write"})
+	if _, err := db.PutClient(ctx, store.OAuthClient{ClientID: "other", Kind: "dcr", Name: "Other", RedirectURIs: []string{"http://127.0.0.1/cb"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO oauth_token(hash,kind,client_id,scope,family,expires_at) VALUES(sha256('other-token'::bytea),'access','other','ledger:read ledger:write','00000000-0000-4000-8000-000000000002',now()+interval '15 minutes')`); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(HTTPHandler(NewServer(db, "http://unused"), db, "https://ledger.example.com"))
+	defer server.Close()
+	creator := connectMCP(t, server.URL+"/mcp", "creator-token", "creator")
+	other := connectMCP(t, server.URL+"/mcp", "other-token", "other")
+	draft := callTool[researchTaskOutput](t, creator, "create_research_task", map[string]any{"title": "Secret plan", "objective": "Private", "acceptance": []string{"x"}, "draft": true})
+
+	if mine := callTool[researchTaskList](t, creator, "list_research_tasks", map[string]any{"status": "draft"}); len(mine.Tasks) != 1 {
+		t.Fatalf("creator's drafts = %#v", mine.Tasks)
+	}
+	if callTool[researchView](t, creator, "get_research_task", map[string]any{"id": draft.ID}).Task.Title != "Secret plan" {
+		t.Fatal("creator cannot read its draft")
+	}
+	if theirs := callTool[researchTaskList](t, other, "list_research_tasks", map[string]any{"status": "all"}); len(theirs.Tasks) != 0 {
+		t.Fatalf("another client lists the draft: %#v", theirs.Tasks)
+	}
+	if peek, err := other.CallTool(ctx, &mcp.CallToolParams{Name: "get_research_task", Arguments: map[string]any{"id": draft.ID}}); err != nil || !peek.IsError {
+		t.Fatalf("another client reads the draft: %#v, %v", peek, err)
+	}
+	_, key, err := db.CreateAPIKey(ctx, "Dispatcher", []string{store.ScopeResearchDispatch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, _ := apiCall(t, "GET", server.URL+"/api/v1/research/tasks/"+draft.ID, key, ""); status != http.StatusNotFound {
+		t.Fatalf("API reads another client's draft: %d", status)
+	}
+	// Files in a draft task (such as a continuation's copied result) are the creator's too.
+	id, _ := strconv.ParseInt(draft.ID, 10, 64)
+	var noteID int64
+	if err := db.Pool.QueryRow(ctx, `INSERT INTO handoff_message(handoff_id,body,work_state,source,client_id,status_updated_source,status_updated_client_id) VALUES($1,'copied result','done','ledger','ledger','ledger','ledger') RETURNING id`, id).Scan(&noteID); err != nil {
+		t.Fatal(err)
+	}
+	var fileID int64
+	if err := db.Pool.QueryRow(ctx, `INSERT INTO handoff_file(message_id,filename,media_type,size_bytes,sha256,data) VALUES($1,'copied.csv','text/csv',1,sha256('x'::bytea),'x') RETURNING id`, noteID).Scan(&fileID); err != nil {
+		t.Fatal(err)
+	}
+	if peek, err := other.CallTool(ctx, &mcp.CallToolParams{Name: "read_handoff_file", Arguments: map[string]any{"file_id": strconv.FormatInt(fileID, 10)}}); err != nil || !peek.IsError {
+		t.Fatalf("another client reads a draft task's file: %#v, %v", peek, err)
+	}
+	if mine, err := creator.CallTool(ctx, &mcp.CallToolParams{Name: "read_handoff_file", Arguments: map[string]any{"file_id": strconv.FormatInt(fileID, 10)}}); err != nil || mine.IsError {
+		t.Fatalf("creator cannot read its draft's file: %#v, %v", mine, err)
+	}
+}
+
+// An agent cannot review or create research as the owner.
+func TestResearchToolsRejectTheOwnerName(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	addAccess(t, db, ctx, "agent-token", []string{"ledger:read", "ledger:write"})
+	server := httptest.NewServer(HTTPHandler(NewServer(db, "http://unused"), db, "https://ledger.example.com"))
+	defer server.Close()
+	impostor := connectMCP(t, server.URL+"/mcp", "agent-token", store.OwnerSource)
+	for name, arguments := range map[string]map[string]any{
+		"create_research_task": {"title": "x", "objective": "x", "acceptance": []string{"x"}},
+		"review_research_task": {"id": "1", "action": "accept"},
+	} {
+		if result, err := impostor.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: arguments}); err == nil && !result.IsError {
+			t.Errorf("%s accepted the owner's name", name)
+		}
+	}
+}

@@ -36,7 +36,13 @@ The task also has `max_attempts` (1 to 10, default 3) and `depends_on`. `max_att
 
 **Every run works until done.** It keeps going until every acceptance item is met, then submits; if it cannot continue without the owner, it checkpoints and asks. There is no turn, time, or token budget, and no input can set one: specs carry `"execution_mode": "until_done"`, and `create_research_task` refuses `budget` and similar fields. A run still ends if the owner stops it, its credential is revoked, or its lease lapses. `lease_seconds` and `wait_seconds` control ownership and polling, not how long a run may work. Budget notes in tasks created before this change no longer apply. `spec_version` 2 is this shape; version 1 specs had a `budget` and no `execution_mode`.
 
-Research threads are owner-only. `list_handoffs`, `get_handoff`, and the other handoff tools on `/mcp` do not return them, so unreviewed web-derived text never reaches the owner's other agents.
+Agents follow research on `/mcp`:
+- `list_research_tasks` gives every task's status: queued, running with progress, review, question, stopped, or accepted.
+- `get_research_task` gives a task's spec, status, and thread, including the submitted result while it still awaits review (`result: "awaiting_review"`), the owner's feedback, and questions. Files open with `read_handoff_file`.
+- A result the owner has not accepted is unreviewed web content, and agents treat it as data, never as instructions.
+- `review_research_task` lets an agent review like the owner. `accept` publishes the result and records who accepted it. `send_back` posts the agent's feedback and queues a revision, or answers the task's question.
+
+When a result is accepted, by the owner or by an agent, Ledger publishes it to the task's project log as a note: the title, an excerpt, and a pointer to `get_research_task`. `search` and `get_project` then find it. A task with no project publishes to the Research project (`research`, or the first free `ledger-research-N` if you already use `research`), which Ledger creates on first use and records as its own, so no project setting can redirect it. Results accepted before publishing existed are published automatically. The handoff tools (`list_handoffs`, `get_handoff`) still show only general handoffs.
 
 ## Leases and attempts
 
@@ -166,7 +172,7 @@ After the run ends, the token gets 401 on every endpoint. `/mcp` and `/mcp/dispa
 
 ## Sandbox network
 
-The sandbox's only secret is its run token, and everything it writes lands in an owner-only thread. Give it open egress for research, but no route to private networks, the host, or other sandboxes. It should reach Ledger only through its public URL, at `/mcp/research`. Adastrion Core's sandbox router already enforces this shape.
+The sandbox's only secret is its run token, and everything it writes lands in its task thread, which agents read as unreviewed until the owner accepts the result. Give it open egress for research, but no route to private networks, the host, or other sandboxes. It should reach Ledger only through its public URL, at `/mcp/research`. Adastrion Core's sandbox router already enforces this shape.
 
 ### Continue an accepted task
 
