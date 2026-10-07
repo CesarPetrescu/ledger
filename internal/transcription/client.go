@@ -49,6 +49,11 @@ func NewClient(endpoint, key, model string, transport *http.Client) (*Client, er
 	h := &http.Client{}
 	if transport != nil {
 		*h = *transport
+	} else if u.Scheme == "http" {
+		// Cleartext goes straight to the local server, never through an HTTP proxy from the environment.
+		direct := http.DefaultTransport.(*http.Transport).Clone()
+		direct.Proxy = nil
+		h.Transport = direct
 	}
 	h.Timeout = 25 * time.Second
 	h.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }

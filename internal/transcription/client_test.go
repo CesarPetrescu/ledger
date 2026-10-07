@@ -78,8 +78,13 @@ func TestSpeechRejectsInvalidAudioConfigAndProviderRedirect(t *testing.T) {
 	}
 	// Plain HTTP is fine when it never leaves this machine or the private network.
 	for _, endpoint := range []string{"http://host.docker.internal:8004/v1/audio/transcriptions", "http://192.168.10.29:8004/v1", "http://127.0.0.1:8004/v1", "http://localhost:8004/v1", "http://[::1]:8004/v1"} {
-		if _, err := NewClient(endpoint, "", "model", nil); err != nil {
+		client, err := NewClient(endpoint, "", "model", nil)
+		if err != nil {
 			t.Fatalf("local provider %s refused: %v", endpoint, err)
+		}
+		// and it never goes through a proxy, which would carry the audio off the network
+		if direct, ok := client.http.Transport.(*http.Transport); !ok || direct.Proxy != nil {
+			t.Fatalf("cleartext provider %s may use a proxy", endpoint)
 		}
 	}
 	provider := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
