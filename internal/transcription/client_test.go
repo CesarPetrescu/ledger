@@ -71,8 +71,16 @@ func TestSpeechRejectsInvalidAudioConfigAndProviderRedirect(t *testing.T) {
 			t.Fatal("invalid audio accepted")
 		}
 	}
-	if _, err := NewClient("http://example.com", "", "model", nil); err == nil {
-		t.Fatal("cleartext provider accepted")
+	for _, endpoint := range []string{"http://example.com", "http://speech", "http://8.8.8.8/v1", "http://192.168.1.5.nip.io/v1", "ftp://192.168.1.5/v1"} {
+		if _, err := NewClient(endpoint, "", "model", nil); err == nil {
+			t.Fatalf("cleartext provider %s accepted", endpoint)
+		}
+	}
+	// Plain HTTP is fine when it never leaves this machine or the private network.
+	for _, endpoint := range []string{"http://host.docker.internal:8004/v1/audio/transcriptions", "http://192.168.10.29:8004/v1", "http://127.0.0.1:8004/v1", "http://localhost:8004/v1", "http://[::1]:8004/v1"} {
+		if _, err := NewClient(endpoint, "", "model", nil); err != nil {
+			t.Fatalf("local provider %s refused: %v", endpoint, err)
+		}
 	}
 	provider := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Location", "https://other.example.com")
