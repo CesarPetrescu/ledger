@@ -53,7 +53,7 @@ of pending captures. No client can recover a lost local retry key by guessing.
 - The client uses supported MCP 2026-07-28 per-request client identity for the
   stateless server; deploy the updated Ledger server before using this client.
 - G2/R1 for physical acceptance; Developer Mode for local QR testing.
-- Optional: an OpenAI-compatible HTTPS speech endpoint configured on the server.
+- Optional: an OpenAI-compatible speech endpoint configured on the server (HTTPS, or plain HTTP on this machine or a private network).
 - Optional: an owner-authorized Nextcloud connection with selected calendars.
 
 The `.ehpk` is bound to a single HTTPS Ledger origin. The build produces its runtime
@@ -140,7 +140,12 @@ LEDGER_STT_MODEL=your-provider-model
 LEDGER_STT_API_KEY=your-provider-key
 ```
 
-The URL is the complete transcription endpoint, not just a base URL. The adapter
+The URL is the complete transcription endpoint, not just a base URL. It must be
+HTTPS, or plain HTTP to this machine or a private network: loopback, a private IP,
+or a `.local`, `.lan`, `.home.arpa` or `.internal` name. A self-hosted model on the
+Docker host, such as a Whisper or Qwen3-ASR server on port 8004, is reached as
+`http://host.docker.internal:8004/v1/audio/transcriptions` once `ledger-mcp` has
+`extra_hosts: ["host.docker.internal:host-gateway"]`. The adapter
 sends multipart WAV audio, `model`, optional `language`, and `response_format=json`;
 it expects a JSON `text` field. Requests are bounded, redirects are rejected, and
 provider errors are displayed without exposing its credentials. Only canonical

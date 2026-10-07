@@ -13,10 +13,13 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/cesarpetrescu/ledger/internal/oauth"
 )
 
 const MaxPCMBytes = 30 * 16000 * 2
@@ -34,8 +37,8 @@ func NewClient(endpoint, key, model string, transport *http.Client) (*Client, er
 		return nil, nil
 	}
 	u, err := url.Parse(endpoint)
-	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return nil, errors.New("LEDGER_STT_URL must be an HTTPS URL without credentials, query or fragment")
+	if err != nil || !(u.Scheme == "https" || u.Scheme == "http" && localHost(u.Hostname())) || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return nil, errors.New("LEDGER_STT_URL must be an HTTPS URL, or HTTP to this machine or a private network, without credentials, query or fragment")
 	}
 	if strings.TrimSpace(model) == "" {
 		return nil, errors.New("LEDGER_STT_MODEL is required with LEDGER_STT_URL")
@@ -46,10 +49,24 @@ func NewClient(endpoint, key, model string, transport *http.Client) (*Client, er
 	h := &http.Client{}
 	if transport != nil {
 		*h = *transport
+	} else if u.Scheme == "http" {
+		// Cleartext goes straight to the local server, never through an HTTP proxy from the environment.
+		direct := http.DefaultTransport.(*http.Transport).Clone()
+		direct.Proxy = nil
+		h.Transport = direct
 	}
 	h.Timeout = 25 * time.Second
 	h.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return &Client{endpoint: endpoint, key: key, model: model, http: h}, nil
+}
+
+// localHost says plain HTTP stays off the internet: loopback, a private IP, or a name only a local
+// network answers for, such as host.docker.internal for a speech server on the Docker host.
+func localHost(host string) bool {
+	if addr, err := netip.ParseAddr(host); err == nil && addr.IsLoopback() {
+		return true
+	}
+	return host == "localhost" || oauth.PrivateNetworkHost(host)
 }
 
 // Only the canonical RIFF PCM encoding produced by our recorder is accepted.
