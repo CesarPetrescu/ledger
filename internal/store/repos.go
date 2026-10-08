@@ -270,10 +270,12 @@ ORDER BY synced_at NULLS FIRST,id LIMIT $2`, every.Seconds(), limit)
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (ProjectRepo, error) { return scanRepo(row) })
 }
 
-// SaveRepoSync records what the sync saw for one link.
-func (db *DB) SaveRepoSync(ctx context.Context, id string, s RepoSync) error {
+// SaveRepoSync records what the sync saw for one link, only while the token it used is still the saved
+// one (token is its SavedAt): a removed or replaced token's late results are dropped.
+func (db *DB) SaveRepoSync(ctx context.Context, id string, token time.Time, s RepoSync) error {
 	_, err := db.Pool.Exec(ctx, `UPDATE project_repo SET synced_at=now(),sync_error=$2,default_branch=$3,description=$4,private=$5,archived=$6,head_sha=$7,head_message=$8,head_at=$9,
-open_prs=$10,latest_release=$11,latest_release_at=$12 WHERE id=$1::bigint`, id, s.Error, s.DefaultBranch, s.Description, s.Private, s.Archived, s.HeadSHA, s.HeadMessage, s.HeadAt, s.OpenPRs, s.LatestRelease, s.LatestReleaseAt)
+open_prs=$10,latest_release=$11,latest_release_at=$12 WHERE id=$1::bigint AND EXISTS (SELECT 1 FROM github_sync WHERE saved_at=$13 FOR SHARE)`,
+		id, s.Error, s.DefaultBranch, s.Description, s.Private, s.Archived, s.HeadSHA, s.HeadMessage, s.HeadAt, s.OpenPRs, s.LatestRelease, s.LatestReleaseAt, token)
 	return err
 }
 
@@ -328,7 +330,8 @@ open_prs=NULL,latest_release='',latest_release_at=NULL`); err != nil {
 	return tx.Commit(ctx)
 }
 
-func (db *DB) NoteGitHubSyncRun(ctx context.Context, problem string) error {
-	_, err := db.Pool.Exec(ctx, `UPDATE github_sync SET last_run_at=now(),last_error=$1`, problem)
+// NoteGitHubSyncRun records a round's outcome for the token it used (its SavedAt).
+func (db *DB) NoteGitHubSyncRun(ctx context.Context, token time.Time, problem string) error {
+	_, err := db.Pool.Exec(ctx, `UPDATE github_sync SET last_run_at=now(),last_error=$1 WHERE saved_at=$2`, problem, token)
 	return err
 }

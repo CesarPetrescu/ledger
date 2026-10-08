@@ -117,20 +117,21 @@ func (s *Sync) SetToken(ctx context.Context, token string) (Status, error) {
 
 func (s *Sync) Clear(ctx context.Context) error { return s.db.DeleteGitHubSync(ctx) }
 
-func (s *Sync) token(ctx context.Context) (string, error) {
+// token returns the saved token and when it was saved, which tells one token from its replacement.
+func (s *Sync) token(ctx context.Context) (string, time.Time, error) {
 	state, err := s.db.GitHubSync(ctx)
 	if err != nil {
-		return "", err
+		return "", time.Time{}, err
 	}
 	size := s.aead.NonceSize()
 	if len(state.Ciphertext) < size {
-		return "", errors.New("stored GitHub token is unreadable; save it again")
+		return "", state.SavedAt, errors.New("stored GitHub token is unreadable; save it again")
 	}
 	plain, err := s.aead.Open(nil, state.Ciphertext[:size], state.Ciphertext[size:], []byte("github-sync"))
 	if err != nil {
-		return "", errors.New("stored GitHub token is unreadable; save it again")
+		return "", state.SavedAt, errors.New("stored GitHub token is unreadable; save it again")
 	}
-	return string(plain), nil
+	return string(plain), state.SavedAt, nil
 }
 
 // Run syncs due repositories every minute until ctx ends.
@@ -151,12 +152,12 @@ func (s *Sync) Run(ctx context.Context) error {
 
 // SyncDue refreshes the repositories that are due. Without a token it does nothing.
 func (s *Sync) SyncDue(ctx context.Context) error {
-	token, err := s.token(ctx)
+	token, saved, err := s.token(ctx)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
 	if err != nil {
-		return s.db.NoteGitHubSyncRun(ctx, err.Error())
+		return s.db.NoteGitHubSyncRun(ctx, saved, err.Error())
 	}
 	repos, err := s.db.ReposDueForSync(ctx, Every, perTick)
 	if err != nil || len(repos) == 0 {
@@ -173,11 +174,12 @@ func (s *Sync) SyncDue(ctx context.Context) error {
 		if err != nil {
 			result = store.RepoSync{Error: err.Error()}
 		}
-		if err := s.db.SaveRepoSync(ctx, repo.ID, result); err != nil {
+		// Dropped if the token was removed or replaced meanwhile.
+		if err := s.db.SaveRepoSync(ctx, repo.ID, saved, result); err != nil {
 			return err
 		}
 	}
-	return s.db.NoteGitHubSyncRun(ctx, problem)
+	return s.db.NoteGitHubSyncRun(ctx, saved, problem)
 }
 
 var errRateLimited = errors.New("GitHub rate limit reached; the sync resumes when it resets")

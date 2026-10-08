@@ -5,6 +5,7 @@ package github
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -137,5 +138,68 @@ func TestGitHubSyncRecordsActivityAndKeepsTheTokenSecret(t *testing.T) {
 		if r.Sync != nil {
 			t.Fatalf("sync kept after the token was removed: %+v", r)
 		}
+	}
+}
+
+// A round in flight when the owner removes or replaces the token writes nothing: its results came from
+// credentials that are no longer the saved ones.
+func TestGitHubSyncDropsResultsFromARemovedOrReplacedToken(t *testing.T) {
+	for _, change := range []string{"remove", "replace"} {
+		t.Run(change, func(t *testing.T) {
+			db, ctx := testdb.Open(t)
+			if _, err := db.UpsertProject(ctx, store.Project{Slug: "acme", Name: "Acme", Tier: "focus"}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.LinkRepo(ctx, store.NewRepo{ProjectSlug: "acme", URL: "https://github.com/acme/app", Branch: "release", Source: "owner", ClientID: "owner"}); err != nil {
+				t.Fatal(err)
+			}
+			var sync *Sync
+			var seen []string
+			inner := fakeGitHub(t, &seen)
+			defer inner.Close()
+			api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// The owner acts while GitHub is still answering the round.
+				if r.URL.Path == "/repos/acme/app" {
+					var err error
+					if change == "remove" {
+						err = db.DeleteGitHubSync(ctx)
+					} else {
+						err = db.SetGitHubSync(ctx, []byte("another token's ciphertext, never decrypted here"), "…NEW1", "someone")
+					}
+					if err != nil {
+						t.Error(err)
+					}
+				}
+				request, _ := http.NewRequest(r.Method, inner.URL+r.URL.RequestURI(), nil)
+				request.Header = r.Header
+				response, err := http.DefaultClient.Do(request)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				defer response.Body.Close()
+				w.WriteHeader(response.StatusCode)
+				_, _ = io.Copy(w, response.Body)
+			}))
+			defer api.Close()
+			base, err := New(db, strings.Repeat("k", 32), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sync = base.WithAPI(api.URL)
+			if _, err := sync.SetToken(ctx, goodToken); err != nil {
+				t.Fatal(err)
+			}
+			if err := sync.SyncDue(ctx); err != nil {
+				t.Fatal(err)
+			}
+			repos, _ := db.ListRepos(ctx, "acme")
+			if len(repos) != 1 || repos[0].Sync != nil {
+				t.Fatalf("a stale round wrote: %+v", repos[0].Sync)
+			}
+			if state, err := db.GitHubSync(ctx); change == "replace" && (err != nil || state.LastRunAt != nil || state.Login != "someone") {
+				t.Fatalf("the new token's status was overwritten: %+v, %v", state, err)
+			}
+		})
 	}
 }
