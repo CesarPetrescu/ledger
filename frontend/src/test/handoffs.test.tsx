@@ -128,6 +128,38 @@ describe('handoff inbox', () => {
     expect(await screen.findByRole('status')).toHaveTextContent(/handoff ready/i)
   })
 
+  it('queues research with files: a draft, the files on its brief, then Queue', async () => {
+    const queued = { ...research.messages[0]!, id: '31', handoff_id: '12', work_state: 'ready' as const }
+    const { calls } = mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/handoffs': { body: page },
+      'GET /admin/api/projects': { body: { projects: [atlas] } },
+      'POST /admin/api/research': { status: 201, body: { handoff_id: '12', message_id: '31', state: 'draft' } },
+      'POST /admin/api/handoff-messages/31/files': { status: 201, body: { id: '40', message_id: '31', filename: 'bench.csv', media_type: 'text/csv', size_bytes: 5, sha256: 'abc', created_at: '2026-09-04T10:00:00Z' } },
+      'POST /admin/api/handoff-messages/31/actions': { body: queued },
+      'GET /admin/api/handoffs/12': { body: { ...research, handoff: { ...research.handoff, id: '12' } } },
+    })
+    renderApp('/admin/handoffs/new?kind=research')
+    const form = await screen.findByRole('form', { name: /new research task/i })
+    const user = userEvent.setup()
+    await user.type(within(form).getByLabelText(/^title$/i), 'Benchmark engines')
+    await user.selectOptions(within(form).getByLabelText(/project/i), 'atlas')
+    await user.type(within(form).getByLabelText(/objective/i), 'Rerun the attached benchmark')
+    await user.type(within(form).getByLabelText(/checks/i), '  {enter} ')
+    await user.click(within(form).getByRole('button', { name: /queue research/i }))
+    expect(await within(form).findByRole('alert')).toHaveTextContent(/1 to 20 checks/i)
+    await user.clear(within(form).getByLabelText(/checks/i))
+    await user.type(within(form).getByLabelText(/checks/i), 'Return a CSV{enter}  {enter}Cite the source')
+    await user.selectOptions(within(form).getByLabelText(/deliverable/i), 'dataset')
+    await user.upload(within(form).getByLabelText(/files/i), new File(['a,b\n'], 'bench.csv', { type: 'text/csv' }))
+    await user.click(within(form).getByRole('button', { name: /queue research/i }))
+    await waitFor(() => expect(calls.some((call) => call.path === '/admin/api/handoff-messages/31/actions')).toBe(true))
+    expect(calls.find((call) => call.path === '/admin/api/research')?.body).toEqual({ title: 'Benchmark engines', project_slug: 'atlas', objective: 'Rerun the attached benchmark', acceptance: ['Return a CSV', 'Cite the source'], deliverable: 'dataset', draft: true })
+    expect(calls.findIndex((call) => call.path.endsWith('/files'))).toBeLessThan(calls.findIndex((call) => call.path.endsWith('/actions')))
+    expect(calls.find((call) => call.path.endsWith('/actions'))?.body).toMatchObject({ action: 'publish' })
+    expect(await screen.findByRole('status')).toHaveTextContent(/research queued/i)
+  })
+
   it('copies a message as plain text without rendering injected markup', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })

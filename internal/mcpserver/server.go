@@ -372,9 +372,13 @@ func HTTPHandler(server *mcp.Server, db *store.DB, publicURL string) http.Handle
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", metadata)
 	mux.Handle("/mcp", oauthProtected(db, publicURL, transport, ""))
 	mux.Handle("/mcp/dispatch", oauthProtected(db, publicURL, dispatchTransport, oauth.ScopeResearchDispatch))
-	mux.Handle("/mcp/research", researchHandler(db))
+	research := researchHandler(db)
+	mux.Handle("/mcp/research", research)
+	mux.Handle("/mcp/research/files", research)
+	mux.Handle("/mcp/research/files/", research)
+	mux.Handle("/files/", fileLinkHandler(db))
 	mux.Handle("/api/", apiHandler(db, publicURL))
-	return mux
+	return withPublicURL(mux, publicURL)
 }
 
 // oauthProtected serves next to holders of a live OAuth access token, which must carry scope when set.

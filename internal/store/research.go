@@ -21,7 +21,9 @@ const (
 	ResearchLeaseDefault  = 300
 	maxResearchCheckpoint = 65536
 	researchNoteSource    = "ledger"
-	// MaxResearchSubmitBytes keeps a whole submission, base64 and all, under the proxy's 40 MB body limit.
+	// MaxResearchSubmitBytes caps the files sent inline as base64 in one MCP call, keeping the request under
+	// the proxy's 40 MB body limit. Larger files travel over HTTP (run uploads, links), up to
+	// MaxHandoffMessageBytes per message.
 	MaxResearchSubmitBytes = 25 << 20
 )
 
@@ -147,6 +149,8 @@ type NewResearchTask struct {
 	Draft              bool
 	Source             string
 	ClientID           string
+	// Files are attached to the brief, for every run to read.
+	Files []ResearchFile
 }
 
 func (db *DB) CreateResearchTask(ctx context.Context, n NewResearchTask) (ResearchTask, error) {
@@ -165,6 +169,12 @@ func (db *DB) CreateResearchTask(ctx context.Context, n NewResearchTask) (Resear
 	}
 	if len(n.DependsOn) > 20 || len(n.DependsOn) > 0 && n.DependsOn[0] < 1 {
 		return ResearchTask{}, fmt.Errorf("depends_on takes up to 20 research task IDs")
+	}
+	if slices.ContainsFunc(n.Files, func(f ResearchFile) bool { return f.UploadID != 0 }) {
+		return ResearchTask{}, ErrUnknownUpload
+	}
+	if err := checkResearchFiles(n.Files); err != nil {
+		return ResearchTask{}, err
 	}
 	description := n.Spec.Objective
 	if runes := []rune(description); len(runes) > 2000 {
@@ -220,6 +230,9 @@ func (db *DB) CreateResearchTask(ctx context.Context, n NewResearchTask) (Resear
 		return ResearchTask{}, err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO research_task(handoff_id,message_id,spec,depends_on,max_attempts) VALUES($1,$2,$3,$4,$5)`, h.ID, brief.ID, n.Spec, n.DependsOn, n.MaxAttempts); err != nil {
+		return ResearchTask{}, err
+	}
+	if _, err := insertResearchFiles(ctx, tx, h.ID, brief.ID, 0, n.Files); err != nil {
 		return ResearchTask{}, err
 	}
 	if n.ContinueFromTaskID != 0 {
@@ -675,6 +688,8 @@ type ResearchFile struct {
 	Filename  string
 	MediaType string
 	Data      []byte
+	// UploadID names a file the run already uploaded over HTTP (StageResearchUpload) instead of Data.
+	UploadID int64
 }
 
 // SubmitResearch posts the deliverable and sends the task to the owner for review. The run ends here.
@@ -682,23 +697,8 @@ func (db *DB) SubmitResearch(ctx context.Context, id int64, attempt int, deliver
 	if err := ValidateHandoffMessage(deliverable, "", "done"); err != nil {
 		return HandoffMessage{}, err
 	}
-	if len(files) > MaxHandoffFiles {
-		return HandoffMessage{}, ErrHandoffFileLimit
-	}
-	var total int64
-	for i := range files {
-		if err := validateHandoffFile(files[i].Filename, files[i].Data); err != nil {
-			return HandoffMessage{}, err
-		}
-		mediaType, err := normalizeMediaType(files[i].MediaType)
-		if err != nil {
-			return HandoffMessage{}, err
-		}
-		files[i].MediaType = mediaType
-		total += int64(len(files[i].Data))
-	}
-	if total > MaxResearchSubmitBytes {
-		return HandoffMessage{}, ErrHandoffFileLimit
+	if err := checkResearchFiles(files); err != nil {
+		return HandoffMessage{}, err
 	}
 	var message HandoffMessage
 	err := db.withRun(ctx, id, attempt, func(tx pgx.Tx, l researchLock) error {
@@ -708,13 +708,12 @@ func (db *DB) SubmitResearch(ctx context.Context, id int64, attempt int, deliver
 		if err != nil {
 			return err
 		}
-		for _, f := range files {
-			file, err := insertHandoffFile(ctx, tx, message.ID, f.Filename, f.MediaType, f.Data)
-			if err != nil {
-				return err
-			}
-			file.HandoffID = id
-			message.Files = append(message.Files, file)
+		if message.Files, err = insertResearchFiles(ctx, tx, id, message.ID, attempt, files); err != nil {
+			return err
+		}
+		// The run is over; uploads it did not name are dropped.
+		if _, err := tx.Exec(ctx, `DELETE FROM research_upload WHERE handoff_id=$1 AND attempt=$2`, id, attempt); err != nil {
+			return err
 		}
 		return endRunWaiting(ctx, tx, id, l, "review", source, client)
 	})
@@ -1066,7 +1065,7 @@ var ErrResearchNotReviewable = errors.New("research task has no result waiting f
 // ReviewResearch lets an agent do what the owner's review buttons do: accept a submitted result (which
 // publishes it), or send it back with feedback, which also answers a question. The feedback becomes a
 // thread note the next run reads.
-func (db *DB) ReviewResearch(ctx context.Context, id int64, action, feedback, source, clientID string) (ResearchTask, error) {
+func (db *DB) ReviewResearch(ctx context.Context, id int64, action, feedback, source, clientID string, files []ResearchFile) (ResearchTask, error) {
 	feedback = strings.TrimSpace(feedback)
 	move := map[string]string{"accept": "complete", "send_back": "release"}[action]
 	if move == "" {
@@ -1079,6 +1078,15 @@ func (db *DB) ReviewResearch(ctx context.Context, id int64, action, feedback, so
 		if err := ValidateHandoffMessage(feedback, "", "done"); err != nil {
 			return ResearchTask{}, err
 		}
+	}
+	if len(files) > 0 && feedback == "" {
+		return ResearchTask{}, fmt.Errorf("files go with feedback: say what they are for")
+	}
+	if slices.ContainsFunc(files, func(f ResearchFile) bool { return f.UploadID != 0 }) {
+		return ResearchTask{}, ErrUnknownUpload
+	}
+	if err := checkResearchFiles(files); err != nil {
+		return ResearchTask{}, err
 	}
 	if err := validateHandoffAttribution(source, clientID); err != nil {
 		return ResearchTask{}, err
@@ -1098,7 +1106,11 @@ func (db *DB) ReviewResearch(ctx context.Context, id int64, action, feedback, so
 		return ResearchTask{}, ErrResearchNotReviewable
 	}
 	if feedback != "" {
-		if _, err := insertHandoffMessage(ctx, tx, HandoffMessage{HandoffID: id, Body: feedback, WorkState: "done", Source: source, ClientID: clientID}); err != nil {
+		note, err := insertHandoffMessage(ctx, tx, HandoffMessage{HandoffID: id, Body: feedback, WorkState: "done", Source: source, ClientID: clientID})
+		if err != nil {
+			return ResearchTask{}, err
+		}
+		if _, err := insertResearchFiles(ctx, tx, id, note.ID, 0, files); err != nil {
 			return ResearchTask{}, err
 		}
 	}

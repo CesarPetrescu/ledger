@@ -1895,3 +1895,52 @@ func TestOwnerManagesAPIKeys(t *testing.T) {
 		t.Fatalf("revoke missing = %d", res.Code)
 	}
 }
+
+// The console creates a research task with files: a draft, files uploaded to its brief, then Queue.
+// The run finds the files on the brief.
+func TestConsoleCreatesResearchWithFiles(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
+	_, signedIn := login(t, server, "correct horse", "")
+	if bad := request(t, server, http.MethodPost, "/admin/api/research", `{"title":"No checks","objective":"x","acceptance":[]}`, authed(signedIn, true)); bad.Code != http.StatusBadRequest {
+		t.Fatalf("invalid spec = %d %s", bad.Code, bad.Body.String())
+	}
+	if missing := request(t, server, http.MethodPost, "/admin/api/research", `{"title":"x","objective":"x","acceptance":["y"],"project_slug":"nope"}`, authed(signedIn, true)); missing.Code != http.StatusBadRequest {
+		t.Fatalf("unknown project = %d %s", missing.Code, missing.Body.String())
+	}
+	created := request(t, server, http.MethodPost, "/admin/api/research", `{"title":"Benchmark","objective":"Rerun the attached benchmark","acceptance":["Return a CSV"],"deliverable":"dataset","draft":true}`, authed(signedIn, true))
+	var task struct {
+		HandoffID string `json:"handoff_id"`
+		MessageID string `json:"message_id"`
+		State     string `json:"state"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &task); err != nil || created.Code != http.StatusCreated || task.State != "draft" {
+		t.Fatalf("create = %d %s", created.Code, created.Body.String())
+	}
+	var upload bytes.Buffer
+	writer := multipart.NewWriter(&upload)
+	part, _ := writer.CreateFormFile("file", "bench.csv")
+	_, _ = part.Write([]byte("engine,tokens_per_s\n"))
+	_ = writer.Close()
+	req := httptest.NewRequest(http.MethodPost, "/admin/api/handoff-messages/"+task.MessageID+"/files", &upload)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Cookie", signedIn.cookie)
+	req.Header.Set("Origin", testPublicURL)
+	req.Header.Set("X-CSRF-Token", signedIn.csrf)
+	res := httptest.NewRecorder()
+	server.ServeHTTP(res, req)
+	if res.Code != http.StatusCreated {
+		t.Fatalf("upload = %d %s", res.Code, res.Body.String())
+	}
+	if queued := request(t, server, http.MethodPost, "/admin/api/handoff-messages/"+task.MessageID+"/actions", `{"action":"publish"}`, authed(signedIn, true)); queued.Code != http.StatusOK {
+		t.Fatalf("queue = %d %s", queued.Code, queued.Body.String())
+	}
+	claim, err := db.ClaimResearchTask(ctx, 60, "Adastrion", "dispatcher")
+	if err != nil || claim == nil || strconv.FormatInt(claim.Task.ID, 10) != task.HandoffID || claim.Task.Spec.Deliverable != "dataset" {
+		t.Fatalf("claim = %#v, %v", claim, err)
+	}
+	pack, err := db.ResearchContext(ctx, claim.Task.ID, nil)
+	if err != nil || len(pack.Files) != 1 || pack.Files[0].Filename != "bench.csv" {
+		t.Fatalf("brief files = %#v, %v", pack.Files, err)
+	}
+}

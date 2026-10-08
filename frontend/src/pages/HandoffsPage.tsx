@@ -9,6 +9,7 @@ import {
   type HandoffMessage,
   type HandoffWorkState,
   type Project,
+  type ResearchCreateInput,
   type ResearchStatus,
 } from '../api'
 import { useToast } from '../components/Toast'
@@ -421,7 +422,83 @@ function counts(handoff: Handoff): { label: string; value: number }[] {
   ].filter((item) => item.value > 0)
 }
 
-export function HandoffsPage({ id, creating = false, initialProject = '' }: { id?: string; creating?: boolean; initialProject?: string }) {
+const DELIVERABLES: { value: ResearchCreateInput['deliverable']; label: string }[] = [
+  { value: 'report', label: 'Report' },
+  { value: 'answer', label: 'Answer' },
+  { value: 'dataset', label: 'Dataset' },
+  { value: 'code', label: 'Code' },
+]
+
+/** Queues research for Adastrion. Files go on the brief, so with files the task is created as a draft,
+ * the files are uploaded, and then it is queued; a failed upload leaves the draft to finish on its page. */
+function NewResearch({ projects, initialProject }: { projects: Project[]; initialProject: string }) {
+  const [input, setInput] = useState({ title: '', project_slug: initialProject, objective: '', acceptance: '', deliverable: 'report' as ResearchCreateInput['deliverable'] })
+  const [files, setFiles] = useState<File[]>([])
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const toast = useToast()
+  const set = <K extends keyof typeof input>(key: K, value: (typeof input)[K]) => setInput((current) => ({ ...current, [key]: value }))
+  const acceptance = input.acceptance.split('\n').map((line) => line.trim()).filter(Boolean)
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    if (busy) return
+    const fileError = validateFiles(files)
+    if (fileError || acceptance.length === 0 || acceptance.length > 20) {
+      setError(fileError || 'List 1 to 20 checks, one per line.')
+      return
+    }
+    setBusy(true)
+    setError('')
+    let createdID = ''
+    try {
+      const created = await api.createResearch({ title: input.title, project_slug: input.project_slug, objective: input.objective, acceptance, deliverable: input.deliverable, draft: files.length > 0 })
+      createdID = created.handoff_id
+      for (const file of files) await api.uploadHandoffFile(created.message_id, file)
+      if (files.length > 0) await api.updateHandoffMessage(created.message_id, 'publish')
+      toast('Research queued.')
+      navigate(`/handoffs/${created.handoff_id}`)
+    } catch (failure) {
+      if (createdID) {
+        toast(`Upload failed; the task is saved as a draft. ${describeError(failure)}`, 'error')
+        navigate(`/handoffs/${createdID}`)
+      } else {
+        setError(describeError(failure))
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="detail">
+      <Link to="/handoffs" className="back-link"><Icon name="back" /> Handoffs</Link>
+      <form className="form" aria-label="New research task" onSubmit={(event) => void submit(event)}>
+        <div>
+          <p className="eyebrow">Research</p>
+          <h1>New research task</h1>
+          <p className="muted small">Adastrion picks it up and works until every check is met. Attach any files the run needs; it can send files back with its result.</p>
+        </div>
+        <div className="form-grid">
+          <label>Title<input required maxLength={200} value={input.title} onChange={(event) => set('title', event.target.value)} /></label>
+          <label>Project<select value={input.project_slug} onChange={(event) => set('project_slug', event.target.value)}><option value="">No project</option>{projects.map((project) => <option key={project.slug} value={project.slug}>{project.name}</option>)}</select></label>
+          <label className="span-2">Objective<textarea required maxLength={8000} rows={6} value={input.objective} onChange={(event) => set('objective', event.target.value)} placeholder="What to find out, and why" /></label>
+          <label className="span-2">Checks<textarea required rows={4} value={input.acceptance} onChange={(event) => set('acceptance', event.target.value)} placeholder={'One per line, for example:\nCites file paths with line numbers\nReturns the results as a CSV'} /></label>
+          <label>Deliverable<select value={input.deliverable} onChange={(event) => set('deliverable', event.target.value as ResearchCreateInput['deliverable'])}>{DELIVERABLES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+          <label>Files<input type="file" multiple onChange={(event) => setFiles(Array.from(event.target.files ?? []))} /></label>
+        </div>
+        {files.length > 0 && <p className="muted small">{files.length} file{files.length === 1 ? '' : 's'} · {formatBytes(files.reduce((total, file) => total + file.size, 0))}</p>}
+        {error && <p className="field-error" role="alert">{error}</p>}
+        <div className="form-actions">
+          <Link to="/handoffs" className="btn">Cancel</Link>
+          <button type="submit" className="btn btn-primary" disabled={busy}>{busy ? 'Queueing…' : 'Queue research'}</button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
+export function HandoffsPage({ id, creating = false, initialProject = '' }: { id?: string; creating?: boolean | 'research'; initialProject?: string }) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('')
   const [archive, setArchive] = useState('active')
@@ -450,7 +527,7 @@ export function HandoffsPage({ id, creating = false, initialProject = '' }: { id
   return (
     <div className="split handoffs" data-mode={mode}>
       <section className="pane pane-list" aria-label="Handoff inbox">
-        <header className="page-head"><h1>Handoffs</h1><Link to="/handoffs/new" className="btn btn-primary"><Icon name="plus" /> New</Link>
+        <header className="page-head"><h1>Handoffs</h1><Link to="/handoffs/new?kind=research" className="btn"><Icon name="plus" /> Research</Link><Link to="/handoffs/new" className="btn btn-primary"><Icon name="plus" /> New</Link>
           <p className="muted small">Work passed from one agent, or from you, to another. Each handoff is a thread: an agent claims a message, reports progress, and marks it done.</p>
         </header>
         <div className="filters">
@@ -473,7 +550,7 @@ export function HandoffsPage({ id, creating = false, initialProject = '' }: { id
         {list.data?.next_before && <button type="button" className="btn" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? 'Loading…' : 'Load more handoffs'}</button>}
       </section>
       <section className="pane pane-detail" aria-label="Handoff inspector">
-        {creating ? projects.loading ? <Loading label="Loading projects…" /> : <NewHandoff projects={projects.data ?? []} initialProject={initialProject} /> : id ? <HandoffThread key={id} id={id} /> : <EmptyState><p>Select a handoff or create one for another agent.</p></EmptyState>}
+        {creating ? projects.loading ? <Loading label="Loading projects…" /> : creating === 'research' ? <NewResearch projects={projects.data ?? []} initialProject={initialProject} /> : <NewHandoff projects={projects.data ?? []} initialProject={initialProject} /> : id ? <HandoffThread key={id} id={id} /> : <EmptyState><p>Select a handoff or create one for another agent.</p></EmptyState>}
       </section>
     </div>
   )

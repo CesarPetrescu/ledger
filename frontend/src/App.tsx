@@ -27,7 +27,9 @@ function resolve(path: string, query: URLSearchParams): { title: string; page: R
   if (path === '/search') return { title: 'Search', page: <SearchPage /> }
   if (path === '/calendar') return { title: 'Calendar', page: <CalendarPage /> }
   if (path === '/handoffs') return { title: 'Handoffs', page: <HandoffsPage /> }
-  if (path === '/handoffs/new') return { title: 'New handoff', page: <HandoffsPage creating initialProject={query.get('project') ?? ''} /> }
+  if (path === '/handoffs/new') return query.get('kind') === 'research'
+    ? { title: 'New research task', page: <HandoffsPage creating="research" initialProject={query.get('project') ?? ''} /> }
+    : { title: 'New handoff', page: <HandoffsPage creating initialProject={query.get('project') ?? ''} /> }
   const handoff = /^\/handoffs\/([^/]+)$/.exec(path)
   if (handoff?.[1]) return { title: 'Handoffs', page: <HandoffsPage id={decodeURIComponent(handoff[1])} /> }
   if (path === '/connect') return { title: 'Connect a machine', page: <ConnectPage /> }
