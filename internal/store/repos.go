@@ -73,15 +73,15 @@ var (
 	repoProviders = map[string]string{"github.com": "github", "gitlab.com": "gitlab", "bitbucket.org": "bitbucket", "codeberg.org": "forgejo"}
 	scpLike       = regexp.MustCompile(`^(?:([^@/:]+)@)?([A-Za-z0-9.-]+):(.+)$`)
 	// An SSH Git URL logs in as an account: git on hosted forges, or a person's login on their own server.
-	sshUser      = regexp.MustCompile(`^[a-z_][a-z0-9_.-]{0,31}$`)
+	sshUser      = regexp.MustCompile(`^[a-z_][a-z0-9_.-]{0,19}$`)
 	tokenMarkers = []string{"ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_", "glpat-", "gldt-", "glptt-", "x-access-token", "oauth", "token", "secret", "pat_"}
 	githubRepo   = regexp.MustCompile(`^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$`)
 )
 
 var errUserInURL = errors.New("url's SSH user must be a plain account name such as git; never put a password or token in a URL")
 
-// plainSSHUser accepts a lowercase account name and nothing shaped like a token, so a secret cannot enter
-// Ledger as an SSH user name.
+// plainSSHUser accepts a short lowercase account name (at most 20 characters and 4 digits) and nothing
+// shaped like a token, so a secret cannot enter Ledger as an SSH user name.
 func plainSSHUser(user string) bool {
 	if user == "" {
 		return true
@@ -92,7 +92,14 @@ func plainSSHUser(user string) bool {
 			return false
 		}
 	}
-	return sshUser.MatchString(user)
+	// Real account names are short and mostly letters; random tokens are long and full of digits.
+	digits := 0
+	for _, r := range user {
+		if r >= '0' && r <= '9' {
+			digits++
+		}
+	}
+	return sshUser.MatchString(user) && digits <= 4
 }
 
 // ParseRepoURL accepts HTTPS, HTTP, SSH, and scp-style (git@host:owner/repo) URLs. It refuses any URL that
