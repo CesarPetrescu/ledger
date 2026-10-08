@@ -129,7 +129,7 @@ fun LedgerApp(model: LedgerModel = viewModel(), opened: MutableState<Pair<String
     val route = model.route
     val title = when (route.substringBefore('/')) {
         "inbox" -> "Inbox"
-        "projects", "project", "project-edit", "entry", "project-files", "table-add" -> "Projects"
+        "projects", "project", "project-edit", "entry", "project-files", "project-repos", "table-add" -> "Projects"
         "reading" -> "Reading"
         "todos" -> "Todos"
         "handoffs", "handoff", "handoff-new", "handoff-edit", "message-new" -> "Handoffs"
@@ -209,6 +209,7 @@ fun LedgerApp(model: LedgerModel = viewModel(), opened: MutableState<Pair<String
                             "project-edit" -> ProjectEditor(model, route.substringAfter('/', ""))
                             "entry" -> EntryEditor(model, route.substringAfter('/'))
                             "project-files" -> ProjectFiles(model, route.substringAfter('/'))
+                            "project-repos" -> ProjectRepos(model, route.substringAfter('/'))
                             "handoffs" -> Handoffs(model)
                             "handoff" -> HandoffDetail(model, route.substringAfter('/'))
                             "handoff-new" -> HandoffEditor(model)

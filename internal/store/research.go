@@ -756,6 +756,8 @@ type ResearchProject struct {
 	// Recent is the project's newest decisions and status updates, so a run builds on what is already
 	// decided. Only for projects the owner shared with research.
 	Recent []ResearchEntry `json:"recent,omitempty"`
+	// Repos are the project's Git repositories, so a run can clone the code it researches.
+	Repos []ProjectRepo `json:"repos,omitempty"`
 }
 
 type ResearchEntry struct {
@@ -817,6 +819,9 @@ CASE WHEN research_visible THEN description ELSE '' END,CASE WHEN research_visib
 				return e, row.Scan(&e.ID, &e.Kind, &e.Body, &e.At)
 			})
 			if err != nil {
+				return ResearchContext{}, err
+			}
+			if p.Repos, err = db.ListRepos(ctx, p.Slug); err != nil {
 				return ResearchContext{}, err
 			}
 		}

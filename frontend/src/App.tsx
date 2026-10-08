@@ -19,7 +19,7 @@ function resolve(path: string, query: URLSearchParams): { title: string; page: R
   if (path === '/projects') return { title: 'Projects', page: <ProjectsPage /> }
   const project = /^\/projects\/([^/]+)$/.exec(path)
   if (project?.[1]) return { title: 'Projects', page: <ProjectsPage slug={decodeURIComponent(project[1])} /> }
-  const projectView = /^\/projects\/([^/]+)\/(todos|decisions|details|handoffs|files)$/.exec(path)
+  const projectView = /^\/projects\/([^/]+)\/(todos|decisions|details|handoffs|files|repos)$/.exec(path)
   if (projectView?.[1] && projectView[2]) return { title: 'Projects', page: <ProjectsPage slug={decodeURIComponent(projectView[1])} view={projectView[2] as ProjectView} /> }
   const entry = /^\/entries\/([0-9]+)$/.exec(path)
   if (entry?.[1]) return { title: 'Entry', page: <EntryPage key={entry[1]} id={entry[1]} /> }

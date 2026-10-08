@@ -44,6 +44,7 @@ func TestToolsListIsExactAndAnnotated(t *testing.T) {
 		"list_handoffs": true, "get_handoff": true, "create_handoff": false, "append_handoff_message": false,
 		"update_handoff_message": false, "attach_handoff_file": false, "read_handoff_file": true,
 		"create_research_task": false, "list_research_tasks": true, "get_research_task": true, "review_research_task": false,
+		"list_repos": true, "link_repo": false, "unlink_repo": false,
 	}
 	if len(result.Tools) != len(want) {
 		t.Fatalf("got %d tools", len(result.Tools))
@@ -60,7 +61,10 @@ func TestToolsListIsExactAndAnnotated(t *testing.T) {
 		"ack_changes":            {store.ReadReceipt{Checkpoint: "0"}},
 		"transcribe_audio":       {transcription.Result{Text: "Atlas note"}},
 		"list_projects":          {[]any{}, []any{map[string]any{"slug": "atlas", "name": "Atlas", "tier": "focus", "hours_wk": 8, "goal": "Ship", "deadline": "", "last_entry_at": nil}}, []any{map[string]any{"slug": "atlas", "name": "Atlas", "tier": "focus", "hours_wk": 8, "goal": "Ship", "deadline": "", "last_entry_at": now}}},
-		"get_project":            {store.ProjectWithEntries{Entries: []store.Entry{}}},
+		"get_project":            {projectOutput{ProjectWithEntries: store.ProjectWithEntries{Entries: []store.Entry{}}, Repos: []store.ProjectRepo{}}, projectOutput{ProjectWithEntries: store.ProjectWithEntries{Entries: []store.Entry{}}, Repos: []store.ProjectRepo{repoSample(now)}}},
+		"list_repos":             {repoList{Repos: []store.ProjectRepo{}}, repoList{Repos: []store.ProjectRepo{repoSample(now)}}},
+		"link_repo":              {repoSample(now)},
+		"unlink_repo":            {repoSample(now)},
 		"search":                 {retrieval.SearchResult{Hits: []retrieval.Ranked{}, Degraded: []string{}}, retrieval.SearchResult{Hits: []retrieval.Ranked{{Ref: "entry:1", Score: 0.5}}, Degraded: []string{"rerank"}}},
 		"upsert_project":         {store.Project{}, store.Project{LastEntryAt: &now}},
 		"append_entry":           {map[string]any{"id": int64(1), "created_at": now}},
@@ -133,6 +137,8 @@ func TestToolsListIsExactAndAnnotated(t *testing.T) {
 			suffix = HandoffDescriptionSuffix
 		} else if strings.Contains(tool.Name, "research") {
 			suffix = ResearchDescriptionSuffix
+		} else if strings.HasSuffix(tool.Name, "_repo") || strings.HasSuffix(tool.Name, "_repos") {
+			suffix = RepoDescriptionSuffix
 		}
 		if !strings.HasSuffix(tool.Description, suffix) {
 			t.Errorf("tool %q description missing required suffix", tool.Name)
@@ -320,4 +326,10 @@ func TestOutputSchemasAllowAddedFields(t *testing.T) {
 	if got := strings.Join(fields, ","); got != "automate,deadline,description,goal,hours_wk,last_entry_at,name,needs_me,slug,stack,tier,type,updated_at" {
 		t.Fatalf("project fields = %s", got)
 	}
+}
+
+func repoSample(now time.Time) store.ProjectRepo {
+	open, private := 2, true
+	return store.ProjectRepo{ID: "1", ProjectSlug: "atlas", URL: "https://github.com/acme/atlas", Provider: "github", Repo: "acme/atlas", WebURL: "https://github.com/acme/atlas", AddedBy: "claude", CreatedAt: now,
+		Sync: &store.RepoSync{SyncedAt: now, HeadSHA: "abc", HeadMessage: "Fix", HeadAt: &now, OpenPRs: &open, Private: &private, LatestRelease: "v1", LatestReleaseAt: &now}}
 }

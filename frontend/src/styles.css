@@ -932,6 +932,10 @@ label > textarea {
 .project-related li > a { display: grid; gap: 4px; padding: 15px 8px; color: var(--text); }
 .project-related li > a:hover { background: var(--surface-soft); }
 .project-related li span { overflow-wrap: anywhere; }
+.repo-list li { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: start; padding: 14px 8px; }
+.repo-list li > div { display: grid; gap: 3px; min-width: 0; }
+.repo-list .repo-sync-error { color: var(--danger, #b42318); }
+.repo-form { margin-top: 18px; }
 
 /* Handoffs */
 .handoff-filter-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }

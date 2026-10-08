@@ -73,7 +73,7 @@ func NewServerWithSpeech(db *store.DB, indexURL string, calendar *calendarapi.Se
 		Slug    string `json:"slug" jsonschema:"project slug, 2 to 64 lowercase letters, digits, or hyphens"`
 		Entries int    `json:"entries,omitempty" jsonschema:"number of newest entries, default 20, maximum 100"`
 	}
-	mcp.AddTool(server, &mcp.Tool{Name: "get_project", OutputSchema: outputSchema[store.ProjectWithEntries](), Description: "Get one project and its newest entries. " + DescriptionSuffix, Annotations: read},
+	mcp.AddTool(server, &mcp.Tool{Name: "get_project", OutputSchema: outputSchema[projectOutput](), Description: "Get one project, its newest entries, and its Git repositories (repos: where the code lives, with recent GitHub activity). " + RepoDescriptionSuffix + " " + DescriptionSuffix, Annotations: read},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input getInput) (*mcp.CallToolResult, any, error) {
 			if !canRead(ctx) {
 				return scopeError(), nil, nil
@@ -88,7 +88,11 @@ func NewServerWithSpeech(db *store.DB, indexURL string, calendar *calendarapi.Se
 				return nil, nil, fmt.Errorf("entries must be between 1 and 100")
 			}
 			result, err := db.GetProject(ctx, input.Slug, input.Entries)
-			return nil, result, err
+			if err != nil {
+				return nil, nil, err
+			}
+			repos, err := db.ListRepos(ctx, input.Slug)
+			return nil, projectOutput{ProjectWithEntries: result, Repos: repos}, err
 		})
 
 	type searchInput struct {
@@ -190,6 +194,7 @@ func NewServerWithSpeech(db *store.DB, indexURL string, calendar *calendarapi.Se
 	addSpeechTool(server, speech)
 	addHandoffTools(server, db)
 	addResearchCreateTool(server, db)
+	addRepoTools(server, db)
 
 	mcp.AddTool(server, &mcp.Tool{Name: "list_calendars", OutputSchema: outputSchema[calendarList](), Description: "List the Nextcloud calendars explicitly selected by the owner. " + CalendarDescriptionSuffix, Annotations: calendarRead},
 		func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {

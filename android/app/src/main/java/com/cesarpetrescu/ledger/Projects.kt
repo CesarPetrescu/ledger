@@ -112,3 +112,38 @@ fun SearchScreen(model: LedgerModel) {
         }
     }
 }
+
+/** The Git repositories a project spans. Agents see them with the project and clone with their own access. */
+@Composable
+fun ProjectRepos(model: LedgerModel, slug: String) {
+    var url by rememberSaveable { mutableStateOf("") }
+    var role by rememberSaveable { mutableStateOf("") }
+    var branch by rememberSaveable { mutableStateOf("") }
+    Load(model, "repos:$slug", { it.request("GET", "/projects/${segment(slug)}/repos") }) { data ->
+        Page {
+            item { Text("Where this project's code lives; link every repository it spans. Agents see them with the project and clone with their own Git access.",
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            if (data.rows("repos").isEmpty()) item { Empty("No repositories linked yet.") }
+            items(data.rows("repos"), key = { it.text("id") }) { repo ->
+                val (subtitle, body) = repoSummary(repo)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SummaryCard(repo.text("repo"), subtitle, body)
+                    ConfirmButton("Unlink", "Unlink ${repo.text("repo")}? Agents stop seeing it with this project. The repository itself is not touched.", !model.busy) {
+                        model.act("Repository unlinked") { it.request("DELETE", "/repos/${segment(repo.text("id"))}") }
+                    }
+                }
+            }
+            item { Text("Link a repository", style = MaterialTheme.typography.titleMedium) }
+            item { Field("Repository URL", url, { url = it }, max = 500, placeholder = "https://github.com/owner/repo", keyboard = KeyboardType.Uri) }
+            item { Field("Role", role, { role = it }, max = 60, placeholder = "backend, android, docs…") }
+            item { Field("Branch", branch, { branch = it }, max = 200, placeholder = "Default branch") }
+            item {
+                Button(enabled = !model.busy && url.isNotBlank(), onClick = {
+                    model.act("Repository linked", after = { url = ""; role = ""; branch = "" }) {
+                        it.request("POST", "/projects/${segment(slug)}/repos", json("url" to url.trim(), "role" to role.trim(), "branch" to branch.trim(), "path" to "", "note" to ""))
+                    }
+                }) { Text("Link repository") }
+            }
+        }
+    }
+}

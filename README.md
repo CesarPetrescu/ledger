@@ -22,6 +22,7 @@ Ledger is a self-hosted [MCP](https://modelcontextprotocol.io) server that gives
 - **Remember decisions.** Keep notes, todos, status updates, and an append-only project history.
 - **Find past context.** Search across projects with full-text search and optional semantic search.
 - **Hand off work.** Leave another assistant a thread with messages, attachments, and progress.
+- **Know where the code lives.** Link each project to the Git repositories it spans, with their latest GitHub activity, so every assistant knows what to clone.
 - **Stay in control.** Manage projects, connected clients, and optional Nextcloud calendars from the web console or Android app.
 
 > “What did we decide about Atlas last week?”

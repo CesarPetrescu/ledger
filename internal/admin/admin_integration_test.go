@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cesarpetrescu/ledger/internal/github"
 	"github.com/cesarpetrescu/ledger/internal/oauth"
 	"github.com/cesarpetrescu/ledger/internal/store"
 	"github.com/cesarpetrescu/ledger/internal/testdb"
@@ -1942,5 +1943,77 @@ func TestConsoleCreatesResearchWithFiles(t *testing.T) {
 	pack, err := db.ResearchContext(ctx, claim.Task.ID, nil)
 	if err != nil || len(pack.Files) != 1 || pack.Files[0].Filename != "bench.csv" {
 		t.Fatalf("brief files = %#v, %v", pack.Files, err)
+	}
+}
+
+// The owner links several repositories to a project, refusing duplicates and URLs that carry secrets,
+// and sets the GitHub sync token, which no response ever repeats.
+func TestConsoleLinksReposAndKeepsTheSyncTokenSecret(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	const token = "github_pat_consoleTEST0123456789abcd"
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/user" || r.Header.Get("Authorization") != "Bearer "+token {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_, _ = w.Write([]byte(`{"login":"CesarPetrescu"}`))
+	}))
+	defer api.Close()
+	sync, err := github.New(db, strings.Repeat("k", 32), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, _ := oauth.HashPassword("correct horse")
+	server := NewServer(Config{PublicURL: testPublicURL, PasswordHash: hash, InternalProxyCIDR: "172.31.255.2/32", IndexURL: "http://127.0.0.1:1", GitHub: sync.WithAPI(api.URL)}, db)
+	_, signedIn := login(t, server, "correct horse", "")
+	mutate := authed(signedIn, true)
+
+	// In order: the duplicate must come after the original.
+	for _, step := range []struct {
+		body string
+		want int
+	}{
+		{`{"url":"https://github.com/CesarPetrescu/atlas-api","role":"backend","branch":"main"}`, http.StatusCreated},
+		{`{"url":"git@github.com:CesarPetrescu/atlas-web.git","role":"frontend"}`, http.StatusCreated},
+		{`{"url":"git@github.com:cesarpetrescu/atlas-api.git"}`, http.StatusConflict},
+		{`{"url":"https://ghp_leak@github.com/CesarPetrescu/atlas-api"}`, http.StatusBadRequest},
+		{`{"url":"not a url"}`, http.StatusBadRequest},
+	} {
+		if res := request(t, server, http.MethodPost, "/admin/api/projects/atlas/repos", step.body, mutate); res.Code != step.want {
+			t.Errorf("%s = %d %s", step.body, res.Code, res.Body.String())
+		}
+	}
+	if res := request(t, server, http.MethodPost, "/admin/api/projects/nope/repos", `{"url":"https://github.com/a/b"}`, mutate); res.Code != http.StatusNotFound {
+		t.Errorf("unknown project = %d %s", res.Code, res.Body.String())
+	}
+	listed := request(t, server, http.MethodGet, "/admin/api/projects/atlas/repos", "", authed(signedIn, false))
+	var list struct {
+		Repos []store.ProjectRepo `json:"repos"`
+	}
+	if err := json.Unmarshal(listed.Body.Bytes(), &list); err != nil || len(list.Repos) != 2 || list.Repos[0].Role != "backend" || list.Repos[0].AddedBy != store.OwnerSource || list.Repos[1].WebURL != "https://github.com/CesarPetrescu/atlas-web" {
+		t.Fatalf("list = %s", listed.Body.String())
+	}
+
+	if res := request(t, server, http.MethodPut, "/admin/api/github-sync", `{"token":"github_pat_wrongwrongwrongwrong"}`, mutate); res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "rejected") {
+		t.Fatalf("bad token = %d %s", res.Code, res.Body.String())
+	}
+	saved := request(t, server, http.MethodPut, "/admin/api/github-sync", `{"token":"`+token+`"}`, mutate)
+	status := request(t, server, http.MethodGet, "/admin/api/github-sync", "", authed(signedIn, false))
+	for _, res := range []*httptest.ResponseRecorder{saved, status} {
+		if res.Code != http.StatusOK || strings.Contains(res.Body.String(), token) || !strings.Contains(res.Body.String(), `"login":"CesarPetrescu"`) || !strings.Contains(res.Body.String(), `"hint":"…abcd"`) {
+			t.Fatalf("token status = %d %s", res.Code, res.Body.String())
+		}
+	}
+	if res := request(t, server, http.MethodDelete, "/admin/api/repos/"+list.Repos[1].ID, "", mutate); res.Code != http.StatusOK {
+		t.Fatalf("unlink = %d %s", res.Code, res.Body.String())
+	}
+	if res := request(t, server, http.MethodDelete, "/admin/api/github-sync", "", mutate); res.Code != http.StatusNoContent {
+		t.Fatalf("forget token = %d", res.Code)
+	}
+	if res := request(t, server, http.MethodGet, "/admin/api/github-sync", "", authed(signedIn, false)); !strings.Contains(res.Body.String(), `"configured":false`) {
+		t.Fatalf("status after forgetting = %s", res.Body.String())
 	}
 }

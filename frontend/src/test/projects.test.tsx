@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import type { ProjectSummary, TableEntry } from '../api'
@@ -34,6 +34,39 @@ describe('project browser', () => {
     expect(calls.find((call) => call.path === '/admin/api/projects/atlas/research')?.body).toEqual({ visible: true })
   })
 
+
+  it('links several repositories to a project, shows their synced activity, and unlinks one', async () => {
+    const api = { id: '1', project_slug: 'atlas', url: 'https://github.com/acme/atlas-api', provider: 'github', repo: 'acme/atlas-api', web_url: 'https://github.com/acme/atlas-api', role: 'backend', added_by: 'claude-code', created_at: '2026-10-08T09:00:00Z',
+      sync: { synced_at: '2026-10-08T10:00:00Z', head_at: '2026-10-08T09:30:00Z', head_message: '<img src=x onerror=alert(1)> Fix login', open_prs: 3, latest_release: 'v1.2.0' } }
+    const web = { id: '2', project_slug: 'atlas', url: 'git@github.com:acme/atlas-web.git', provider: 'github', repo: 'acme/atlas-web', web_url: 'https://github.com/acme/atlas-web', role: 'frontend', added_by: 'ledger-admin', created_at: '2026-10-08T11:00:00Z' }
+    const { calls } = mockApi({
+      ...projectBase,
+      'GET /admin/api/projects': { body: { projects: [atlas, beacon] } },
+      'GET /admin/api/projects/atlas': { body: atlasDetail },
+      'GET /admin/api/projects/atlas/repos': { body: { repos: [api] } },
+      'POST /admin/api/projects/atlas/repos': { status: 201, body: web },
+      'DELETE /admin/api/repos/1': { body: api },
+    })
+    renderApp('/admin/projects/atlas/repos')
+    const section = await screen.findByRole('region', { name: 'Project repositories' })
+    expect(await within(section).findByRole('link', { name: 'acme/atlas-api' })).toHaveAttribute('href', 'https://github.com/acme/atlas-api')
+    expect(section).toHaveTextContent('3 open PRs · release v1.2.0')
+    expect(section).toHaveTextContent('<img src=x onerror=alert(1)> Fix login')
+    expect(section.querySelector('img')).toBeNull()
+    expect(section).toHaveTextContent('Linked by claude-code')
+    const user = userEvent.setup()
+    const form = within(section).getByRole('form', { name: 'Link a repository' })
+    await user.type(within(form).getByLabelText('Repository URL'), 'git@github.com:acme/atlas-web.git')
+    await user.type(within(form).getByLabelText('Role'), 'frontend')
+    await user.click(within(form).getByRole('button', { name: 'Link repository' }))
+    expect(await within(section).findByText('acme/atlas-web')).toBeInTheDocument()
+    expect(section).toHaveTextContent('Linked by you')
+    expect(calls.find((call) => call.method === 'POST' && call.path === '/admin/api/projects/atlas/repos')?.body).toEqual({ url: 'git@github.com:acme/atlas-web.git', role: 'frontend', branch: '', path: '', note: '' })
+    expect(within(form).getByLabelText('Repository URL')).toHaveValue('')
+    await user.click(within(section).getAllByRole('button', { name: 'Unlink' })[0]!)
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Unlink' }))
+    await waitFor(() => expect(within(section).queryByRole('link', { name: 'acme/atlas-api' })).not.toBeInTheDocument())
+  })
 
   it('lists projects densely, filters by text and tier, and opens a project page with AI titles instead of raw text', async () => {
     const { calls } = mockApi({

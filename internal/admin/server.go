@@ -29,6 +29,7 @@ import (
 	"unicode/utf8"
 
 	calendarapi "github.com/cesarpetrescu/ledger/internal/calendar"
+	"github.com/cesarpetrescu/ledger/internal/github"
 	"github.com/cesarpetrescu/ledger/internal/oauth"
 	"github.com/cesarpetrescu/ledger/internal/retrieval"
 	"github.com/cesarpetrescu/ledger/internal/store"
@@ -54,6 +55,7 @@ type Config struct {
 	InternalProxyCIDR string
 	IndexURL          string
 	Calendar          *calendarapi.Service
+	GitHub            *github.Sync
 }
 
 type Server struct {
@@ -67,6 +69,7 @@ type Server struct {
 	failures *oauth.RateLimiter
 	events   *eventStream
 	calendar *calendarapi.Service
+	github   *github.Sync
 	oauth    *oauth.Server
 }
 
@@ -76,7 +79,7 @@ func NewServer(config Config, db *store.DB) *Server {
 	if !strings.HasPrefix(config.PasswordHash, "$argon2id$") {
 		panic("LEDGER_ADMIN_PASSWORD_HASH must be an Argon2id PHC string")
 	}
-	s := &Server{config: config, origin: publicOrigin(config.PublicURL), db: db, index: retrieval.NewClient(config.IndexURL), mux: http.NewServeMux(), requests: oauth.NewRateLimiter(), failures: oauth.NewRateLimiter(), events: newEventStream(db), calendar: config.Calendar}
+	s := &Server{config: config, origin: publicOrigin(config.PublicURL), db: db, index: retrieval.NewClient(config.IndexURL), mux: http.NewServeMux(), requests: oauth.NewRateLimiter(), failures: oauth.NewRateLimiter(), events: newEventStream(db), calendar: config.Calendar, github: config.GitHub}
 	s.oauth = oauth.NewServer(oauth.Config{PublicURL: config.PublicURL}, db)
 	if config.InternalProxyCIDR != "" {
 		prefix, err := netip.ParsePrefix(config.InternalProxyCIDR)
@@ -92,6 +95,12 @@ func NewServer(config Config, db *store.DB) *Server {
 	s.mux.HandleFunc("GET /admin/api/projects/{slug}", s.getProject)
 	s.mux.HandleFunc("PUT /admin/api/projects/{slug}", s.putProject)
 	s.mux.HandleFunc("PUT /admin/api/projects/{slug}/research", s.putProjectResearch)
+	s.mux.HandleFunc("GET /admin/api/projects/{slug}/repos", s.listProjectRepos)
+	s.mux.HandleFunc("POST /admin/api/projects/{slug}/repos", s.linkProjectRepo)
+	s.mux.HandleFunc("DELETE /admin/api/repos/{id}", s.unlinkProjectRepo)
+	s.mux.HandleFunc("GET /admin/api/github-sync", s.gitHubSyncStatus)
+	s.mux.HandleFunc("PUT /admin/api/github-sync", s.putGitHubSync)
+	s.mux.HandleFunc("DELETE /admin/api/github-sync", s.deleteGitHubSync)
 	s.mux.HandleFunc("POST /admin/api/projects/{slug}/entries", s.appendEntry)
 	s.mux.HandleFunc("GET /admin/api/projects/{slug}/files", s.listProjectFiles)
 	s.mux.HandleFunc("GET /admin/api/entries", s.listEntries)
