@@ -98,18 +98,20 @@ func (s *Sync) SetToken(ctx context.Context, token string) (Status, error) {
 	if len(token) < 20 || len(token) > 255 || strings.ContainsAny(token, " \t\r\n") {
 		return Status{}, errors.New("paste a GitHub token: a fine-grained token starts with github_pat_")
 	}
-	var user struct {
-		Login string `json:"login"`
-	}
-	if err := s.get(ctx, token, "/user", &user); err != nil {
-		return Status{}, err
-	}
 	nonce := make([]byte, s.aead.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
 		return Status{}, err
 	}
 	sealed := s.aead.Seal(nonce, nonce, []byte(token), []byte("github-sync"))
-	if err := s.db.SetGitHubSync(ctx, sealed, "…"+token[len(token)-4:], user.Login); err != nil {
+	// GitHub is asked while saves and removals are held, so a removal meanwhile waits and wins.
+	check := func() (string, error) {
+		var user struct {
+			Login string `json:"login"`
+		}
+		err := s.get(ctx, token, "/user", &user)
+		return user.Login, err
+	}
+	if err := s.db.SetGitHubSync(ctx, sealed, "…"+token[len(token)-4:], check); err != nil {
 		return Status{}, err
 	}
 	return s.Status(ctx)

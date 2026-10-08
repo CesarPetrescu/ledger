@@ -7,16 +7,18 @@ import (
 
 func TestParseRepoURL(t *testing.T) {
 	for raw, want := range map[string][3]string{ // provider, repo, web URL
-		"https://github.com/CesarPetrescu/ledger":       {"github", "CesarPetrescu/ledger", "https://github.com/CesarPetrescu/ledger"},
-		"https://github.com/CesarPetrescu/ledger.git/":  {"github", "CesarPetrescu/ledger", "https://github.com/CesarPetrescu/ledger"},
-		"git@github.com:CesarPetrescu/ledger.git":       {"github", "CesarPetrescu/ledger", "https://github.com/CesarPetrescu/ledger"},
-		"ssh://git@www.GitHub.com/CesarPetrescu/ledger": {"github", "CesarPetrescu/ledger", "https://github.com/CesarPetrescu/ledger"},
-		"https://gitlab.com/group/sub/app":              {"gitlab", "group/sub/app", "https://gitlab.com/group/sub/app"},
-		"https://codeberg.org/me/tool.git":              {"forgejo", "me/tool", "https://codeberg.org/me/tool"},
-		"http://forgejo.lan:3000/photon/panel.git":      {"git", "photon/panel", "http://forgejo.lan:3000/photon/panel"},
-		"ssh://git@192.168.10.29:2222/photon/panel.git": {"git", "photon/panel", ""},
-		"github-personal:CesarPetrescu/ledger.git":      {"git", "CesarPetrescu/ledger", ""},
-		"git@forgejo.lan:/srv/git/panel.git":            {"git", "srv/git/panel", ""},
+		"https://github.com/CesarPetrescu/ledger":        {"github", "CesarPetrescu/ledger", "https://github.com/CesarPetrescu/ledger"},
+		"https://github.com/CesarPetrescu/ledger.git/":   {"github", "CesarPetrescu/ledger", "https://github.com/CesarPetrescu/ledger"},
+		"git@github.com:CesarPetrescu/ledger.git":        {"github", "CesarPetrescu/ledger", "https://github.com/CesarPetrescu/ledger"},
+		"ssh://git@www.GitHub.com/CesarPetrescu/ledger":  {"github", "CesarPetrescu/ledger", "https://github.com/CesarPetrescu/ledger"},
+		"https://gitlab.com/group/sub/app":               {"gitlab", "group/sub/app", "https://gitlab.com/group/sub/app"},
+		"https://codeberg.org/me/tool.git":               {"forgejo", "me/tool", "https://codeberg.org/me/tool"},
+		"http://forgejo.lan:3000/photon/panel.git":       {"git", "photon/panel", "http://forgejo.lan:3000/photon/panel"},
+		"ssh://git@192.168.10.29:2222/photon/panel.git":  {"git", "photon/panel", ""},
+		"github-personal:CesarPetrescu/ledger.git":       {"git", "CesarPetrescu/ledger", ""},
+		"ssh://cesar@nas.lan/home/cesar/repos/notes.git": {"git", "home/cesar/repos/notes", ""},
+		"gitea@forgejo.lan:photon/panel.git":             {"git", "photon/panel", ""},
+		"git@forgejo.lan:/srv/git/panel.git":             {"git", "srv/git/panel", ""},
 	} {
 		got, err := ParseRepoURL(raw)
 		if err != nil || got.Provider != want[0] || got.Repo != want[1] || got.WebURL != want[2] {
@@ -60,7 +62,12 @@ func TestParseRepoURL(t *testing.T) {
 	for raw, why := range map[string]string{
 		"https://ghp_secret@github.com/owner/repo": "user name",
 		"https://user:token@github.com/owner/repo": "user name",
-		"ssh://git:hunter2@host/owner/repo":        "password",
+		"ssh://git:hunter2@host/owner/repo":        "SSH user",
+		"ssh://github_pat_secret@host/owner/repo":  "SSH user",
+		"ghp_abcdef@github.com:owner/repo.git":     "SSH user",
+		"ssh://AbC123xYz789@host/owner/repo":       "SSH user",
+		"glpat-xyz@gitlab.com:group/app.git":       "SSH user",
+		"ssh://deploy-token@host/owner/repo":       "SSH user",
 		"https://github.com/owner/repo?token=x":    "query",
 		"https://github.com/owner":                 "OWNER/REPO",
 		"https://github.com/owner/repo/tree/main":  "OWNER/REPO",

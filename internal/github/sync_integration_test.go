@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cesarpetrescu/ledger/internal/store"
 	"github.com/cesarpetrescu/ledger/internal/testdb"
@@ -164,7 +165,7 @@ func TestGitHubSyncDropsResultsFromARemovedOrReplacedToken(t *testing.T) {
 					if change == "remove" {
 						err = db.DeleteGitHubSync(ctx)
 					} else {
-						err = db.SetGitHubSync(ctx, []byte("another token's ciphertext, never decrypted here"), "…NEW1", "someone")
+						err = db.SetGitHubSync(ctx, []byte("another token's ciphertext, never decrypted here"), "…NEW1", func() (string, error) { return "someone", nil })
 					}
 					if err != nil {
 						t.Error(err)
@@ -201,5 +202,46 @@ func TestGitHubSyncDropsResultsFromARemovedOrReplacedToken(t *testing.T) {
 				t.Fatalf("the new token's status was overwritten: %+v, %v", state, err)
 			}
 		})
+	}
+}
+
+// Turning sync off while a new token is being checked is not undone when the check finishes: the
+// removal waits for the save, then removes it.
+func TestTurningSyncOffWinsOverATokenBeingChecked(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	entered, release := make(chan struct{}), make(chan struct{})
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(entered)
+		<-release
+		_, _ = w.Write([]byte(`{"login":"CesarPetrescu"}`))
+	}))
+	defer api.Close()
+	base, err := New(db, strings.Repeat("k", 32), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sync := base.WithAPI(api.URL)
+	saved := make(chan error, 1)
+	go func() {
+		_, err := sync.SetToken(ctx, goodToken)
+		saved <- err
+	}()
+	<-entered
+	cleared := make(chan error, 1)
+	go func() { cleared <- sync.Clear(ctx) }()
+	select {
+	case err := <-cleared:
+		t.Fatalf("turning off did not wait for the token being checked: %v", err)
+	case <-time.After(500 * time.Millisecond):
+	}
+	close(release)
+	if err := <-saved; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-cleared; err != nil {
+		t.Fatal(err)
+	}
+	if status, _ := sync.Status(ctx); status.Configured {
+		t.Fatalf("a token checked before turning off came back: %+v", status)
 	}
 }

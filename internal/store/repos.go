@@ -71,9 +71,29 @@ type RepoLocation struct {
 
 var (
 	repoProviders = map[string]string{"github.com": "github", "gitlab.com": "gitlab", "bitbucket.org": "bitbucket", "codeberg.org": "forgejo"}
-	scpLike       = regexp.MustCompile(`^(?:[A-Za-z0-9._-]+@)?([A-Za-z0-9.-]+):(.+)$`)
-	githubRepo    = regexp.MustCompile(`^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$`)
+	scpLike       = regexp.MustCompile(`^(?:([^@/:]+)@)?([A-Za-z0-9.-]+):(.+)$`)
+	// An SSH Git URL logs in as an account: git on hosted forges, or a person's login on their own server.
+	sshUser      = regexp.MustCompile(`^[a-z_][a-z0-9_.-]{0,31}$`)
+	tokenMarkers = []string{"ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_", "glpat-", "gldt-", "glptt-", "x-access-token", "oauth", "token", "secret", "pat_"}
+	githubRepo   = regexp.MustCompile(`^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$`)
 )
+
+var errUserInURL = errors.New("url's SSH user must be a plain account name such as git; never put a password or token in a URL")
+
+// plainSSHUser accepts a lowercase account name and nothing shaped like a token, so a secret cannot enter
+// Ledger as an SSH user name.
+func plainSSHUser(user string) bool {
+	if user == "" {
+		return true
+	}
+	lower := strings.ToLower(user)
+	for _, marker := range tokenMarkers {
+		if strings.Contains(lower, marker) {
+			return false
+		}
+	}
+	return sshUser.MatchString(user)
+}
 
 // ParseRepoURL accepts HTTPS, HTTP, SSH, and scp-style (git@host:owner/repo) URLs. It refuses any URL that
 // carries a password or token, so a secret cannot enter Ledger through a link.
@@ -88,7 +108,10 @@ func ParseRepoURL(raw string) (RepoLocation, error) {
 		if m == nil {
 			return RepoLocation{}, errors.New("url must look like https://host/owner/repo or git@host:owner/repo.git")
 		}
-		host, path, scheme = m[1], m[2], "ssh"
+		if !plainSSHUser(m[1]) {
+			return RepoLocation{}, errUserInURL
+		}
+		host, path, scheme = m[2], m[3], "ssh"
 	} else {
 		u, err := url.Parse(raw)
 		if err != nil || u.Host == "" || u.RawQuery != "" || u.Fragment != "" {
@@ -101,8 +124,8 @@ func ParseRepoURL(raw string) (RepoLocation, error) {
 				return RepoLocation{}, errors.New("url must not contain a user name, password, or token; remove the part before @")
 			}
 		case "ssh", "git":
-			if _, hasPassword := u.User.Password(); hasPassword {
-				return RepoLocation{}, errors.New("url must not contain a password")
+			if _, hasPassword := u.User.Password(); hasPassword || !plainSSHUser(u.User.Username()) {
+				return RepoLocation{}, errUserInURL
 			}
 		default:
 			return RepoLocation{}, errors.New("url must use https, http, ssh, or git")
@@ -326,13 +349,25 @@ func (db *DB) GitHubSync(ctx context.Context) (GitHubSyncState, error) {
 	return s, err
 }
 
-// SetGitHubSync replaces the token and marks every GitHub repository for a fresh sync.
-func (db *DB) SetGitHubSync(ctx context.Context, ciphertext []byte, hint, login string) error {
+// githubSyncLock serializes saving and removing the token.
+const githubSyncLock = 7103379
+
+// SetGitHubSync stores a token once check (which asks GitHub who it belongs to) passes, and marks every
+// GitHub repository for a fresh sync. Saves and removals take turns: a removal requested while a token is
+// being checked runs after the save, so turning sync off is never undone by an older request.
+func (db *DB) SetGitHubSync(ctx context.Context, ciphertext []byte, hint string, check func() (login string, err error)) error {
 	tx, err := db.Pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, githubSyncLock); err != nil {
+		return err
+	}
+	login, err := check()
+	if err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `INSERT INTO github_sync(token_ciphertext,token_hint,login) VALUES($1,$2,$3)
 ON CONFLICT (singleton) DO UPDATE SET token_ciphertext=EXCLUDED.token_ciphertext,token_hint=EXCLUDED.token_hint,login=EXCLUDED.login,saved_at=now(),last_run_at=NULL,last_error=''`, ciphertext, hint, login); err != nil {
 		return err
@@ -343,13 +378,16 @@ ON CONFLICT (singleton) DO UPDATE SET token_ciphertext=EXCLUDED.token_ciphertext
 	return tx.Commit(ctx)
 }
 
-// DeleteGitHubSync forgets the token and what it synced.
+// DeleteGitHubSync forgets the token and what it synced, after any save in progress.
 func (db *DB) DeleteGitHubSync(ctx context.Context) error {
 	tx, err := db.Pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, githubSyncLock); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `DELETE FROM github_sync`); err != nil {
 		return err
 	}

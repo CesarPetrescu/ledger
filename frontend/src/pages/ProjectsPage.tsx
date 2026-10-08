@@ -222,7 +222,8 @@ function ProjectRepos({ slug }: { slug: string }) {
     try {
       const repo = await api.linkProjectRepo(slug, input)
       setInput(EMPTY_REPO)
-      repos.update((current) => [...current, repo])
+      // A live refresh may already have brought it in.
+      repos.update((current) => current.some((item) => item.id === repo.id) ? current : [...current, repo])
       toast(`Linked ${repo.repo}.`)
     } catch (failure) {
       setError(describeError(failure))
