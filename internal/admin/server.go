@@ -118,6 +118,7 @@ func NewServer(config Config, db *store.DB) *Server {
 	s.mux.HandleFunc("GET /admin/api/agents", s.agents)
 	s.mux.HandleFunc("GET /admin/api/handoffs", s.listHandoffs)
 	s.mux.HandleFunc("POST /admin/api/handoffs", s.createHandoff)
+	s.mux.HandleFunc("POST /admin/api/research", s.createResearch)
 	s.mux.HandleFunc("GET /admin/api/handoffs/{id}", s.getHandoff)
 	s.mux.HandleFunc("PUT /admin/api/handoffs/{id}", s.putHandoff)
 	s.mux.HandleFunc("GET /admin/api/handoffs/{id}/export", s.exportHandoff)

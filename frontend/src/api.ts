@@ -484,6 +484,21 @@ export interface HandoffCreateInput {
   draft: boolean
 }
 
+export interface ResearchCreateInput {
+  project_slug?: string
+  title: string
+  objective: string
+  acceptance: string[]
+  deliverable: 'report' | 'answer' | 'dataset' | 'code'
+  draft: boolean
+}
+
+export interface ResearchCreated {
+  handoff_id: string
+  message_id: string
+  state: string
+}
+
 export interface Session {
   csrf_token: string
   expires_at: string
@@ -627,6 +642,7 @@ export const api = {
   },
   getHandoff: (id: string, before?: string) => request<HandoffDetail>('GET', `/handoffs/${encodeURIComponent(id)}?messages=50${before ? `&before=${encodeURIComponent(before)}` : ''}`),
   createHandoff: (input: HandoffCreateInput) => request<HandoffDetail>('POST', '/handoffs', input),
+  createResearch: (input: ResearchCreateInput) => request<ResearchCreated>('POST', '/research', input),
   saveHandoff: (id: string, input: Pick<HandoffCreateInput, 'project_slug' | 'title' | 'description' | 'scope'>) => request<Handoff>('PUT', `/handoffs/${encodeURIComponent(id)}`, input),
   appendHandoffMessage: (id: string, input: { body: string; target?: string; draft: boolean }) => request<HandoffMessage>('POST', `/handoffs/${encodeURIComponent(id)}/messages`, input),
   updateHandoffMessage: (id: string, action: string, target = '') => request<HandoffMessage>('POST', `/handoff-messages/${encodeURIComponent(id)}/actions`, { action, target }),

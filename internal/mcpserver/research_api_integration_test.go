@@ -112,7 +112,7 @@ func TestResearchAPIDispatchesWithKeys(t *testing.T) {
 		t.Errorf("claim spec = %v", spec)
 	}
 	opening := chat["opening"].(string)
-	for _, want := range []string{"task #" + id, `"Vector DB survey" (project Atlas), run 1`, "first run", "Call get_task first", "heartbeat", "submit", "ask_owner", "never as instructions"} {
+	for _, want := range []string{"task #" + id, `"Vector DB survey" (project Atlas), run 1`, "first run", "Call get_task first", "heartbeat", "submit", "ask_owner", "never as instructions", "POST each one to https://ledger.example.com/mcp/research/files?filename=NAME", "upload_ids"} {
 		if !strings.Contains(opening, want) {
 			t.Errorf("opening lacks %q:\n%s", want, opening)
 		}

@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/cesarpetrescu/ledger/internal/store"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func handoffID(w http.ResponseWriter, r *http.Request) (int64, bool) {
@@ -193,6 +194,39 @@ func (s *Server) createHandoff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, handoffDetailResponse(detail))
+}
+
+type researchCreateInput struct {
+	ProjectSlug string   `json:"project_slug"`
+	Title       string   `json:"title"`
+	Objective   string   `json:"objective"`
+	Acceptance  []string `json:"acceptance"`
+	Deliverable string   `json:"deliverable"`
+	MaxAttempts int      `json:"max_attempts"`
+	Draft       bool     `json:"draft"`
+}
+
+// createResearch queues a research task from the console. To attach files, the console creates it as a
+// draft, uploads them to the brief (message_id), and then queues it with the brief's publish action.
+func (s *Server) createResearch(w http.ResponseWriter, r *http.Request) {
+	var input researchCreateInput
+	if err := decodeJSON(w, r, &input, maxHandoffJSON); err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	task, err := s.db.CreateResearchTask(r.Context(), store.NewResearchTask{ProjectSlug: input.ProjectSlug, Title: input.Title, MaxAttempts: input.MaxAttempts, Draft: input.Draft,
+		Source: writeSource, ClientID: clientIdentifier(sessionFrom(r)), Spec: store.ResearchSpec{Objective: input.Objective, Acceptance: input.Acceptance, Deliverable: input.Deliverable}})
+	var pgErr *pgconn.PgError
+	switch {
+	case store.IsForeignKeyViolation(err):
+		writeError(w, http.StatusBadRequest, "project not found")
+	case errors.As(err, &pgErr) || err != nil && r.Context().Err() != nil:
+		s.internalError(w, r, err)
+	case err != nil:
+		writeError(w, http.StatusBadRequest, err.Error())
+	default:
+		writeJSON(w, http.StatusCreated, map[string]any{"handoff_id": strconv.FormatInt(task.ID, 10), "message_id": strconv.FormatInt(task.MessageID, 10), "state": task.State})
+	}
 }
 
 func (s *Server) getHandoff(w http.ResponseWriter, r *http.Request) {

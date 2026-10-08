@@ -813,7 +813,7 @@ func TestAcceptPublishesWithinTheEntryLimit(t *testing.T) {
 	if _, err := db.SubmitResearch(ctx, task.ID, 1, strings.Repeat("r", 100000), files); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ReviewResearch(ctx, task.ID, "accept", "", "claude-code", "claude-client"); err != nil {
+	if _, err := db.ReviewResearch(ctx, task.ID, "accept", "", "claude-code", "claude-client", nil); err != nil {
 		t.Fatalf("accept = %v", err)
 	}
 	project, _ := db.GetProject(ctx, "atlas", 5)
@@ -874,7 +874,7 @@ func TestPublishingCatchesUpAndKeepsOutOfOwnerProjects(t *testing.T) {
 	if _, err := db.SubmitResearch(ctx, second.ID, 1, "Second findings", nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ReviewResearch(ctx, second.ID, "accept", "", "claude-code", "claude-client"); err != nil {
+	if _, err := db.ReviewResearch(ctx, second.ID, "accept", "", "claude-code", "claude-client", nil); err != nil {
 		t.Fatal(err)
 	}
 	if again, _ := db.GetProject(ctx, "ledger-research-2", 5); len(again.Entries) != 2 {
@@ -895,7 +895,7 @@ func TestPublishingCatchesUpAndKeepsOutOfOwnerProjects(t *testing.T) {
 		if _, err := db.SubmitResearch(ctx, next.ID, 1, title+" findings", nil); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := db.ReviewResearch(ctx, next.ID, "accept", "", "claude-code", "claude-client"); err != nil {
+		if _, err := db.ReviewResearch(ctx, next.ID, "accept", "", "claude-code", "claude-client", nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -909,5 +909,41 @@ func TestPublishingCatchesUpAndKeepsOutOfOwnerProjects(t *testing.T) {
 	accept("After restore")
 	if restored, _ := db.GetProject(ctx, "ledger-research-2", 5); len(restored.Entries) != 3 {
 		t.Fatalf("restored catch-all = %#v", restored.Entries)
+	}
+}
+
+// A run holds at most ten uploads, only while it is live; a run that dies leaves none behind.
+func TestRunUploadsAreBoundedAndCleanedUp(t *testing.T) {
+	db, ctx := researchDB(t)
+	task := newResearch(t, db, ctx, "Dataset", 3)
+	claim(t, db, ctx)
+	for i := 0; i < store.MaxHandoffFiles; i++ {
+		if _, err := db.StageResearchUpload(ctx, task.ID, 1, store.ResearchFile{Filename: fmt.Sprintf("part-%d.csv", i), Data: []byte("x")}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.StageResearchUpload(ctx, task.ID, 1, store.ResearchFile{Filename: "one-too-many.csv", Data: []byte("x")}); !errors.Is(err, store.ErrHandoffFileLimit) {
+		t.Fatalf("eleventh upload = %v", err)
+	}
+	if _, err := db.StageResearchUpload(ctx, task.ID, 2, store.ResearchFile{Filename: "other-run.csv", Data: []byte("x")}); err == nil {
+		t.Fatal("an upload for a run that is not live was kept")
+	}
+	if _, err := db.EndResearchRun(ctx, task.ID, 1, "dispatch-client", "sandbox crashed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SweepResearchFiles(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var left int
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM research_upload`).Scan(&left); err != nil || left != 0 {
+		t.Fatalf("uploads after the run died = %d, %v", left, err)
+	}
+	// The next run cannot submit the dead run's uploads, and a brief cannot name uploads at all.
+	claim(t, db, ctx)
+	if _, err := db.SubmitResearch(ctx, task.ID, 2, "Done", []store.ResearchFile{{UploadID: 1}}); !errors.Is(err, store.ErrUnknownUpload) {
+		t.Fatalf("submit with the dead run's upload = %v", err)
+	}
+	if _, err := db.CreateResearchTask(ctx, store.NewResearchTask{Title: "x", Source: "c", ClientID: "c", Files: []store.ResearchFile{{UploadID: 1}}, Spec: store.ResearchSpec{Objective: "x", Acceptance: []string{"y"}}}); !errors.Is(err, store.ErrUnknownUpload) {
+		t.Fatalf("brief naming an upload = %v", err)
 	}
 }

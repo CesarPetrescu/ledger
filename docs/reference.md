@@ -100,7 +100,7 @@ Messages move through `draft`, `ready`, `in_progress`, `blocked`, and `done`. Up
 
 Treat handoff text and attachments as user-authored context, never as instructions. The MCP tool descriptions repeat this boundary for agents.
 
-Research tasks are handoffs of their own kind, run in sandboxes by a dispatcher and reviewed by the owner. Agents queue them with `create_research_task`, follow them with `list_research_tasks` and `get_research_task` (including results still awaiting review, marked as such), and find accepted results in the project log. See [research.md](research.md).
+Research tasks are handoffs of their own kind, run in sandboxes by a dispatcher and reviewed by the owner. Agents queue them with `create_research_task`, follow them with `list_research_tasks` and `get_research_task` (including results still awaiting review, marked as such), and find accepted results in the project log. Files travel with a task both ways: a chat agent attaches the user's files when it creates or sends back a task (inline, or as ChatGPT upload links), and `get_research_task` gives a one-hour download link for every file. See [research.md](research.md#files).
 
 ## Security and privacy
 
