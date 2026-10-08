@@ -404,8 +404,8 @@ func (db *DB) GitHubSync(ctx context.Context) (GitHubSyncState, error) {
 // githubSyncLock serializes saving and removing the token.
 const githubSyncLock = 7103379
 
-// SetGitHubSync stores a token once check (which asks GitHub who it belongs to) passes, and marks every
-// GitHub repository for a fresh sync. Saves and removals take turns: a removal requested while a token is
+// SetGitHubSync stores a token once check (which asks GitHub who it belongs to) passes, and clears what the
+// previous token synced, so every repository syncs afresh with the new one. Saves and removals take turns: a removal requested while a token is
 // being checked runs after the save, so turning sync off is never undone by an older request.
 func (db *DB) SetGitHubSync(ctx context.Context, ciphertext []byte, hint string, check func() (login string, err error)) error {
 	tx, err := db.Pool.Begin(ctx)
@@ -424,10 +424,18 @@ func (db *DB) SetGitHubSync(ctx context.Context, ciphertext []byte, hint string,
 ON CONFLICT (singleton) DO UPDATE SET token_ciphertext=EXCLUDED.token_ciphertext,token_hint=EXCLUDED.token_hint,login=EXCLUDED.login,saved_at=now(),last_run_at=NULL,last_error=''`, ciphertext, hint, login); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE project_repo SET synced_at=NULL WHERE provider='github'`); err != nil {
+	// What the previous token saw is not this token's to show: start every repository afresh.
+	if err := clearRepoSync(ctx, tx); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// clearRepoSync forgets everything a token synced.
+func clearRepoSync(ctx context.Context, tx pgx.Tx) error {
+	_, err := tx.Exec(ctx, `UPDATE project_repo SET synced_at=NULL,sync_error='',default_branch='',description='',private=NULL,archived=NULL,head_sha='',head_message='',head_at=NULL,
+open_prs=NULL,latest_release='',latest_release_at=NULL`)
+	return err
 }
 
 // DeleteGitHubSync forgets the token and what it synced, after any save in progress.
@@ -443,8 +451,7 @@ func (db *DB) DeleteGitHubSync(ctx context.Context) error {
 	if _, err := tx.Exec(ctx, `DELETE FROM github_sync`); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE project_repo SET synced_at=NULL,sync_error='',default_branch='',description='',private=NULL,archived=NULL,head_sha='',head_message='',head_at=NULL,
-open_prs=NULL,latest_release='',latest_release_at=NULL`); err != nil {
+	if err := clearRepoSync(ctx, tx); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

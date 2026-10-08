@@ -183,4 +183,16 @@ func TestFailedSyncKeepsTheLastGoodSnapshot(t *testing.T) {
 	if got := repos[0].Sync; got.Error != "" || got.HeadSHA != "def" {
 		t.Fatalf("after recovering = %+v", got)
 	}
+	// A new token starts afresh: a failed check with it cannot show what the old token saw.
+	if err := db.SetGitHubSync(ctx, []byte("other ciphertext"), "…wxyz", func() (string, error) { return "owner", nil }); err != nil {
+		t.Fatal(err)
+	}
+	replaced, _ := db.GitHubSync(ctx)
+	if err := db.SaveSyncRound(ctx, replaced.SavedAt, []store.RepoSyncResult{{ID: repo.ID, Sync: store.RepoSync{Error: "not found, or the token cannot read this repository"}}}, ""); err != nil {
+		t.Fatal(err)
+	}
+	repos, _ = db.ListRepos(ctx, "atlas")
+	if got := repos[0].Sync; got == nil || got.HeadSHA != "" || got.Error == "" {
+		t.Fatalf("the old token's snapshot survived a replacement: %+v", got)
+	}
 }
