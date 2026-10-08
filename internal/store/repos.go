@@ -106,7 +106,8 @@ func plainSSHUser(user string) bool {
 // carries a password or token, so a secret cannot enter Ledger through a link.
 func ParseRepoURL(raw string) (RepoLocation, error) {
 	raw = strings.TrimSpace(raw)
-	if raw == "" || len(raw) > 500 || strings.IndexFunc(raw, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) || r == '\\' }) >= 0 {
+	unsafe := func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) || r == '\\' }
+	if raw == "" || len(raw) > 500 || strings.IndexFunc(raw, unsafe) >= 0 {
 		return RepoLocation{}, errors.New("url must be a Git repository URL of at most 500 characters")
 	}
 	var host, port, path, scheme string
@@ -153,6 +154,10 @@ func ParseRepoURL(raw string) (RepoLocation, error) {
 		host = bare
 	}
 	path = strings.TrimSuffix(strings.Trim(path, "/"), ".git")
+	// url.Parse decodes percent escapes, so check the decoded path too: %0A must not become a newline.
+	if strings.IndexFunc(path, unsafe) >= 0 || strings.ContainsAny(path, "?#%") {
+		return RepoLocation{}, errors.New("url's repository path has characters a repository name cannot have")
+	}
 	if path == "" || strings.Contains("/"+path+"/", "/../") || strings.Contains("/"+path+"/", "/./") || strings.Contains(path, "//") {
 		return RepoLocation{}, errors.New("url must name a repository path, such as owner/repo")
 	}
