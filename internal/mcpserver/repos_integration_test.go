@@ -3,6 +3,7 @@
 package mcpserver
 
 import (
+	"encoding/json"
 	"net/http/httptest"
 	"testing"
 
@@ -30,6 +31,11 @@ func TestAgentsSeeAndLinkProjectRepos(t *testing.T) {
 	project := callTool[projectOutput](t, claude, "get_project", map[string]any{"slug": "atlas"})
 	if len(project.Repos) != 1 || project.Repos[0].Repo != "acme/atlas-api" || project.Repos[0].Role != "backend" || project.Project.Slug != "atlas" {
 		t.Fatalf("get_project repos = %#v", project.Repos)
+	}
+	resource, err := claude.ReadResource(ctx, &mcp.ReadResourceParams{URI: "ledger://project/atlas"})
+	var fromResource projectOutput
+	if err != nil || len(resource.Contents) != 1 || json.Unmarshal([]byte(resource.Contents[0].Text), &fromResource) != nil || len(fromResource.Repos) != 1 || fromResource.Repos[0].Repo != "acme/atlas-api" {
+		t.Fatalf("project resource = %#v, %v", resource, err)
 	}
 	web := callTool[store.ProjectRepo](t, claude, "link_repo", map[string]any{"project_slug": "atlas", "url": "git@github.com:acme/atlas-web.git", "role": "frontend"})
 	if web.AddedBy != "claude-code" || web.WebURL != "https://github.com/acme/atlas-web" {

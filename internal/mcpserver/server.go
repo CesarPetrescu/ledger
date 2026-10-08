@@ -302,7 +302,12 @@ func NewServerWithSpeech(db *store.DB, indexURL string, calendar *calendarapi.Se
 			if err != nil {
 				return nil, err
 			}
-			body, _ := json.Marshal(result)
+			// The same shape as get_project, repositories included.
+			repos, err := db.ListRepos(ctx, slug)
+			if err != nil {
+				return nil, err
+			}
+			body, _ := json.Marshal(projectOutput{ProjectWithEntries: result, Repos: repos})
 			return &mcp.ReadResourceResult{Contents: []*mcp.ResourceContents{{URI: request.Params.URI, MIMEType: "application/json", Text: string(body)}}}, nil
 		})
 
