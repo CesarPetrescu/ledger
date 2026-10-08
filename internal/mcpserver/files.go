@@ -65,11 +65,17 @@ func inputFiles(ctx context.Context, inline []researchFileInput, uploads []chatU
 	if err != nil {
 		return nil, err
 	}
+	// Downloads stop as soon as the message's total is reached, so a call never buffers more than that.
+	var total int64
+	for _, file := range files {
+		total += int64(len(file.Data))
+	}
 	for i, upload := range uploads {
-		file, err := fetchUpload(ctx, upload)
+		file, err := fetchUpload(ctx, upload, min(store.MaxHandoffFileBytes, store.MaxHandoffMessageBytes-total))
 		if err != nil {
 			return nil, fmt.Errorf("uploads[%d]: %w", i, err)
 		}
+		total += int64(len(file.Data))
 		files = append(files, file)
 	}
 	return files, nil
@@ -127,7 +133,8 @@ func publicAddressOnly(_, address string, _ syscall.RawConn) error {
 	return nil
 }
 
-func fetchUpload(ctx context.Context, upload chatUpload) (store.ResearchFile, error) {
+// fetchUpload downloads one ChatGPT upload of at most limit bytes.
+func fetchUpload(ctx context.Context, upload chatUpload, limit int64) (store.ResearchFile, error) {
 	link, err := url.Parse(upload.DownloadURL)
 	if err != nil || link.Scheme != "https" || link.Host == "" || link.User != nil {
 		return store.ResearchFile{}, fmt.Errorf("download_url must be an HTTPS link; ChatGPT's mobile apps do not pass files to connectors yet, so attach the file from ChatGPT on the web or in Ledger's console")
@@ -144,11 +151,14 @@ func fetchUpload(ctx context.Context, upload chatUpload) (store.ResearchFile, er
 	if response.StatusCode != http.StatusOK {
 		return store.ResearchFile{}, fmt.Errorf("could not download the file: HTTP %d (the link may have expired)", response.StatusCode)
 	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, store.MaxHandoffFileBytes+1))
+	if response.ContentLength > limit {
+		return store.ResearchFile{}, store.ErrHandoffFileLimit
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, limit+1))
 	if err != nil {
 		return store.ResearchFile{}, fmt.Errorf("could not download the file: %w", err)
 	}
-	if len(data) > store.MaxHandoffFileBytes {
+	if int64(len(data)) > limit {
 		return store.ResearchFile{}, store.ErrHandoffFileLimit
 	}
 	name := upload.FileName
