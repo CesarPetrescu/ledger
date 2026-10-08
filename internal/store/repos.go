@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	slashpath "path"
 	"regexp"
@@ -136,9 +137,12 @@ func ParseRepoURL(raw string) (RepoLocation, error) {
 		u, _ := url.Parse(raw)
 		web = scheme + "://" + u.Host + "/" + path
 	}
+	// Brackets keep an IPv6 address apart from its port: [::1]:3000 is not [::1:3000].
 	server := host
 	if port != "" {
-		server += ":" + port
+		server = net.JoinHostPort(host, port)
+	} else if strings.Contains(host, ":") {
+		server = "[" + host + "]"
 	}
 	// Hosted providers match owner and repository names in any case; a generic Git server may not.
 	key := path

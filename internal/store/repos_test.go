@@ -47,6 +47,11 @@ func TestParseRepoURL(t *testing.T) {
 	if x, _ := ParseRepoURL("https://GitLab.com/Team/App"); x.Key != "gitlab.com/team/app" {
 		t.Errorf("hosted key = %q", x.Key)
 	}
+	v6port, _ := ParseRepoURL("http://[::1]:3000/acme/app")
+	v6bare, _ := ParseRepoURL("http://[::1:3000]/acme/app")
+	if v6port.Key != "[::1]:3000/acme/app" || v6bare.Key != "[::1:3000]/acme/app" {
+		t.Errorf("IPv6 keys = %q, %q", v6port.Key, v6bare.Key)
+	}
 	c, _ := ParseRepoURL("http://forgejo.lan:3000/acme/app")
 	d, _ := ParseRepoURL("http://forgejo.lan:4000/acme/app")
 	if c.Key == d.Key || c.Key != "forgejo.lan:3000/acme/app" {
