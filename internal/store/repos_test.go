@@ -41,6 +41,9 @@ func TestParseRepoURL(t *testing.T) {
 	if x, _ := ParseRepoURL("https://git.example.org/Team/App"); x.Key != "git.example.org/Team/App" {
 		t.Errorf("generic key = %q", x.Key)
 	}
+	if x, _ := ParseRepoURL("https://www.git.example.org/team/app"); x.Key != "www.git.example.org/team/app" {
+		t.Errorf("www dropped on a generic host: %q", x.Key)
+	}
 	if x, _ := ParseRepoURL("https://GitLab.com/Team/App"); x.Key != "gitlab.com/team/app" {
 		t.Errorf("hosted key = %q", x.Key)
 	}

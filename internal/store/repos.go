@@ -69,8 +69,9 @@ type RepoLocation struct {
 }
 
 var (
-	scpLike    = regexp.MustCompile(`^(?:[A-Za-z0-9._-]+@)?([A-Za-z0-9.-]+):(.+)$`)
-	githubRepo = regexp.MustCompile(`^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$`)
+	repoProviders = map[string]string{"github.com": "github", "gitlab.com": "gitlab", "bitbucket.org": "bitbucket", "codeberg.org": "forgejo"}
+	scpLike       = regexp.MustCompile(`^(?:[A-Za-z0-9._-]+@)?([A-Za-z0-9.-]+):(.+)$`)
+	githubRepo    = regexp.MustCompile(`^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$`)
 )
 
 // ParseRepoURL accepts HTTPS, HTTP, SSH, and scp-style (git@host:owner/repo) URLs. It refuses any URL that
@@ -111,12 +112,16 @@ func ParseRepoURL(raw string) (RepoLocation, error) {
 			port = ""
 		}
 	}
-	host = strings.TrimPrefix(strings.ToLower(host), "www.")
+	// www. is an alias only on the hosted providers; on another server it may be a different host.
+	host = strings.ToLower(host)
+	if bare := strings.TrimPrefix(host, "www."); repoProviders[bare] != "" {
+		host = bare
+	}
 	path = strings.TrimSuffix(strings.Trim(path, "/"), ".git")
 	if path == "" || strings.Contains("/"+path+"/", "/../") || strings.Contains("/"+path+"/", "/./") || strings.Contains(path, "//") {
 		return RepoLocation{}, errors.New("url must name a repository path, such as owner/repo")
 	}
-	provider := map[string]string{"github.com": "github", "gitlab.com": "gitlab", "bitbucket.org": "bitbucket", "codeberg.org": "forgejo"}[host]
+	provider := repoProviders[host]
 	if provider == "" {
 		provider = "git"
 	}

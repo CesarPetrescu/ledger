@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/cesarpetrescu/ledger/internal/store"
 	"github.com/cesarpetrescu/ledger/internal/testdb"
@@ -94,5 +95,56 @@ func TestProjectReposLinkUnlinkAndSurviveTrash(t *testing.T) {
 	all, _ := db.ListRepos(ctx, "")
 	if len(all) != len(after)+1 {
 		t.Fatalf("all repos = %d", len(all))
+	}
+}
+
+// An unlink in flight while the project is deleted wins or loses as a whole: the link it removed never
+// comes back from Trash.
+func TestTrashWaitsForAnUnlinkInFlight(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	gone, err := db.LinkRepo(ctx, store.NewRepo{ProjectSlug: "atlas", URL: "https://github.com/acme/gone", Source: "c", ClientID: "c"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.LinkRepo(ctx, store.NewRepo{ProjectSlug: "atlas", URL: "https://github.com/acme/kept", Source: "c", ClientID: "c"}); err != nil {
+		t.Fatal(err)
+	}
+	unlink, err := db.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := unlink.Exec(ctx, `DELETE FROM project_repo WHERE id=$1::bigint`, gone.ID); err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		id  int64
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		id, _, err := db.TrashProject(ctx, "atlas")
+		done <- result{id, err}
+	}()
+	select {
+	case r := <-done:
+		t.Fatalf("Trash did not wait for the unlink: %+v", r)
+	case <-time.After(500 * time.Millisecond):
+	}
+	if err := unlink.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r := <-done
+	if r.err != nil {
+		t.Fatal(r.err)
+	}
+	if err := db.RestoreTrash(ctx, r.id); err != nil {
+		t.Fatal(err)
+	}
+	repos, _ := db.ListRepos(ctx, "atlas")
+	if len(repos) != 1 || repos[0].Repo != "acme/kept" {
+		t.Fatalf("restored links = %+v", repos)
 	}
 }

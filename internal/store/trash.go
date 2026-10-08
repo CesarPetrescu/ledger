@@ -179,6 +179,10 @@ func (db *DB) TrashProject(ctx context.Context, slug string) (trashID, actionID 
 	if _, err := tx.Exec(ctx, `SELECT 1 FROM handoff WHERE project_slug=$1 FOR UPDATE`, slug); err != nil {
 		return 0, 0, err
 	}
+	// And its repository links, so an unlink racing the deletion either lands first or finds nothing.
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM project_repo WHERE project_slug=$1 FOR UPDATE`, slug); err != nil {
+		return 0, 0, err
+	}
 	if err := tx.QueryRow(ctx, `SELECT p.name,(SELECT count(*) FROM entry WHERE slug=p.slug),jsonb_build_object(
  'project',to_jsonb(p),
  'entries',COALESCE((SELECT jsonb_agg(`+entryPayload+` ORDER BY e.id) FROM entry e WHERE e.slug=p.slug),'[]'::jsonb),
