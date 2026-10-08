@@ -3,6 +3,7 @@
 package github
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -243,5 +244,65 @@ func TestTurningSyncOffWinsOverATokenBeingChecked(t *testing.T) {
 	}
 	if status, _ := sync.Status(ctx); status.Configured {
 		t.Fatalf("a token checked before turning off came back: %+v", status)
+	}
+}
+
+// A round over many repositories refreshes an open console once, not once per repository.
+func TestASyncRoundNotifiesTheConsoleOnce(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "acme", Name: "Acme", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"app", "empty", "hidden-1", "hidden-2"} {
+		branch := ""
+		if name == "app" {
+			branch = "release"
+		}
+		if _, err := db.LinkRepo(ctx, store.NewRepo{ProjectSlug: "acme", URL: "https://github.com/acme/" + name, Branch: branch, Source: "owner", ClientID: "owner"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var seen []string
+	api := fakeGitHub(t, &seen)
+	defer api.Close()
+	base, err := New(db, strings.Repeat("k", 32), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sync := base.WithAPI(api.URL)
+	if _, err := sync.SetToken(ctx, goodToken); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := db.Pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Release()
+	if _, err := listener.Exec(ctx, `LISTEN ledger_admin_event`); err != nil {
+		t.Fatal(err)
+	}
+	if err := sync.SyncDue(ctx); err != nil {
+		t.Fatal(err)
+	}
+	repoEvents := 0
+	for {
+		wait, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+		n, err := listener.Conn().WaitForNotification(wait)
+		cancel()
+		if err != nil {
+			break
+		}
+		if strings.Contains(n.Payload, `"project_repo"`) {
+			repoEvents++
+		}
+	}
+	if repoEvents != 1 {
+		t.Fatalf("one round sent %d repository notifications", repoEvents)
+	}
+	repos, _ := db.ListRepos(ctx, "acme")
+	for _, r := range repos {
+		if r.Sync == nil {
+			t.Fatalf("%s not synced", r.Repo)
+		}
 	}
 }

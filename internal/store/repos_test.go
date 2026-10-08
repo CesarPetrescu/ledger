@@ -18,6 +18,7 @@ func TestParseRepoURL(t *testing.T) {
 		"github-personal:CesarPetrescu/ledger.git":       {"git", "CesarPetrescu/ledger", ""},
 		"ssh://cesar@nas.lan/home/cesar/repos/notes.git": {"git", "home/cesar/repos/notes", ""},
 		"gitea@forgejo.lan:photon/panel.git":             {"git", "photon/panel", ""},
+		"git@github.com.:CesarPetrescu/ledger.git":       {"github", "CesarPetrescu/ledger", "https://github.com/CesarPetrescu/ledger"},
 		"git@forgejo.lan:/srv/git/panel.git":             {"git", "srv/git/panel", ""},
 	} {
 		got, err := ParseRepoURL(raw)

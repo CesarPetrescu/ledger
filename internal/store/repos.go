@@ -137,7 +137,11 @@ func ParseRepoURL(raw string) (RepoLocation, error) {
 		}
 	}
 	// www. is an alias only on the hosted providers; on another server it may be a different host.
-	host = strings.ToLower(host)
+	// A terminal dot names the same host (github.com. is github.com).
+	host = strings.TrimSuffix(strings.ToLower(host), ".")
+	if host == "" {
+		return RepoLocation{}, errors.New("url must name a host")
+	}
 	if bare := strings.TrimPrefix(host, "www."); repoProviders[bare] != "" {
 		host = bare
 	}
@@ -323,13 +327,38 @@ ORDER BY synced_at NULLS FIRST,id LIMIT $2`, every.Seconds(), limit)
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (ProjectRepo, error) { return scanRepo(row) })
 }
 
-// SaveRepoSync records what the sync saw for one link, only while the token it used is still the saved
-// one (token is its SavedAt): a removed or replaced token's late results are dropped.
-func (db *DB) SaveRepoSync(ctx context.Context, id string, token time.Time, s RepoSync) error {
-	_, err := db.Pool.Exec(ctx, `UPDATE project_repo SET synced_at=now(),sync_error=$2,default_branch=$3,description=$4,private=$5,archived=$6,head_sha=$7,head_message=$8,head_at=$9,
-open_prs=$10,latest_release=$11,latest_release_at=$12 WHERE id=$1::bigint AND EXISTS (SELECT 1 FROM github_sync WHERE saved_at=$13 FOR SHARE)`,
-		id, s.Error, s.DefaultBranch, s.Description, s.Private, s.Archived, s.HeadSHA, s.HeadMessage, s.HeadAt, s.OpenPRs, s.LatestRelease, s.LatestReleaseAt, token)
-	return err
+// RepoSyncResult is what one round saw for one link.
+type RepoSyncResult struct {
+	ID   string
+	Sync RepoSync
+}
+
+// SaveSyncRound records a round's results and outcome in one transaction, so an open console refreshes
+// once per round rather than once per repository. It writes nothing unless the token the round used (its
+// SavedAt) is still the saved one: a removed or replaced token's late results are dropped.
+func (db *DB) SaveSyncRound(ctx context.Context, token time.Time, results []RepoSyncResult, problem string) error {
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var current int
+	if err := tx.QueryRow(ctx, `SELECT 1 FROM github_sync WHERE saved_at=$1 FOR SHARE`, token).Scan(&current); IsNotFound(err) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	for _, r := range results {
+		s := r.Sync
+		if _, err := tx.Exec(ctx, `UPDATE project_repo SET synced_at=now(),sync_error=$2,default_branch=$3,description=$4,private=$5,archived=$6,head_sha=$7,head_message=$8,head_at=$9,
+open_prs=$10,latest_release=$11,latest_release_at=$12 WHERE id=$1::bigint`, r.ID, s.Error, s.DefaultBranch, s.Description, s.Private, s.Archived, s.HeadSHA, s.HeadMessage, s.HeadAt, s.OpenPRs, s.LatestRelease, s.LatestReleaseAt); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(ctx, `UPDATE github_sync SET last_run_at=now(),last_error=$1`, problem); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // GitHubSyncState is the stored sync token and its status. Ciphertext never leaves the GitHub package.

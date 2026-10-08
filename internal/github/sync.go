@@ -166,6 +166,7 @@ func (s *Sync) SyncDue(ctx context.Context) error {
 		return err
 	}
 	problem := ""
+	results := make([]store.RepoSyncResult, 0, len(repos))
 	for _, repo := range repos {
 		result, err := s.syncRepo(ctx, token, repo)
 		if errors.Is(err, ErrRejected) || errors.Is(err, errRateLimited) {
@@ -176,12 +177,10 @@ func (s *Sync) SyncDue(ctx context.Context) error {
 		if err != nil {
 			result = store.RepoSync{Error: err.Error()}
 		}
-		// Dropped if the token was removed or replaced meanwhile.
-		if err := s.db.SaveRepoSync(ctx, repo.ID, saved, result); err != nil {
-			return err
-		}
+		results = append(results, store.RepoSyncResult{ID: repo.ID, Sync: result})
 	}
-	return s.db.NoteGitHubSyncRun(ctx, saved, problem)
+	// One write per round; dropped if the token was removed or replaced meanwhile.
+	return s.db.SaveSyncRound(ctx, saved, results, problem)
 }
 
 var errRateLimited = errors.New("GitHub rate limit reached; the sync resumes when it resets")
