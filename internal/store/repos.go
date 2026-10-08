@@ -79,7 +79,7 @@ func ParseRepoURL(raw string) (RepoLocation, error) {
 	if raw == "" || len(raw) > 500 || strings.IndexFunc(raw, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) || r == '\\' }) >= 0 {
 		return RepoLocation{}, errors.New("url must be a Git repository URL of at most 500 characters")
 	}
-	var host, path, scheme string
+	var host, port, path, scheme string
 	if !strings.Contains(raw, "://") {
 		m := scpLike.FindStringSubmatch(raw)
 		if m == nil {
@@ -104,7 +104,11 @@ func ParseRepoURL(raw string) (RepoLocation, error) {
 		default:
 			return RepoLocation{}, errors.New("url must use https, http, ssh, or git")
 		}
-		host, path = u.Hostname(), u.Path
+		host, port, path = u.Hostname(), u.Port(), u.Path
+		// A default port names the same server as none at all; any other port is another server.
+		if port == map[string]string{"https": "443", "http": "80", "ssh": "22", "git": "9418"}[scheme] {
+			port = ""
+		}
 	}
 	host = strings.TrimPrefix(strings.ToLower(host), "www.")
 	path = strings.TrimSuffix(strings.Trim(path, "/"), ".git")
@@ -126,7 +130,11 @@ func ParseRepoURL(raw string) (RepoLocation, error) {
 		u, _ := url.Parse(raw)
 		web = scheme + "://" + u.Host + "/" + path
 	}
-	return RepoLocation{URL: raw, Provider: provider, Host: host, Repo: path, WebURL: web, Key: strings.ToLower(host + "/" + path)}, nil
+	server := host
+	if port != "" {
+		server += ":" + port
+	}
+	return RepoLocation{URL: raw, Provider: provider, Host: host, Repo: path, WebURL: web, Key: strings.ToLower(server + "/" + path)}, nil
 }
 
 // NewRepo is a repository to link to a project.

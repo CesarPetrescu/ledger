@@ -183,7 +183,9 @@ func (db *DB) TrashProject(ctx context.Context, slug string) (trashID, actionID 
  'project',to_jsonb(p),
  'entries',COALESCE((SELECT jsonb_agg(`+entryPayload+` ORDER BY e.id) FROM entry e WHERE e.slug=p.slug),'[]'::jsonb),
  'handoffs',COALESCE((SELECT jsonb_agg(h.id) FROM handoff h WHERE h.project_slug=p.slug),'[]'::jsonb),
- 'repos',COALESCE((SELECT jsonb_agg(to_jsonb(r) ORDER BY r.id) FROM project_repo r WHERE r.project_slug=p.slug),'[]'::jsonb)),
+ -- Only the links: what GitHub sync saw belongs to the token that saw it, and is fetched again after a restore.
+ 'repos',COALESCE((SELECT jsonb_agg(to_jsonb(r) - ARRAY['synced_at','sync_error','default_branch','description','private','archived','head_sha','head_message','head_at','open_prs','latest_release','latest_release_at'] ORDER BY r.id)
+   FROM project_repo r WHERE r.project_slug=p.slug),'[]'::jsonb)),
  ARRAY['project:'||p.slug]||COALESCE((SELECT array_agg('entry:'||id) FROM entry WHERE slug=p.slug),'{}')
 FROM project p WHERE p.slug=$1 FOR UPDATE`, slug).Scan(&name, &count, &payload, &refs); err != nil {
 		return 0, 0, err

@@ -29,6 +29,19 @@ func TestParseRepoURL(t *testing.T) {
 	if a.Key != b.Key {
 		t.Errorf("keys differ: %q %q", a.Key, b.Key)
 	}
+	// A default port is the same server; another port is another server.
+	for _, same := range [][2]string{{"https://github.com:443/acme/app", "ssh://git@github.com:22/acme/app"}, {"http://forgejo.lan:80/acme/app", "http://forgejo.lan/acme/app"}} {
+		x, _ := ParseRepoURL(same[0])
+		y, _ := ParseRepoURL(same[1])
+		if x.Key != y.Key {
+			t.Errorf("%s and %s differ: %q %q", same[0], same[1], x.Key, y.Key)
+		}
+	}
+	c, _ := ParseRepoURL("http://forgejo.lan:3000/acme/app")
+	d, _ := ParseRepoURL("http://forgejo.lan:4000/acme/app")
+	if c.Key == d.Key || c.Key != "forgejo.lan:3000/acme/app" {
+		t.Errorf("ports collapsed: %q %q", c.Key, d.Key)
+	}
 	for raw, why := range map[string]string{
 		"https://ghp_secret@github.com/owner/repo": "user name",
 		"https://user:token@github.com/owner/repo": "user name",

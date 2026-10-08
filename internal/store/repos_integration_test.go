@@ -60,6 +60,10 @@ func TestProjectReposLinkUnlinkAndSurviveTrash(t *testing.T) {
 		t.Fatalf("own unlink = %v", err)
 	}
 
+	// What a sync saw does not travel through Trash: it belongs to the token that saw it.
+	if _, err := db.Pool.Exec(ctx, `UPDATE project_repo SET synced_at=now(),head_message='synced with the old token' WHERE project_slug='atlas'`); err != nil {
+		t.Fatal(err)
+	}
 	before, _ := db.ListRepos(ctx, "atlas")
 	trashID, _, err := db.TrashProject(ctx, "atlas")
 	if err != nil {
@@ -74,6 +78,11 @@ func TestProjectReposLinkUnlinkAndSurviveTrash(t *testing.T) {
 	after, _ := db.ListRepos(ctx, "atlas")
 	if len(after) != len(before) || after[0].ID != before[0].ID || after[0].AddedBy != before[0].AddedBy || after[0].Path != "services/web" {
 		t.Fatalf("restored %d of %d links: %+v", len(after), len(before), after[0])
+	}
+	for _, repo := range after {
+		if repo.Sync != nil {
+			t.Fatalf("restored synced activity: %+v", repo.Sync)
+		}
 	}
 	all, _ := db.ListRepos(ctx, "")
 	if len(all) != len(after)+1 {
