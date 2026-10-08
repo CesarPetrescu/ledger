@@ -239,6 +239,10 @@ func (db *DB) LinkRepo(ctx context.Context, n NewRepo) (ProjectRepo, error) {
 		return ProjectRepo{}, err
 	}
 	n.Branch, n.Role, n.Note = strings.TrimSpace(n.Branch), strings.TrimSpace(n.Role), strings.TrimSpace(n.Note)
+	// Folders use forward slashes only: a backslash would be a separator on Windows and slip past these checks.
+	if strings.ContainsRune(n.Path, '\\') || strings.ContainsRune(n.Branch, '\\') {
+		return ProjectRepo{}, errors.New("path and branch use forward slashes, never backslashes")
+	}
 	// One spelling per folder, so services/./web and services//web are the same link as services/web.
 	if n.Path = strings.Trim(strings.TrimSpace(n.Path), "/"); n.Path != "" {
 		n.Path = slashpath.Clean(n.Path)
@@ -362,6 +366,13 @@ func (db *DB) SaveSyncRound(ctx context.Context, token time.Time, results []Repo
 	}
 	for _, r := range results {
 		s := r.Sync
+		// A failed check keeps the last good snapshot and only reports the problem.
+		if s.Error != "" {
+			if _, err := tx.Exec(ctx, `UPDATE project_repo SET synced_at=now(),sync_error=$2 WHERE id=$1::bigint`, r.ID, s.Error); err != nil {
+				return err
+			}
+			continue
+		}
 		if _, err := tx.Exec(ctx, `UPDATE project_repo SET synced_at=now(),sync_error=$2,default_branch=$3,description=$4,private=$5,archived=$6,head_sha=$7,head_message=$8,head_at=$9,
 open_prs=$10,latest_release=$11,latest_release_at=$12 WHERE id=$1::bigint`, r.ID, s.Error, s.DefaultBranch, s.Description, s.Private, s.Archived, s.HeadSHA, s.HeadMessage, s.HeadAt, s.OpenPRs, s.LatestRelease, s.LatestReleaseAt); err != nil {
 			return err

@@ -193,14 +193,20 @@ const EMPTY_REPO: RepoLinkInput = { url: '', role: '', branch: '', path: '', not
 function repoActivity(repo: ProjectRepo) {
   const sync = repo.sync
   if (!sync) return repo.provider === 'github' ? <span className="muted small">Not synced yet</span> : null
-  if (sync.error) return <span className="small repo-sync-error">Sync: {sync.error}</span>
+  // After a failed check the last good snapshot stays, shown under the error.
+  const known = !sync.error || sync.head_at !== undefined || sync.open_prs !== undefined || Boolean(sync.latest_release)
   return (
-    <span className="muted small">
-      {sync.head_at ? <>Last commit <Timestamp iso={sync.head_at} />{sync.head_message ? `: ${sync.head_message}` : ''}</> : 'No commits yet'}
-      {sync.open_prs !== undefined && ` · ${sync.open_prs >= 100 ? '100+' : sync.open_prs} open PR${sync.open_prs === 1 ? '' : 's'}`}
-      {sync.latest_release && ` · release ${sync.latest_release}`}
-      {sync.archived && ' · archived'}
-    </span>
+    <>
+      {sync.error && <span className="small repo-sync-error">Sync: {sync.error}</span>}
+      {known && (
+        <span className="muted small">
+          {sync.head_at ? <>Last commit <Timestamp iso={sync.head_at} />{sync.head_message ? `: ${sync.head_message}` : ''}</> : 'No commits yet'}
+          {sync.open_prs !== undefined && ` · ${sync.open_prs >= 100 ? '100+' : sync.open_prs} open PR${sync.open_prs === 1 ? '' : 's'}`}
+          {sync.latest_release && ` · release ${sync.latest_release}`}
+          {sync.archived && ' · archived'}
+        </span>
+      )}
+    </>
   )
 }
 

@@ -46,7 +46,7 @@ func TestProjectReposLinkUnlinkAndSurviveTrash(t *testing.T) {
 	if _, err := link("missing", "https://github.com/acme/x", "", "codex"); !store.IsNotFound(err) {
 		t.Fatalf("unknown project = %v", err)
 	}
-	for _, outside := range []string{"../outside", "a/../../outside", ".."} {
+	for _, outside := range []string{"../outside", "a/../../outside", "..", "..\\outside", "services\\web"} {
 		if _, err := link("atlas", "https://github.com/acme/x", outside, "codex"); err == nil {
 			t.Fatalf("path %q outside the repository was accepted", outside)
 		}
@@ -146,5 +146,41 @@ func TestTrashWaitsForAnUnlinkInFlight(t *testing.T) {
 	repos, _ := db.ListRepos(ctx, "atlas")
 	if len(repos) != 1 || repos[0].Repo != "acme/kept" {
 		t.Fatalf("restored links = %+v", repos)
+	}
+}
+
+// A failed check reports the problem and keeps the last good snapshot.
+func TestFailedSyncKeepsTheLastGoodSnapshot(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	repo, err := db.LinkRepo(ctx, store.NewRepo{ProjectSlug: "atlas", URL: "https://github.com/acme/atlas", Source: "c", ClientID: "c"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetGitHubSync(ctx, []byte("ciphertext"), "…abcd", func() (string, error) { return "owner", nil }); err != nil {
+		t.Fatal(err)
+	}
+	state, _ := db.GitHubSync(ctx)
+	open := 3
+	if err := db.SaveSyncRound(ctx, state.SavedAt, []store.RepoSyncResult{{ID: repo.ID, Sync: store.RepoSync{HeadSHA: "abc", HeadMessage: "Fix", OpenPRs: &open, LatestRelease: "v1"}}}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SaveSyncRound(ctx, state.SavedAt, []store.RepoSyncResult{{ID: repo.ID, Sync: store.RepoSync{Error: "GitHub answered HTTP 502"}}}, ""); err != nil {
+		t.Fatal(err)
+	}
+	repos, _ := db.ListRepos(ctx, "atlas")
+	got := repos[0].Sync
+	if got == nil || got.Error != "GitHub answered HTTP 502" || got.HeadSHA != "abc" || got.LatestRelease != "v1" || got.OpenPRs == nil || *got.OpenPRs != 3 {
+		t.Fatalf("after a failed check = %+v", got)
+	}
+	// The next good check clears the error.
+	if err := db.SaveSyncRound(ctx, state.SavedAt, []store.RepoSyncResult{{ID: repo.ID, Sync: store.RepoSync{HeadSHA: "def"}}}, ""); err != nil {
+		t.Fatal(err)
+	}
+	repos, _ = db.ListRepos(ctx, "atlas")
+	if got := repos[0].Sync; got.Error != "" || got.HeadSHA != "def" {
+		t.Fatalf("after recovering = %+v", got)
 	}
 }

@@ -61,6 +61,9 @@ class ContractTest {
         assertEquals("", repoSummary(failed).first)
         assertTrue(repoSummary(failed).second.contains("Sync: not found"))
         assertTrue(repoSummary(failed).second.endsWith("Linked by you"))
+        val stale = org.json.JSONObject("""{"repo":"acme/x","url":"https://github.com/acme/x","provider":"github","added_by":"codex","sync":{"error":"GitHub answered HTTP 502","head_at":"2026-10-08T09:30:00Z","head_message":"Fix","open_prs":2}}""")
+        assertTrue(repoSummary(stale).second.contains("Sync: GitHub answered HTTP 502\n"))
+        assertTrue(repoSummary(stale).second.contains(": Fix · 2 open PRs"))
         val plain = org.json.JSONObject("""{"repo":"photon/panel","url":"http://forgejo.lan/photon/panel","provider":"git","added_by":"codex"}""")
         assertFalse(repoSummary(plain).second.contains("synced"))
     }
