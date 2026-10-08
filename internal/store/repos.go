@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	slashpath "path"
 	"regexp"
 	"strings"
 	"time"
@@ -134,7 +135,12 @@ func ParseRepoURL(raw string) (RepoLocation, error) {
 	if port != "" {
 		server += ":" + port
 	}
-	return RepoLocation{URL: raw, Provider: provider, Host: host, Repo: path, WebURL: web, Key: strings.ToLower(server + "/" + path)}, nil
+	// Hosted providers match owner and repository names in any case; a generic Git server may not.
+	key := path
+	if provider != "git" {
+		key = strings.ToLower(path)
+	}
+	return RepoLocation{URL: raw, Provider: provider, Host: host, Repo: path, WebURL: web, Key: server + "/" + key}, nil
 }
 
 // NewRepo is a repository to link to a project.
@@ -184,7 +190,14 @@ func (db *DB) LinkRepo(ctx context.Context, n NewRepo) (ProjectRepo, error) {
 	if err != nil {
 		return ProjectRepo{}, err
 	}
-	n.Branch, n.Path, n.Role, n.Note = strings.TrimSpace(n.Branch), strings.Trim(strings.TrimSpace(n.Path), "/"), strings.TrimSpace(n.Role), strings.TrimSpace(n.Note)
+	n.Branch, n.Role, n.Note = strings.TrimSpace(n.Branch), strings.TrimSpace(n.Role), strings.TrimSpace(n.Note)
+	// One spelling per folder, so services/./web and services//web are the same link as services/web.
+	if n.Path = strings.Trim(strings.TrimSpace(n.Path), "/"); n.Path != "" {
+		n.Path = slashpath.Clean(n.Path)
+		if n.Path == "." {
+			n.Path = ""
+		}
+	}
 	for _, check := range []error{
 		validateRepoText("branch", n.Branch, 200, true),
 		validateRepoText("path", n.Path, 300, true),
@@ -195,7 +208,7 @@ func (db *DB) LinkRepo(ctx context.Context, n NewRepo) (ProjectRepo, error) {
 			return ProjectRepo{}, check
 		}
 	}
-	if strings.Contains("/"+n.Path+"/", "/../") {
+	if n.Path == ".." || strings.HasPrefix(n.Path, "../") {
 		return ProjectRepo{}, errors.New("path must be a folder inside the repository")
 	}
 	if err := validateHandoffAttribution(n.Source, n.ClientID); err != nil {

@@ -37,6 +37,13 @@ func TestParseRepoURL(t *testing.T) {
 			t.Errorf("%s and %s differ: %q %q", same[0], same[1], x.Key, y.Key)
 		}
 	}
+	// A generic Git server may tell Team/App from team/app; hosted providers do not.
+	if x, _ := ParseRepoURL("https://git.example.org/Team/App"); x.Key != "git.example.org/Team/App" {
+		t.Errorf("generic key = %q", x.Key)
+	}
+	if x, _ := ParseRepoURL("https://GitLab.com/Team/App"); x.Key != "gitlab.com/team/app" {
+		t.Errorf("hosted key = %q", x.Key)
+	}
 	c, _ := ParseRepoURL("http://forgejo.lan:3000/acme/app")
 	d, _ := ParseRepoURL("http://forgejo.lan:4000/acme/app")
 	if c.Key == d.Key || c.Key != "forgejo.lan:3000/acme/app" {

@@ -37,11 +37,18 @@ func TestProjectReposLinkUnlinkAndSurviveTrash(t *testing.T) {
 	if _, err := link("atlas", "git@github.com:ACME/Atlas.git", "", "codex"); !errors.Is(err, store.ErrRepoExists) {
 		t.Fatalf("duplicate = %v", err)
 	}
+	for _, folder := range []string{"services/./web", "/services//web/", "services/x/../web"} {
+		if _, err := link("atlas", "https://github.com/acme/atlas", folder, "codex"); !errors.Is(err, store.ErrRepoExists) {
+			t.Fatalf("folder %q = %v", folder, err)
+		}
+	}
 	if _, err := link("missing", "https://github.com/acme/x", "", "codex"); !store.IsNotFound(err) {
 		t.Fatalf("unknown project = %v", err)
 	}
-	if _, err := link("atlas", "https://github.com/acme/x", "../outside", "codex"); err == nil {
-		t.Fatal("a path outside the repository was accepted")
+	for _, outside := range []string{"../outside", "a/../../outside", ".."} {
+		if _, err := link("atlas", "https://github.com/acme/x", outside, "codex"); err == nil {
+			t.Fatalf("path %q outside the repository was accepted", outside)
+		}
 	}
 	for i := 2; i < store.MaxProjectRepos; i++ {
 		if _, err := link("atlas", fmt.Sprintf("https://github.com/acme/repo-%d", i), "", "codex"); err != nil {
