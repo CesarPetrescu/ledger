@@ -1,5 +1,5 @@
 import { useMemo, useState, type FormEvent, useLayoutEffect, useRef } from 'react'
-import { api, describeError, TIERS, type DeletionPreview, type Project, type ProjectInput, type ProjectSummary } from '../api'
+import { api, describeError, TIERS, type DeletionPreview, type Project, type ProjectInput, type ProjectRepo, type ProjectSummary, type RepoLinkInput } from '../api'
 import { useToast } from '../components/Toast'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { useUndo } from '../hooks/useUndo'
@@ -144,7 +144,7 @@ const META_FIELDS: { key: keyof Project; label: string }[] = [
   { key: 'stack', label: 'Stack' },
 ]
 
-export type ProjectView = 'activity' | 'todos' | 'decisions' | 'details' | 'handoffs' | 'files'
+export type ProjectView = 'activity' | 'todos' | 'decisions' | 'details' | 'handoffs' | 'files' | 'repos'
 
 function ProjectHandoffs({ slug }: { slug: string }) {
   const handoffs = useResource(() => api.listHandoffs({ project: slug, archive: 'all' }), `project-handoffs:${slug}`, 'handoff handoff_message')
@@ -183,6 +183,112 @@ function ProjectFiles({ slug }: { slug: string }) {
     <section aria-label="Project files" className="project-related">
       <h2 className="section-title">Files from handoffs</h2>
       {files.data.length === 0 ? <p className="muted">No handoff files are linked to this project.</p> : <ul>{files.data.map((file) => <li key={file.id}><a href={`/admin/api/handoff-files/${file.id}`}><strong>{file.filename}</strong><span>{file.handoff_title}</span><span className="muted small">{file.size_bytes.toLocaleString()} bytes · <Timestamp iso={file.created_at} /></span></a></li>)}</ul>}
+    </section>
+  )
+}
+
+const EMPTY_REPO: RepoLinkInput = { url: '', role: '', branch: '', path: '', note: '' }
+
+/** What the GitHub sync last saw, in one line. Synced text is external data, shown as plain text. */
+function repoActivity(repo: ProjectRepo) {
+  const sync = repo.sync
+  if (!sync) return repo.provider === 'github' ? <span className="muted small">Not synced yet</span> : null
+  // After a failed check the last good snapshot stays, shown under the error.
+  const known = !sync.error || sync.head_at !== undefined || sync.open_prs !== undefined || Boolean(sync.latest_release)
+  return (
+    <>
+      {sync.error && <span className="small repo-sync-error">Sync: {sync.error}</span>}
+      {known && (
+        <span className="muted small">
+          {sync.head_at ? <>Last commit <Timestamp iso={sync.head_at} />{sync.head_message ? `: ${sync.head_message}` : ''}</> : 'No commits yet'}
+          {sync.open_prs !== undefined && ` · ${sync.open_prs >= 100 ? '100+' : sync.open_prs} open PR${sync.open_prs === 1 ? '' : 's'}`}
+          {sync.latest_release && ` · release ${sync.latest_release}`}
+          {sync.archived && ' · archived'}
+        </span>
+      )}
+    </>
+  )
+}
+
+/** The Git repositories a project spans. Agents see them with the project and clone with their own access. */
+function ProjectRepos({ slug }: { slug: string }) {
+  const repos = useResource(() => api.listProjectRepos(slug), `project-repos:${slug}`, 'project_repo')
+  const [input, setInput] = useState<RepoLinkInput>(EMPTY_REPO)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [target, setTarget] = useState<ProjectRepo | null>(null)
+  const toast = useToast()
+  const set = (key: keyof RepoLinkInput, value: string) => setInput((current) => ({ ...current, [key]: value }))
+
+  const link = async (event: FormEvent) => {
+    event.preventDefault()
+    if (busy || !input.url.trim()) return
+    setBusy(true)
+    setError('')
+    try {
+      const repo = await api.linkProjectRepo(slug, input)
+      setInput(EMPTY_REPO)
+      // A live refresh may already have brought it in.
+      repos.update((current) => current.some((item) => item.id === repo.id) ? current : [...current, repo])
+      toast(`Linked ${repo.repo}.`)
+    } catch (failure) {
+      setError(describeError(failure))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const unlink = async () => {
+    if (!target) return
+    setBusy(true)
+    try {
+      await api.unlinkRepo(target.id)
+      repos.update((current) => current.filter((repo) => repo.id !== target.id))
+      toast(`Unlinked ${target.repo}.`)
+      setTarget(null)
+    } catch (failure) {
+      toast(describeError(failure), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (repos.loading) return <Loading label="Loading repositories…" />
+  if (!repos.data) return <ErrorState message="Couldn't load repositories." onRetry={repos.reload} />
+  return (
+    <section aria-label="Project repositories" className="project-related">
+      <h2 className="section-title">Repositories</h2>
+      <p className="muted small">Where this project's code lives; link every repository it spans. Agents see them with the project and clone with their own Git access. With GitHub sync on (Agents page), the latest commit, open pull requests, and release show here and for agents.</p>
+      {repos.data.length === 0 ? <p className="muted">No repositories linked yet.</p> : (
+        <ul className="repo-list">
+          {repos.data.map((repo) => (
+            <li key={repo.id}>
+              <div>
+                <strong>{repo.web_url ? <a href={repo.web_url} target="_blank" rel="noreferrer noopener">{repo.repo}</a> : repo.repo}{repo.role && <span className="muted"> · {repo.role}</span>}</strong>
+                <span className="muted small"><code>{repo.url}</code>{repo.branch && ` · branch ${repo.branch}`}{repo.path && ` · folder ${repo.path}`}</span>
+                {repoActivity(repo)}
+                {repo.note && <span className="small">{repo.note}</span>}
+                <span className="muted small">Linked by {repo.added_by === 'ledger-admin' ? 'you' : repo.added_by} · <Timestamp iso={repo.created_at} /></span>
+              </div>
+              <button type="button" className="btn btn-danger-quiet" disabled={busy} onClick={() => setTarget(repo)}>Unlink</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form className="form repo-form" aria-label="Link a repository" onSubmit={(event) => void link(event)}>
+        <div className="form-grid">
+          <label className="span-2">Repository URL<input required maxLength={500} value={input.url} onChange={(event) => set('url', event.target.value)} placeholder="https://github.com/owner/repo or git@github.com:owner/repo.git" /></label>
+          <label>Role<input maxLength={60} value={input.role} onChange={(event) => set('role', event.target.value)} placeholder="backend, android, docs…" /></label>
+          <label>Branch<input maxLength={200} value={input.branch} onChange={(event) => set('branch', event.target.value)} placeholder="Default branch" /></label>
+          <label>Folder<input maxLength={300} value={input.path} onChange={(event) => set('path', event.target.value)} placeholder="For a monorepo" /></label>
+          <label>Note<input maxLength={500} value={input.note} onChange={(event) => set('note', event.target.value)} /></label>
+        </div>
+        {error && <p className="field-error" role="alert">{error}</p>}
+        <div className="form-actions"><span className="muted small">Never paste a token into the URL.</span><button type="submit" className="btn btn-primary" disabled={busy || !input.url.trim()}>Link repository</button></div>
+      </form>
+      <ConfirmDialog open={target !== null} title={`Unlink ${target?.repo ?? ''}?`} confirmLabel="Unlink" busy={busy} onCancel={() => setTarget(null)} onConfirm={() => void unlink()}>
+        <p>Agents will no longer see this repository with the project. The repository itself is not touched.</p>
+      </ConfirmDialog>
     </section>
   )
 }
@@ -246,6 +352,7 @@ const PROJECT_TABS: { id: ProjectView; label: string; path: string }[] = [
   { id: 'details', label: 'Details', path: '/details' },
   { id: 'handoffs', label: 'Handoffs', path: '/handoffs' },
   { id: 'files', label: 'Files', path: '/files' },
+  { id: 'repos', label: 'Repos', path: '/repos' },
 ]
 
 /** Where the project stands: what needs you, how much is open, who worked on it this week, and its week in a few lines. */
@@ -381,6 +488,7 @@ function ProjectDetail({ slug, view, summary, onRetrySummary, onSaved }: { slug:
           </nav>
           {view === 'handoffs' ? <ProjectHandoffs slug={slug} />
             : view === 'files' ? <ProjectFiles slug={slug} />
+            : view === 'repos' ? <ProjectRepos slug={slug} />
             : view === 'details' ? (
               <>
               <ResearchShare project={project} onChange={(visible) => detail.update((current) => ({ ...current, research_visible: visible }))} />

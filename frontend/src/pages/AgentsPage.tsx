@@ -39,6 +39,7 @@ export function AgentsPage() {
       <ConnectGuide />
       <ConnectedApps />
       <ApiKeys />
+      <GitHubSync />
       <ApprovalPassword />
     </>
   )
@@ -121,6 +122,61 @@ function ApiKeys() {
     )}
     <ConfirmDialog open={target !== null} title={`Revoke ${target?.name ?? ''}?`} confirmLabel="Revoke" busy={busy} onCancel={() => setTarget(null)} onConfirm={() => void revoke()}>
       <p>The key stops working immediately. Research runs it started are stopped and queued again, and their chats lose access to Ledger.</p>
+    </ConfirmDialog>
+  </section>
+}
+
+/** The read-only GitHub token the server uses to keep linked repositories' activity fresh. It is
+ * write-only here: the console shows its last characters, never the token. */
+function GitHubSync() {
+  const status = useResource(api.getGitHubSync, 'github-sync', 'github_sync')
+  const [token, setToken] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [removing, setRemoving] = useState(false)
+  const toast = useToast()
+
+  async function save(event: FormEvent) {
+    event.preventDefault()
+    if (busy || !token.trim()) return
+    setBusy(true)
+    setError('')
+    try {
+      const saved = await api.setGitHubSync(token.trim())
+      setToken('')
+      status.update(() => saved)
+      toast(`GitHub sync connected as ${saved.login ?? 'your account'}.`)
+    } catch (failure) { setError(describeError(failure)) }
+    finally { setBusy(false) }
+  }
+
+  async function remove() {
+    setBusy(true)
+    try {
+      await api.deleteGitHubSync()
+      status.update(() => ({ configured: false }))
+      setRemoving(false)
+      toast('GitHub sync turned off.')
+    } catch (failure) { toast(describeError(failure), 'error') }
+    finally { setBusy(false) }
+  }
+
+  const current = status.data
+  return <section className="connected-apps" aria-labelledby="github-sync-title">
+    <h2 id="github-sync-title" className="section-title">GitHub sync</h2>
+    <p className="muted small">With a read-only token, Ledger checks each linked GitHub repository every 15 minutes: latest commit, open pull requests, latest release. Agents see that with the project. Create a fine-grained token on GitHub with read-only <strong>Metadata</strong>, <strong>Contents</strong>, and <strong>Pull requests</strong> for the repositories you want synced. Ledger stores it encrypted, uses it only on the server, and never shows it again. Agents never receive it.</p>
+    {status.loading && <Loading label="Loading GitHub sync…" />}
+    {!status.loading && !current && <ErrorState message="Couldn't load GitHub sync." onRetry={status.reload} />}
+    {current?.configured && <p>Connected as <strong>{current.login}</strong> with token <code>{current.hint}</code>{current.last_run_at && <> · last checked <Timestamp iso={current.last_run_at} /></>}{current.last_error && <span className="field-error"> · {current.last_error}</span>}</p>}
+    <form className="inline-form" onSubmit={event => void save(event)}>
+      <label htmlFor="github-token">{current?.configured ? 'Replace token' : 'Token'}</label>
+      <input id="github-token" type="password" autoComplete="off" spellCheck={false} value={token} onChange={event => setToken(event.target.value)} maxLength={255} placeholder="github_pat_…" disabled={busy} />
+      <button className="btn" disabled={busy || !token.trim()}>{busy ? 'Checking…' : 'Save token'}</button>
+      {current?.configured && <button type="button" className="btn btn-danger-quiet" disabled={busy} onClick={() => setRemoving(true)}>Turn off</button>}
+    </form>
+    {error && <p className="field-error" role="alert">{error}</p>}
+    <ConfirmDialog open={removing} title="Turn off GitHub sync?" confirmLabel="Turn off" busy={busy} onCancel={() => setRemoving(false)} onConfirm={() => void remove()}>
+      <p>Ledger forgets the token and the activity it synced. Repository links stay.</p>
     </ConfirmDialog>
   </section>
 }

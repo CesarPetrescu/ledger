@@ -178,3 +178,27 @@ fun messageActions(work: String, delivery: String): List<String> = buildList {
         else -> emptyList()
     })
 }
+
+/** A linked repository's card: its role and branch, then where it lives and what the GitHub sync last saw.
+ * Synced text comes from GitHub and is shown as plain text. */
+fun repoSummary(repo: JSONObject): Pair<String, String> {
+    val subtitle = listOf(repo.text("role"), repo.text("branch").takeIf { it.isNotBlank() }?.let { "branch $it" } ?: "").filter { it.isNotBlank() }.joinToString(" · ")
+    val sync = repo.optJSONObject("sync")
+    val activity = when {
+        sync == null -> if (repo.text("provider") == "github") "Not synced yet" else ""
+        else -> {
+            // After a failed check the last good snapshot stays, shown under the error.
+            val known = sync.text("error").isBlank() || sync.text("head_at").isNotBlank() || sync.has("open_prs") || sync.text("latest_release").isNotBlank()
+            val seen = if (!known) "" else buildList {
+                add(if (sync.text("head_at").isBlank()) "No commits yet" else "Last commit ${displayTime(sync.text("head_at"))}: ${sync.text("head_message")}".trimEnd(':', ' '))
+                if (sync.has("open_prs")) sync.optInt("open_prs").let { add(if (it >= 100) "100+ open PRs" else "$it open PR${if (it == 1) "" else "s"}") }
+                if (sync.text("latest_release").isNotBlank()) add("release ${sync.text("latest_release")}")
+            }.joinToString(" · ")
+            listOf(sync.text("error").takeIf { it.isNotBlank() }?.let { "Sync: $it" } ?: "", seen).filter { it.isNotBlank() }.joinToString("\n")
+        }
+    }
+    val by = if (repo.text("added_by") == "ledger-admin") "you" else repo.text("added_by")
+    val body = listOf(repo.text("url"), repo.text("path").takeIf { it.isNotBlank() }?.let { "Folder: $it" } ?: "", activity, repo.text("note"), "Linked by $by")
+        .filter { it.isNotBlank() }.joinToString("\n")
+    return subtitle to body
+}

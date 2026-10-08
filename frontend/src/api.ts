@@ -484,6 +484,54 @@ export interface HandoffCreateInput {
   draft: boolean
 }
 
+export interface RepoSync {
+  synced_at: string
+  error?: string
+  default_branch?: string
+  description?: string
+  private?: boolean
+  archived?: boolean
+  head_sha?: string
+  head_message?: string
+  head_at?: string
+  open_prs?: number
+  latest_release?: string
+  latest_release_at?: string
+}
+
+export interface ProjectRepo {
+  id: string
+  project_slug: string
+  url: string
+  provider: string
+  repo: string
+  web_url?: string
+  branch?: string
+  path?: string
+  role?: string
+  note?: string
+  added_by: string
+  created_at: string
+  sync?: RepoSync
+}
+
+export interface RepoLinkInput {
+  url: string
+  role: string
+  branch: string
+  path: string
+  note: string
+}
+
+export interface GitHubSyncStatus {
+  configured: boolean
+  hint?: string
+  login?: string
+  saved_at?: string
+  last_run_at?: string
+  last_error?: string
+}
+
 export interface ResearchCreateInput {
   project_slug?: string
   title: string
@@ -652,6 +700,12 @@ export const api = {
     return request<HandoffFile>('POST', `/handoff-messages/${encodeURIComponent(messageId)}/files`, form)
   },
   deleteHandoffFile: (id: string) => request<void>('DELETE', `/handoff-files/${encodeURIComponent(id)}`),
+  listProjectRepos: (slug: string) => request<{ repos: ProjectRepo[] }>('GET', `/projects/${encodeURIComponent(slug)}/repos`).then((response) => response.repos),
+  linkProjectRepo: (slug: string, input: RepoLinkInput) => request<ProjectRepo>('POST', `/projects/${encodeURIComponent(slug)}/repos`, input),
+  unlinkRepo: (id: string) => request<ProjectRepo>('DELETE', `/repos/${encodeURIComponent(id)}`),
+  getGitHubSync: () => request<GitHubSyncStatus>('GET', '/github-sync'),
+  setGitHubSync: (token: string) => request<GitHubSyncStatus>('PUT', '/github-sync', { token }),
+  deleteGitHubSync: () => request<void>('DELETE', '/github-sync'),
   listProjectFiles: (slug: string) => request<{ files: HandoffFile[] }>('GET', `/projects/${encodeURIComponent(slug)}/files`).then((response) => response.files),
   exportHandoff: (id: string) => requestText(`/handoffs/${encodeURIComponent(id)}/export`),
 }

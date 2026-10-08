@@ -36,6 +36,35 @@ describe('oauth clients', () => {
     expect(await within(section).findByText(/^Revoked/)).toBeInTheDocument()
   })
 
+  it('saves the GitHub sync token without ever showing it, then turns sync off', async () => {
+    const token = 'github_pat_SECRETVALUE0123456789wxyz'
+    const { calls } = mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/oauth/clients': { body: { clients: [] } },
+      'GET /admin/api/agents': { body: { agents: [] } },
+      'GET /admin/api/api-keys': { body: { keys: [] } },
+      'GET /admin/api/github-sync': { body: { configured: false } },
+      'PUT /admin/api/github-sync': { body: { configured: true, hint: '…wxyz', login: 'CesarPetrescu', saved_at: '2026-10-08T10:00:00Z' } },
+      'DELETE /admin/api/github-sync': { status: 204 },
+    })
+    renderApp('/admin/agents')
+    const section = await screen.findByRole('region', { name: 'GitHub sync' })
+    const user = userEvent.setup()
+    const field = await within(section).findByLabelText('Token')
+    expect(field).toHaveAttribute('type', 'password')
+    await user.type(field, token)
+    await user.click(within(section).getByRole('button', { name: 'Save token' }))
+    expect(await within(section).findByText('CesarPetrescu')).toBeInTheDocument()
+    expect(section).toHaveTextContent('…wxyz')
+    expect(section.textContent).not.toContain('SECRETVALUE')
+    expect(within(section).getByLabelText('Replace token')).toHaveValue('')
+    expect(calls.find((call) => call.method === 'PUT' && call.path === '/admin/api/github-sync')?.body).toEqual({ token })
+    await user.click(within(section).getByRole('button', { name: 'Turn off' }))
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Turn off' }))
+    await waitFor(() => expect(calls.some((call) => call.method === 'DELETE' && call.path === '/admin/api/github-sync')).toBe(true))
+    expect(await within(section).findByLabelText('Token')).toBeInTheDocument()
+  })
+
   it('lists safe metadata only', async () => {
     mockApi({ 'GET /admin/api/session': authenticatedSession, 'GET /admin/api/oauth/clients': { body: { clients } }, 'GET /admin/api/overview': { body: overview } })
     renderApp('/admin/clients')

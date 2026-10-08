@@ -10,6 +10,7 @@ import (
 	"github.com/cesarpetrescu/ledger/internal/admin"
 	calendarapi "github.com/cesarpetrescu/ledger/internal/calendar"
 	"github.com/cesarpetrescu/ledger/internal/config"
+	"github.com/cesarpetrescu/ledger/internal/github"
 	"github.com/cesarpetrescu/ledger/internal/oauth"
 )
 
@@ -33,12 +34,18 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
+		// The GitHub token is encrypted with a key derived from the same server credential key.
+		gitHub, err := github.New(db, config.Required("LEDGER_CALENDAR_ENCRYPTION_KEY"), nil)
+		if err != nil {
+			log.Fatal(err)
+		}
 		handler := admin.NewServer(admin.Config{
 			PublicURL:         config.PublicURL(),
 			PasswordHash:      config.Required("LEDGER_ADMIN_PASSWORD_HASH"),
 			InternalProxyCIDR: config.Required("LEDGER_INTERNAL_PROXY_CIDR"),
 			IndexURL:          config.Required("LEDGER_INDEX_URL"),
 			Calendar:          calendar,
+			GitHub:            gitHub,
 		}, db)
 		eventsCtx, cancelEvents := context.WithCancel(ctx)
 		defer cancelEvents()
@@ -55,6 +62,11 @@ func main() {
 		go func() {
 			if err := handler.RunCalendarSync(eventsCtx); err != nil && eventsCtx.Err() == nil {
 				log.Printf("calendar sync watcher stopped: %v", err)
+			}
+		}()
+		go func() {
+			if err := gitHub.Run(eventsCtx); err != nil && eventsCtx.Err() == nil {
+				log.Printf("github sync stopped: %v", err)
 			}
 		}()
 		if err := config.Serve(":8084", handler); err != nil && err != http.ErrServerClosed {

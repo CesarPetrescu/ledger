@@ -721,6 +721,7 @@ fun ProjectScreen(model: LedgerModel, slug: String, initialTab: String = "activi
                     FilledTonalButton(onClick = { model.go("entry/$slug") }, enabled = !model.busy, contentPadding = PaddingValues(horizontal = 14.dp)) { Text("Add entry") }
                     TextButton(onClick = { model.go("project-edit/$slug") }, enabled = !model.busy) { Text("Edit") }
                     TextButton(onClick = { model.go("project-files/$slug") }) { Text("Files") }
+                    TextButton(onClick = { model.go("project-repos/$slug") }) { Text("Repos") }
                     DeleteProject(model, slug)
                 }
             }

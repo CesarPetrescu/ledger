@@ -47,4 +47,24 @@ class ContractTest {
         assertEquals(listOf("complete", "release"), messageActions("blocked", "seen"))
         assertEquals(listOf("reopen"), messageActions("done", "seen"))
     }
+
+    @Test
+    fun repoCardsShowRoleBranchAndSyncedActivity() {
+        val synced = org.json.JSONObject("""{"repo":"acme/atlas-api","url":"https://github.com/acme/atlas-api","provider":"github","role":"backend","branch":"release","path":"api",
+            "note":"Deploys from tags","added_by":"claude-code","sync":{"head_at":"2026-10-08T09:30:00Z","head_message":"Fix login","open_prs":1,"latest_release":"v1.2.0"}}""")
+        val (subtitle, body) = repoSummary(synced)
+        assertEquals("backend · branch release", subtitle)
+        assertTrue(body.contains("Folder: api"))
+        assertTrue(body.contains(": Fix login · 1 open PR · release v1.2.0"))
+        assertTrue(body.endsWith("Deploys from tags\nLinked by claude-code"))
+        val failed = org.json.JSONObject("""{"repo":"acme/x","url":"git@github.com:acme/x.git","provider":"github","added_by":"ledger-admin","sync":{"error":"not found, or the token cannot read this repository"}}""")
+        assertEquals("", repoSummary(failed).first)
+        assertTrue(repoSummary(failed).second.contains("Sync: not found"))
+        assertTrue(repoSummary(failed).second.endsWith("Linked by you"))
+        val stale = org.json.JSONObject("""{"repo":"acme/x","url":"https://github.com/acme/x","provider":"github","added_by":"codex","sync":{"error":"GitHub answered HTTP 502","head_at":"2026-10-08T09:30:00Z","head_message":"Fix","open_prs":2}}""")
+        assertTrue(repoSummary(stale).second.contains("Sync: GitHub answered HTTP 502\n"))
+        assertTrue(repoSummary(stale).second.contains(": Fix · 2 open PRs"))
+        val plain = org.json.JSONObject("""{"repo":"photon/panel","url":"http://forgejo.lan/photon/panel","provider":"git","added_by":"codex"}""")
+        assertFalse(repoSummary(plain).second.contains("synced"))
+    }
 }

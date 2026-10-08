@@ -179,10 +179,17 @@ func (db *DB) TrashProject(ctx context.Context, slug string) (trashID, actionID 
 	if _, err := tx.Exec(ctx, `SELECT 1 FROM handoff WHERE project_slug=$1 FOR UPDATE`, slug); err != nil {
 		return 0, 0, err
 	}
+	// And its repository links, so an unlink racing the deletion either lands first or finds nothing.
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM project_repo WHERE project_slug=$1 FOR UPDATE`, slug); err != nil {
+		return 0, 0, err
+	}
 	if err := tx.QueryRow(ctx, `SELECT p.name,(SELECT count(*) FROM entry WHERE slug=p.slug),jsonb_build_object(
  'project',to_jsonb(p),
  'entries',COALESCE((SELECT jsonb_agg(`+entryPayload+` ORDER BY e.id) FROM entry e WHERE e.slug=p.slug),'[]'::jsonb),
- 'handoffs',COALESCE((SELECT jsonb_agg(h.id) FROM handoff h WHERE h.project_slug=p.slug),'[]'::jsonb)),
+ 'handoffs',COALESCE((SELECT jsonb_agg(h.id) FROM handoff h WHERE h.project_slug=p.slug),'[]'::jsonb),
+ -- Only the links: what GitHub sync saw belongs to the token that saw it, and is fetched again after a restore.
+ 'repos',COALESCE((SELECT jsonb_agg(to_jsonb(r) - ARRAY['synced_at','sync_error','default_branch','description','private','archived','head_sha','head_message','head_at','open_prs','latest_release','latest_release_at'] ORDER BY r.id)
+   FROM project_repo r WHERE r.project_slug=p.slug),'[]'::jsonb)),
  ARRAY['project:'||p.slug]||COALESCE((SELECT array_agg('entry:'||id) FROM entry WHERE slug=p.slug),'{}')
 FROM project p WHERE p.slug=$1 FOR UPDATE`, slug).Scan(&name, &count, &payload, &refs); err != nil {
 		return 0, 0, err
@@ -283,9 +290,10 @@ func restore(ctx context.Context, tx pgx.Tx, trashID int64) error {
 	var handoffs []int64
 	if kind == "project" {
 		var p struct {
-			Project  json.RawMessage `json:"project"`
-			Entries  []storedEntry   `json:"entries"`
-			Handoffs []int64         `json:"handoffs"`
+			Project  json.RawMessage   `json:"project"`
+			Entries  []storedEntry     `json:"entries"`
+			Handoffs []int64           `json:"handoffs"`
+			Repos    []json.RawMessage `json:"repos"`
 		}
 		if err := json.Unmarshal(payload, &p); err != nil {
 			return err
@@ -296,6 +304,11 @@ func restore(ctx context.Context, tx pgx.Tx, trashID int64) error {
 		}
 		if tag.RowsAffected() == 0 {
 			return ErrProjectTaken
+		}
+		for _, repo := range p.Repos {
+			if _, err := insertSnapshot(ctx, tx, "project_repo", repo, "OVERRIDING SYSTEM VALUE", "ON CONFLICT DO NOTHING"); err != nil {
+				return err
+			}
 		}
 		entries, handoffs = p.Entries, p.Handoffs
 	} else {
