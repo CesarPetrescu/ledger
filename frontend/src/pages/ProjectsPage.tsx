@@ -272,7 +272,7 @@ function ProjectRepos({ slug }: { slug: string }) {
   return (
     <section aria-label="Project repositories" className="project-related">
       <h2 className="section-title">Repositories</h2>
-      <p className="muted small">Where this project's code lives; link every repository it spans. Agents see them with the project and clone with their own Git access. With GitHub sync on (Agents page), the latest commit, open pull requests, and release show here and for agents.</p>
+      <p className="muted small">Where this project's code lives; link every repository it spans. Agents see them with the project and clone with their own Git access. With GitHub sync on (<Link to="/access">Access</Link>), the latest commit, open pull requests, and release show here and for agents.</p>
       {repos.data.length === 0 ? <p className="muted">No repositories linked yet.</p> : (
         <ul className="repo-list">
           {repos.data.map((repo) => (

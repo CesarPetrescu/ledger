@@ -49,10 +49,9 @@ it('allows denial and never offers approval for an invalid request', async () =>
   expect(calls.find(call => call.method === 'POST')?.body).toEqual({ action: 'deny' })
 })
 
-it('resets the approval password from Agents using the owner password and clears the fields', async () => {
+it('resets the approval password from Access using the owner password and clears the fields', async () => {
   const { calls } = mockApi({
     'GET /admin/api/session': authenticatedSession,
-    'GET /admin/api/agents': { body: { agents: [] } },
     'GET /admin/api/oauth/clients': { body: { clients: [] } },
     'GET /admin/api/overview': { body: overview },
     'GET /admin/api/api-keys': { body: { keys: [] } },
@@ -62,7 +61,7 @@ it('resets the approval password from Agents using the owner password and clears
       { status: 204 },
     ],
   })
-  renderApp('/admin/agents')
+  renderApp('/admin/access')
   const user = userEvent.setup()
   await user.type(await screen.findByLabelText('Owner password'), 'wrong')
   await user.type(screen.getByLabelText('New approval password'), 'new approval secret')

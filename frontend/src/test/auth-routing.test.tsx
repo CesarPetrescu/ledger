@@ -7,8 +7,7 @@ describe('authenticated shell and routing', () => {
   it('renders navigation, routes by path, and signs out with CSRF', async () => {
     const { calls } = mockApi({
       'GET /admin/api/session': authenticatedSession,
-      'GET /admin/api/overview': { body: overview },
-      'GET /admin/api/oauth/clients': { body: { clients } },
+      'GET /admin/api/agents': { body: { agents: [] } },
       'POST /admin/api/logout': { status: 204 },
       ...homeRoutes,
     })
@@ -37,12 +36,12 @@ describe('authenticated shell and routing', () => {
       'GET /admin/api/overview': { body: overview },
       'POST /admin/api/logout': { status: 500, body: { error: 'internal detail must stay hidden' } },
     })
-    renderApp('/admin/clients')
-    expect(await screen.findByRole('heading', { name: /^agents$/i })).toBeInTheDocument()
+    renderApp('/admin/access')
+    expect(await screen.findByRole('heading', { name: /^access$/i })).toBeInTheDocument()
 
     await userEvent.setup().click(screen.getByRole('button', { name: /sign out/i }))
 
-    expect(await screen.findByRole('heading', { name: /^agents$/i })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /^access$/i })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: /welcome back/i })).not.toBeInTheDocument()
     expect(screen.getByRole('status', { name: /notifications/i })).toHaveTextContent(/server could not complete the request/i)
     expect(screen.getByRole('status', { name: /notifications/i })).not.toHaveTextContent(/internal detail/i)
@@ -66,10 +65,10 @@ describe('authenticated shell and routing', () => {
       'GET /admin/api/oauth/clients': { body: { clients } },
       'GET /admin/api/overview': { body: overview },
     })
-    renderApp('/admin/clients')
+    renderApp('/admin/access')
     const user = userEvent.setup()
     await user.type(await screen.findByLabelText(/^password$/i), 'correct horse{Enter}')
-    expect(await screen.findByRole('heading', { name: /^agents$/i })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /^access$/i })).toBeInTheDocument()
   })
 
   it('opens search from the keyboard shortcut', async () => {

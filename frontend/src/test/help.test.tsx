@@ -7,6 +7,8 @@ it('covers the calendar, research, repos, and where access settings live', async
   renderApp('/admin/help')
   const where = await screen.findByRole('region', { name: 'Where to look' })
   expect(within(where).getByRole('link', { name: 'Calendar' })).toHaveAttribute('href', '/admin/calendar')
+  expect(within(where).getByRole('link', { name: 'Agents' })).toHaveAttribute('href', '/admin/agents')
+  expect(within(where).getByRole('link', { name: 'Access' })).toHaveAttribute('href', '/admin/access')
 
   const research = screen.getByRole('region', { name: 'Research' })
   expect(within(research).getByRole('link', { name: 'Handoffs' })).toHaveAttribute('href', '/admin/handoffs')
@@ -15,7 +17,7 @@ it('covers the calendar, research, repos, and where access settings live', async
 
   const access = screen.getByRole('region', { name: 'Repos and access' })
   for (const topic of ['Repos', 'GitHub sync', 'API keys']) expect(within(access).getByText(topic)).toBeInTheDocument()
-  expect(within(access).getByRole('link', { name: 'Agents' })).toHaveAttribute('href', '/admin/agents')
+  expect(within(access).getByRole('link', { name: 'Access' })).toHaveAttribute('href', '/admin/access')
   // Delete moved behind the ⋯ menu; Help says where it went.
   expect(screen.getByText(/Delete an entry or a project from its ⋯ menu/)).toBeInTheDocument()
 })
