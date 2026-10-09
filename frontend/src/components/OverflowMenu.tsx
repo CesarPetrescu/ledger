@@ -12,7 +12,7 @@ export interface OverflowItem {
  * outside, or focus moving elsewhere closes it, and Escape stops there instead of also closing the panel around it;
  * the menu's first item takes focus when it opens, and the arrow keys, Home, and End move between items. Choosing
  * an item hands focus back to the button first, so a confirmation dialog it opens returns focus there when it closes. */
-export function OverflowMenu({ label, items }: { label: string; items: OverflowItem[] }) {
+export function OverflowMenu({ label, items, text }: { label: string; items: OverflowItem[]; text?: string }) {
   const [open, setOpen] = useState(false)
   const root = useRef<HTMLDivElement>(null)
   const button = useRef<HTMLButtonElement>(null)
@@ -42,8 +42,9 @@ export function OverflowMenu({ label, items }: { label: string; items: OverflowI
   return (
     // Only focus landing outside closes it: a click that focuses nothing (Safari buttons) is left to the mousedown check.
     <div className="overflow-menu" ref={root} onBlur={(event) => { if (event.relatedTarget instanceof Node && !root.current?.contains(event.relatedTarget)) setOpen(false) }}>
-      <button ref={button} type="button" className="icon-button" aria-label={label} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((current) => !current)}>
-        <Icon name="dots" />
+      {/* With [text] the button reads as a named action, such as Snooze, instead of "⋯". */}
+      <button ref={button} type="button" className={text ? 'btn btn-small' : 'icon-button'} aria-label={text ? undefined : label} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((current) => !current)}>
+        {text ?? <Icon name="dots" />}
       </button>
       {open && (
         <div role="menu" aria-label={label} className="overflow-menu-list">

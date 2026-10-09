@@ -39,10 +39,15 @@ describe('inbox actions', () => {
     const { calls } = mockApi({ ...base, 'POST /admin/api/entries/70/owner': { body: { ...owner, snoozed_until: '2026-01-04', action_id: '906' } }, 'POST /admin/api/entries/50/owner': { body: { ...owner, snoozed_until: '2026-01-02', action_id: '907' } } })
     renderApp('/admin/')
     const asks = await screen.findByRole('region', { name: 'Needs you' })
-    const snooze = within(asks).getByRole('combobox', { name: 'Snooze' })
-    expect(within(snooze).getAllByRole('option').map((option) => option.textContent)).toEqual(['Snooze…', 'Until tomorrow', 'For 3 days', 'For a week'])
     const user = userEvent.setup()
-    await user.selectOptions(snooze, '3')
+    await user.click(within(asks).getByRole('button', { name: 'Snooze' }))
+    const menu = within(asks).getByRole('menu', { name: 'Snooze' })
+    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Until tomorrow', 'For 3 days', 'For a week'])
+    // Arrow keys move through the choices; nothing is snoozed until one is picked.
+    await user.keyboard('{ArrowDown}')
+    expect(within(menu).getByRole('menuitem', { name: 'For 3 days' })).toHaveFocus()
+    expect(calls.some((call) => call.path === '/admin/api/entries/70/owner')).toBe(false)
+    await user.keyboard('{Enter}')
     expect(await screen.findByText('Snoozed for 3 days.')).toBeInTheDocument()
     expect(calls.find((call) => call.path === '/admin/api/entries/70/owner')?.body).toEqual({ snooze_days: 3 })
 
@@ -50,9 +55,24 @@ describe('inbox actions', () => {
     expect(within(todos).getByRole('button', { name: 'Mark done' })).toBeInTheDocument()
     // A todo asks nothing, so it has no Answer.
     expect(within(todos).queryByRole('button', { name: 'Answer' })).not.toBeInTheDocument()
-    await user.selectOptions(within(todos).getByRole('combobox', { name: 'Snooze' }), '1')
+    await user.click(within(todos).getByRole('button', { name: 'Snooze' }))
+    await user.click(within(todos).getByRole('menuitem', { name: 'Until tomorrow' }))
     expect(await screen.findByText('Snoozed until tomorrow.')).toBeInTheDocument()
     expect(calls.find((call) => call.path === '/admin/api/entries/50/owner')?.body).toEqual({ snooze_days: 1 })
+  })
+
+  it('offers Snooze again once a snooze has ended, not Wake now', async () => {
+    const yesterday = new Date()
+    yesterday.setDate(yesterday.getDate() - 1)
+    const ended = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`
+    const woken = { ...owner, snoozed_until: ended }
+    mockApi({ ...base, 'GET /admin/api/inbox': { body: { needs_you: [{ ...ask, owner: woken }], todos: [{ ...todo, owner: woken }], todos_total: 1, projects: [] } } })
+    renderApp('/admin/')
+    for (const name of ['Needs you', 'Todos']) {
+      const group = await screen.findByRole('region', { name })
+      expect(within(group).getByRole('button', { name: 'Snooze' })).toBeInTheDocument()
+      expect(within(group).queryByRole('button', { name: 'Wake now' })).not.toBeInTheDocument()
+    }
   })
 
   it('keeps the open entry while you type an inline answer, beside the panel’s own answer box', async () => {

@@ -20,6 +20,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -782,10 +783,14 @@ fun projectStats(p: JSONObject, now: OffsetDateTime = OffsetDateTime.now()): Lis
         ProjectStat(agents.size, when {
             agents.isNotEmpty() -> agents.joinToString(", ", transform = ::writerName)
             p.text("last_entry_at").isNotBlank() -> "quiet; last entry ${ago(p.text("last_entry_at"), now)} ago"
-            else -> "agents this week"
+            else -> "agents active"
         }, ""),
     )
 }
+
+/** Whether the project header has room for its stat tiles and summary. With the keyboard up or on a short (landscape)
+ * screen they would leave a tab's list, such as the Repos link form, almost no room, so only Add entry and the tabs stay. */
+fun roomyProjectHeader(imeVisible: Boolean, screenHeightDp: Int) = !imeVisible && screenHeightDp >= 480
 
 /** The stat tiles in one compact row, so the tabs stay in sight on a small phone; a question waiting for you is amber, like the web. */
 @Composable
@@ -819,17 +824,18 @@ fun ProjectScreen(model: LedgerModel, slug: String, initialTab: String = "activi
         LaunchedEffect(p) { model.knowProjects(listOf(p)) }
         Column {
             Column(Modifier.padding(start = 20.dp, end = 8.dp, top = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                val roomy = roomyProjectHeader(WindowInsets.isImeVisible, LocalConfiguration.current.screenHeightDp)
                 // The tiles keep a 20dp margin on both sides; the column's narrower end is for the ⋯ button's own padding.
-                Box(Modifier.padding(end = 12.dp, bottom = 4.dp)) {
+                if (roomy) Box(Modifier.padding(end = 12.dp, bottom = 4.dp)) {
                     ProjectStatTiles(projectStats(p)) { target -> if (target == "inbox") model.tab("inbox") else { tab = target; if (target == "todos") todoState = "open" } }
                 }
                 HealthTag(p.text("status_state"))
                 // Tap the summary to read it all, including what the project needs from you.
                 var expanded by rememberSaveable { mutableStateOf(false) }
                 val summary = p.text("digest").ifBlank { p.text("status_title") }
-                if (summary.isNotBlank()) Text(summary, Modifier.clickable { expanded = !expanded }, style = MaterialTheme.typography.bodyMedium,
+                if (roomy && summary.isNotBlank()) Text(summary, Modifier.clickable { expanded = !expanded }, style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = if (expanded) Int.MAX_VALUE else 2, overflow = TextOverflow.Ellipsis)
-                if (expanded && p.text("needs_me").isNotBlank()) Text("Needs you: ${p.text("needs_me")}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
+                if (roomy && expanded && p.text("needs_me").isNotBlank()) Text("Needs you: ${p.text("needs_me")}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Button(onClick = { model.go("entry/$slug") }, enabled = !model.busy) { Text("Add entry") }
                     Spacer(Modifier.weight(1f))

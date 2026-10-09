@@ -2,6 +2,8 @@ package com.cesarpetrescu.ledger
 
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
 
@@ -129,7 +131,14 @@ class TableTest {
         val quiet = JSONObject().put("needs_you", 0).put("open_todos", 1).put("week_entries", 0).put("week_agents", org.json.JSONArray()).put("last_entry_at", "2026-09-07T12:00:00Z")
         assertEquals(listOf(ProjectStat(0, "questions wait for you", "inbox"), ProjectStat(1, "open todo", "todos"),
             ProjectStat(0, "entries this week", "activity"), ProjectStat(0, "quiet; last entry 3d ago", "")), projectStats(quiet, now))
-        assertEquals(ProjectStat(0, "agents this week", ""), projectStats(JSONObject(), now).last())
+        assertEquals(ProjectStat(0, "agents active", ""), projectStats(JSONObject(), now).last())
+    }
+
+    @Test fun projectHeaderDropsTilesAndSummaryWithTheKeyboardUpOrOnAShortScreen() {
+        // Pixel 2 portrait is about 683dp tall without its system bars, and about 387dp in landscape.
+        assertTrue(roomyProjectHeader(imeVisible = false, screenHeightDp = 683))
+        assertFalse(roomyProjectHeader(imeVisible = true, screenHeightDp = 683))
+        assertFalse(roomyProjectHeader(imeVisible = false, screenHeightDp = 387))
     }
 
     @Test fun projectDetailsListTheWebsFieldsWithTheLatestStatus() {

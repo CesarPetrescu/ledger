@@ -3,10 +3,11 @@ import { api, describeError, OWNER_SOURCE, type HistoryEvent, type TableEntry } 
 import { useResource } from '../hooks/useResource'
 import { useUndo } from '../hooks/useUndo'
 import { refreshAll } from '../live'
-import { DeleteEntry, Facts, FocusBadges, LIVE, RelatedList, TodoState, titleOf, useOwnerAction } from './entries'
+import { DeleteEntry, Facts, FocusBadges, LIVE, localDay, RelatedList, TodoState, titleOf, useOwnerAction } from './entries'
 import { LegendButton } from './help'
 import { LabelEditor } from './LabelEditor'
 import { MarkdownText, plainText } from './Markdown'
+import { OverflowMenu } from './OverflowMenu'
 import { Link, navigate, useLocation } from '../router'
 import { useToast } from './Toast'
 import { ErrorState, Icon, KindBadge, Loading, StaleNotice, Timestamp } from './ui'
@@ -191,7 +192,7 @@ function EntryActions({ entry }: { entry: TableEntry }) {
   const asking = agentAsk && !entry.owner.handled
   const link = entry.meta?.link
   const snoozable = asking || (entry.kind === 'todo' && !entry.resolved_by)
-  const snoozed = entry.owner.snoozed_until
+  const snoozed = snoozedUntil(entry)
   // A decision or note without a link has nothing here; an empty bordered row looks like missing content.
   if (entry.kind !== 'todo' && !agentAsk && !snoozed && !link) return null
   return (
@@ -216,26 +217,22 @@ function EntryActions({ entry }: { entry: TableEntry }) {
   )
 }
 
-/** Snooze choices, or when a snoozed entry wakes; shared by the entry panel and the Inbox rows. */
+/** The day a snooze ends while it is still ahead; the server keeps a past date after the entry wakes. */
+function snoozedUntil(entry: TableEntry): string {
+  const until = entry.owner.snoozed_until ?? ''
+  return until > localDay() ? until : ''
+}
+
+const SNOOZE_CHOICES = [[1, 'Until tomorrow', 'Snoozed until tomorrow.'], [3, 'For 3 days', 'Snoozed for 3 days.'], [7, 'For a week', 'Snoozed for a week.']] as const
+
+/** Snooze choices, or when a snoozed entry wakes; shared by the entry panel and the Inbox rows. A menu rather than a
+ * select, so an arrow key moves through the choices instead of snoozing at once. */
 export function Snooze({ entry, owner }: { entry: TableEntry; owner: ReturnType<typeof useOwnerAction> }) {
-  const snoozed = entry.owner.snoozed_until
+  const snoozed = snoozedUntil(entry)
   if (snoozed) {
     return <span className="muted small">Snoozed until {new Date(`${snoozed}T12:00:00`).toLocaleDateString()} <button type="button" className="link-button" disabled={owner.busy} onClick={() => void owner.act(entry.id, { snooze_days: 0 }, 'Unsnoozed.')}>Wake now</button></span>
   }
-  return (
-    <label className="snooze-select">
-      <span className="visually-hidden">Snooze</span>
-      <select value="" disabled={owner.busy} onChange={(event) => {
-        const days = Number(event.target.value)
-        if (days) void owner.act(entry.id, { snooze_days: days }, days === 1 ? 'Snoozed until tomorrow.' : `Snoozed for ${days} days.`)
-      }}>
-        <option value="">Snooze…</option>
-        <option value="1">Until tomorrow</option>
-        <option value="3">For 3 days</option>
-        <option value="7">For a week</option>
-      </select>
-    </label>
-  )
+  return <OverflowMenu label="Snooze" text="Snooze" items={SNOOZE_CHOICES.map(([days, label, done]) => ({ label, disabled: owner.busy, onSelect: () => void owner.act(entry.id, { snooze_days: days }, done) }))} />
 }
 
 /** Your answer, saved under the entry where the agent reads it; in the panel and inline under an Inbox row. */

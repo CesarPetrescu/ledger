@@ -40,8 +40,8 @@ export function titleOf(entry: TableEntry): string {
   return line.length > 110 ? `${line.slice(0, 109)}…` : line
 }
 
-/** Local calendar date as YYYY-MM-DD, to compare with due dates. */
-function localDay(date = new Date()): string {
+/** Local calendar date as YYYY-MM-DD, to compare with due and snooze dates. */
+export function localDay(date = new Date()): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 

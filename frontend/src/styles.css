@@ -1486,8 +1486,6 @@ label > textarea {
 .entry-question-text { margin: 0; color: var(--text); font-size: 1rem; font-weight: 600; line-height: 1.45; }
 
 .entry-detail-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 12px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-/* As tall as the small buttons beside it; the global select minimum would make it the odd one out. */
-.snooze-select select { height: 32px; min-height: 32px; padding: 0 28px 0 10px; font-size: 0.82rem; }
 
 .reply-box { display: grid; gap: 8px; }
 .reply-box textarea { width: 100%; min-height: 64px; resize: vertical; }
