@@ -253,7 +253,7 @@ private fun EventForm(model: LedgerModel, id: String, event: JSONObject, calenda
     val recurring = event.optBoolean("recurring")
     Page {
         item { Text(if (id.isBlank()) "New event" else "Event details", style = MaterialTheme.typography.headlineSmall) }
-        if (recurring) item { Text("This event belongs to a recurring series. Manage the series in your calendar provider.", color = MaterialTheme.colorScheme.primary) }
+        if (recurring) item { Text("This event belongs to a recurring series. Manage the series in your calendar provider.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         item { Field("Title", title, { title = it }, max = 200) }
         if (id.isBlank()) item { Choice("Calendar", calendar, calendars.filter { it.optBoolean("selected") }.map { it.text("id") to it.text("name") }) { calendar = it } }
         else item { Text(event.text("calendar_name")) }
@@ -328,12 +328,17 @@ fun CalendarSettings(model: LedgerModel) {
             } else {
                 item { Text("Connect Nextcloud", style = MaterialTheme.typography.headlineSmall) }
                 item { Field("Nextcloud server address", url, { url = it }, placeholder = "https://cloud.example.com") }
-                item { Button(enabled = !model.busy && url.isNotBlank(), onClick = {
+                val connect = {
                     var result = JSONObject()
                     model.act("Complete the sign-in in your browser", after = { pending = result.text("id"); loginURL = result.text("login_url"); openBrowser(context, loginURL, model) }) {
                         result = it.request("POST", "/calendar/connect", json("server_url" to url.trim()))
                     }
-                }) { Text("Connect Nextcloud") } }
+                }
+                // While a sign-in is pending, "Finish connecting" is the one filled action; starting over stays outlined.
+                item {
+                    if (pending.isBlank()) Button(enabled = !model.busy && url.isNotBlank(), onClick = connect) { Text("Connect Nextcloud") }
+                    else OutlinedButton(enabled = !model.busy && url.isNotBlank(), onClick = connect) { Text("Connect Nextcloud") }
+                }
                 if (pending.isNotBlank()) {
                     item { Text("After approving access in the browser, return here and finish connecting.") }
                     item { OutlinedButton(onClick = { openBrowser(context, loginURL, model) }) { Text("Open sign-in again") } }

@@ -314,6 +314,34 @@ describe('handoff inbox', () => {
     })
   })
 
+  it('folds the inbox filters behind a Filters button that counts the active ones, as the entry lists do', async () => {
+    mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/handoffs': { body: page },
+      'GET /admin/api/projects': { body: { projects: [atlas] } },
+    })
+    renderApp('/admin/handoffs')
+    await screen.findByRole('list', { name: /handoffs/i })
+    const toggle = screen.getByRole('button', { name: 'Filters' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    const user = userEvent.setup()
+    // The search box stays in view and does not count; "Active only" is the default.
+    await user.type(screen.getByLabelText(/search handoffs/i), 'plan')
+    expect(toggle).toHaveAccessibleName('Filters')
+    await user.selectOptions(screen.getByLabelText(/filter by project/i), 'atlas')
+    await user.selectOptions(screen.getByLabelText(/^archive$/i), 'all')
+    expect(toggle).toHaveAccessibleName('Filters 2 active')
+    // On a phone the stylesheet hides every .filter-extra until the toolbar is marked open.
+    const toolbar = document.querySelector('.handoff-filters')!
+    expect(screen.getByLabelText(/filter by target/i).closest('.filter-extra')).not.toBeNull()
+    expect(screen.getByLabelText(/^work status$/i).closest('.filter-extra')).not.toBeNull()
+    expect(screen.getByLabelText(/search handoffs/i).closest('.filter-extra')).toBeNull()
+    expect(toolbar).not.toHaveAttribute('data-filters')
+    await user.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(toolbar).toHaveAttribute('data-filters', 'open')
+  })
+
   it('loads the next inbox page', async () => {
     const older = { ...detail.handoff, id: '6', title: 'Older handoff' }
     const { calls } = mockApi({

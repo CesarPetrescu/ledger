@@ -20,7 +20,8 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: ['src/test/setup.ts'],
-    css: false,
+    // Styles are not applied in jsdom, but tests may read them as text (?raw).
+    css: { include: [/\.css\?raw$/] },
     restoreMocks: true,
   },
 })

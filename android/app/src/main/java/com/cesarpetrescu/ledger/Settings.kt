@@ -10,13 +10,18 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 import java.net.URI
@@ -34,20 +39,36 @@ fun openBrowser(context: Context, address: String, model: LedgerModel): Boolean 
     }
 }
 
+/** Settings; [atAccess] (from Agents › Manage access) opens it at the Access heading instead of the top. */
 @Composable
-fun Settings(model: LedgerModel) {
+fun Settings(model: LedgerModel, atAccess: Boolean = false) {
     val context = LocalContext.current
-    Page {
+    // The Access heading is the fourth item: after the version card, Appearance, and Notifications.
+    // The first visible item sits below the page's 20 dp top padding, so the item before it would show
+    // its last 4 dp (20 dp padding less the 16 dp gap) as a cut-off sliver. Starting that much into the
+    // heading, inside its own 8 dp top padding, puts Notifications fully above the top edge.
+    val sliver = with(LocalDensity.current) { 20.dp.roundToPx() - 16.dp.roundToPx() }
+    Page(rememberLazyListState(if (atAccess) 3 else 0, if (atAccess) sliver else 0)) {
         item { SummaryCard("Ledger ${BuildConfig.VERSION_NAME}", "Owner console", model.api?.origin ?: "") }
         item { ThemeChoice(model) }
         item { NotificationsChoice(model) }
+        // Who and what can reach your projects; the Agents screen only shows what agents did.
+        item {
+            Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("Access", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text("The web console's Access page also has GitHub sync and the approval password.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        item { SummaryCard("Connect an agent", body = "Add Ledger to Claude, ChatGPT, Codex, or another MCP app.") { model.go("connect") } }
         item { SummaryCard("Connected apps", body = "Review ChatGPT, Claude, CLI, and other apps. Revoke access when needed.") { model.go("clients") } }
         item { SummaryCard("API keys", body = "Keys that let a server such as Adastrion Core pick up research. Create them in the web console; revoke them here.") { model.go("api-keys") } }
         item { SummaryCard("Approve a device", body = "Enter the code shown by the Ledger CLI.") { model.go("device") } }
         item { SummaryCard("Calendars", body = "Connect Nextcloud and choose visible calendars.") { model.go("calendar-settings") } }
+        // Ends the Access section: updates and sign-out are about this phone, not who can reach your projects.
+        item { Text("This phone", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }
         item { OutlinedButton(onClick = { openBrowser(context, "https://github.com/CesarPetrescu/ledger/releases/latest", model) }) { Text("Check for updates") } }
         item { ConfirmButton("Sign out", "Sign out and revoke this phone's owner session?", !model.busy, action = model::logout) }
-        item { ConfirmButton("Forget this phone", "Remove the saved session from this phone without contacting the server. Use this if the server is unreachable. The server session remains valid until it expires.", !model.busy, action = model::forget) }
+        item { ConfirmButton("Forget this phone", "Remove the saved session from this phone without contacting the server. Use this if the server is unreachable. The server session remains valid until it expires.", !model.busy, danger = true, action = model::forget) }
     }
 }
 
@@ -107,20 +128,34 @@ fun NotificationsChoice(model: LedgerModel) {
     }
 }
 
+/** How to connect an agent: the MCP address for apps, or the CLI for Codex. */
+@Composable
+fun ConnectScreen(model: LedgerModel) {
+    val origin = model.api?.origin.orEmpty()
+    Page {
+        item { Text("Claude, ChatGPT, or another MCP app: add this address as a remote MCP server, then approve it in your browser.", style = MaterialTheme.typography.bodyMedium) }
+        item { SelectionContainer { Text("$origin/mcp", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) } }
+        item { Text("Codex: install the Ledger CLI and run this on the computer, then approve the code it shows.", style = MaterialTheme.typography.bodyMedium) }
+        item { SelectionContainer { Text("ledger connect codex --server $origin", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) } }
+        item { OutlinedButton(onClick = { model.go("device") }, enabled = !model.busy) { Text("Approve a device") } }
+    }
+}
+
 @Composable
 fun Clients(model: LedgerModel) {
     var offset by rememberSaveable { mutableStateOf(0) }
     Load(model, "clients:$offset", { it.request("GET", "/oauth/clients?limit=50&offset=$offset") }) { data ->
         Page {
-            if (data.rows("clients").isEmpty()) item { Empty("No apps have connected yet. More › Agents shows how to connect one.") }
+            if (data.rows("clients").isEmpty()) item { Empty("No apps have connected yet. Settings › Access › Connect an agent shows how to connect one.") }
             items(data.rows("clients")) { client ->
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SummaryCard(client.text("client_name").ifBlank { "Unnamed client" }, label(client.text("kind")),
-                        "${plural(client.optInt("active_access_tokens"), "access token")} · ${plural(client.optInt("active_refresh_tokens"), "refresh token")}\nLast used: ${displayTime(client.text("last_used_at")).ifBlank { "Never" }}\n${client.strings("redirect_uris").joinToString("\n")}")
-                    ConfirmButton("Revoke access", "Revoke all access and refresh tokens for ${client.text("client_name")}? It will need to reconnect.", !model.busy, danger = true) {
-                        model.act("Client access revoked") { it.request("POST", "/oauth/revoke", json("client_id" to client.text("client_id"))) }
-                    }
-                }
+                SummaryCard(client.text("client_name").ifBlank { "Unnamed client" }, label(client.text("kind")),
+                    (listOf("${plural(client.optInt("active_access_tokens"), "access token")} · ${plural(client.optInt("active_refresh_tokens"), "refresh token")}",
+                        "Last used: ${displayTime(client.text("last_used_at")).ifBlank { "Never" }}") + client.strings("redirect_uris")).joinToString("\n"),
+                    actions = {
+                        ConfirmButton("Revoke access", "Revoke all access and refresh tokens for ${client.text("client_name")}? It will need to reconnect.", !model.busy, danger = true) {
+                            model.act("Client access revoked") { it.request("POST", "/oauth/revoke", json("client_id" to client.text("client_id"))) }
+                        }
+                    })
             }
             item { Row {
                 if (offset > 0) TextButton(onClick = { offset = (offset - 50).coerceAtLeast(0) }) { Text("Previous") }
@@ -135,16 +170,16 @@ fun Clients(model: LedgerModel) {
 fun ApiKeys(model: LedgerModel) {
     Load(model, "api-keys", { it.request("GET", "/api-keys") }) { data ->
         Page {
-            if (data.rows("keys").isEmpty()) item { Empty("No API keys yet. Create one in the web console under Agents › API keys.") }
+            if (data.rows("keys").isEmpty()) item { Empty("No API keys yet. Create one in the web console under Access › API keys.") }
             items(data.rows("keys"), key = { it.text("id") }) { key ->
                 val revoked = key.text("revoked_at").isNotBlank()
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SummaryCard(key.text("name"), if (revoked) "Revoked ${displayTime(key.text("revoked_at"))}" else "Dispatch research",
-                        "Key ${key.text("prefix")}…\nCreated: ${displayTime(key.text("created_at"))}\nLast used: ${displayTime(key.text("last_used_at")).ifBlank { "Never" }}")
-                    if (!revoked) ConfirmButton("Revoke key", "Revoke ${key.text("name")}? It stops working immediately.", !model.busy, danger = true) {
-                        model.act("API key revoked") { it.request("DELETE", "/api-keys/${segment(key.text("id"))}") }
-                    }
-                }
+                SummaryCard(key.text("name"), if (revoked) "Revoked ${displayTime(key.text("revoked_at"))}" else "Dispatch research",
+                    "Key ${key.text("prefix")}…\nCreated: ${displayTime(key.text("created_at"))}\nLast used: ${displayTime(key.text("last_used_at")).ifBlank { "Never" }}",
+                    actions = if (revoked) null else ({
+                        ConfirmButton("Revoke key", "Revoke ${key.text("name")}? It stops working immediately.", !model.busy, danger = true) {
+                            model.act("API key revoked") { it.request("DELETE", "/api-keys/${segment(key.text("id"))}") }
+                        }
+                    }))
             }
         }
     }

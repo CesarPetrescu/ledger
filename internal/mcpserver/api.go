@@ -267,5 +267,5 @@ func apiHandler(db *store.DB, publicURL string) http.Handler {
 
 func apiUnauthorized(w http.ResponseWriter) {
 	w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
-	apiError(w, http.StatusUnauthorized, "invalid_key", "send an API key from Ledger's Agents page as Authorization: Bearer <key>")
+	apiError(w, http.StatusUnauthorized, "invalid_key", "send an API key from Ledger's Access page as Authorization: Bearer <key>")
 }

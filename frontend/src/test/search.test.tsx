@@ -29,10 +29,74 @@ describe('search', () => {
     // Entry hits open the entry itself; project hits open the project.
     expect(within(items[0]!).getByRole('link', { name: /postgresql/i })).toHaveAttribute('href', '/admin/entries/41')
     expect(items[1]).toHaveTextContent('Atlas')
+    // Reranked results carry their relevance.
+    expect(items[0]).toHaveTextContent('91%')
     const post = calls.find((call) => call.method === 'POST')
     expect(post?.body).toEqual({ q: 'postgres', limit: 20, project: 'atlas', kind: 'decision' })
     expect(window.location.search).toContain('q=postgres')
     expect(screen.queryByRole('status', { name: /degraded/i })).not.toBeInTheDocument()
+    // Two filters are applied beyond the scope tabs.
+    expect(screen.getByRole('button', { name: 'Filters, 2 active' })).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('uses the standard page layout: eyebrow, title, a plain field, and scope tabs', async () => {
+    mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/projects': { body: { projects: [atlas] } },
+    })
+    renderApp('/admin/search')
+    expect(await screen.findByRole('heading', { level: 1, name: 'Search' })).toBeInTheDocument()
+    const head = screen.getByRole('heading', { level: 1 }).closest('header')
+    expect(head).toHaveClass('page-head')
+    expect(head?.querySelector('.eyebrow')).not.toBeNull()
+    expect(document.querySelector('.search-command')).toBeNull()
+    expect(screen.getByRole('group', { name: /search scope/i })).toHaveClass('view-tabs')
+    expect(screen.getByRole('button', { name: 'Filters' })).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('says word matches only, without scores, when meaning search is offline', async () => {
+    mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/projects': { body: { projects: [atlas] } },
+      'POST /admin/api/search': { body: { ...searchResponse, degraded: ['vector', 'rerank'] } },
+    })
+    renderApp('/admin/search?q=postgres')
+    const results = await screen.findByRole('region', { name: /results/i })
+    expect(screen.getByRole('status', { name: /degraded/i })).toHaveTextContent('Showing word matches only; meaning search is offline.')
+    expect(within(results).getAllByRole('listitem')).toHaveLength(2)
+    expect(results).not.toHaveTextContent('%')
+  })
+
+  it('shows Markdown snippets as plain words, skipping blank lines and code fences', async () => {
+    const hit = searchResponse.hits[0]!
+    mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/projects': { body: { projects: [atlas] } },
+      'POST /admin/api/search': { body: { hits: [
+        { ...hit, snippet: 'Use **Qwen3 reranker** for the top 50\n- Latency budget: `180 ms`' },
+        { ...hit, ref: 'entry:42', entry_id: '42', kind: 'status', snippet: '```\n\ngo test ./...\n```\nAll green' },
+      ], degraded: ['vector'] } },
+    })
+    renderApp('/admin/search?q=reranker')
+    const results = await screen.findByRole('region', { name: /results/i })
+    const [first, second] = within(results).getAllByRole('listitem')
+    expect(within(first!).getByRole('link')).toHaveTextContent(/^Use Qwen3 reranker for the top 50$/)
+    expect(first).toHaveTextContent('Latency budget: 180 ms')
+    expect(within(second!).getByRole('link')).toHaveTextContent(/^go test \.\/\.\.\.$/)
+    expect(second).toHaveTextContent('All green')
+    expect(results.textContent).not.toMatch(/\*\*|`|^- /)
+  })
+
+  it('explains a ranking-only outage', async () => {
+    mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/projects': { body: { projects: [atlas] } },
+      'POST /admin/api/search': { body: { ...searchResponse, degraded: ['rerank'] } },
+    })
+    renderApp('/admin/search?q=postgres')
+    const results = await screen.findByRole('region', { name: /results/i })
+    expect(screen.getByRole('status', { name: /degraded/i })).toHaveTextContent(/relevance ranking is offline/i)
+    expect(results).not.toHaveTextContent('%')
   })
 
   it('explains degraded retrieval, empty results, and unavailability with retry', async () => {
@@ -46,10 +110,11 @@ describe('search', () => {
       ],
     })
     renderApp('/admin/search?q=nothing')
-    expect(await screen.findByText(/no results for/i)).toBeInTheDocument()
+    // With meaning search offline, the empty result says what was searched.
+    expect(await screen.findByText('No word matches for “nothing”.')).toBeInTheDocument()
     const degraded = screen.getByRole('status', { name: /degraded/i })
-    expect(degraded).toHaveTextContent(/vector retrieval/i)
-    expect(degraded).toHaveTextContent(/reranking/i)
+    expect(degraded).toHaveTextContent(/word matches only/i)
+    expect(degraded).not.toHaveTextContent(/ranking/i)
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: /^search$/i }))
     expect(await screen.findByRole('alert')).toHaveTextContent(/search is unavailable/i)
@@ -116,5 +181,12 @@ describe('search', () => {
       { q: 'postgres', limit: 20, kind: 'project' },
       { q: 'postgres', limit: 20, kind: 'entry' },
     ])
+  })
+
+  it('gives the Filters toggle the entry lists\' treatment on phones: labelled, with the same count pill', () => {
+    // jsdom applies no media queries, so read the rules themselves.
+    const styles = Object.values(import.meta.glob<string>('../styles.css', { query: '?raw', import: 'default', eager: true }))[0] ?? ''
+    expect(styles).not.toMatch(/\.search-filter-label[^{]*\{ display: none; \}/)
+    expect(styles).toMatch(/\.search-filter-toggle \.count,\s*\.filter-toggle \.count \{/)
   })
 })

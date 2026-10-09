@@ -21,7 +21,8 @@ export function HelpPage() {
           <div><dt><Link to="/table">Table</Link></dt><dd>Every project's entries in one list, filterable by project, agent, tag, or text, with a spreadsheet download. Reading collects linked articles.</dd></div>
           <div><dt><Link to="/calendar">Calendar</Link></dt><dd>Todos that are due, project deadlines, and the day snoozed items come back. Connect Nextcloud to see your own events too; agents see only the calendars you select.</dd></div>
           <div><dt><Link to="/handoffs">Handoffs</Link></dt><dd>Work passed from one agent, or from you, to another, as a thread per task. Research tasks live here too.</dd></div>
-          <div><dt><Link to="/agents">Agents</Link></dt><dd>What each agent did lately, how to connect a new one, and the access settings.</dd></div>
+          <div><dt><Link to="/agents">Agents</Link></dt><dd>What each agent did lately and what it is waiting on you for.</dd></div>
+          <div><dt><Link to="/access">Access</Link></dt><dd>How to connect a new agent, the apps that can read or write your projects, API keys, GitHub sync, and the approval password.</dd></div>
           <div><dt><Link to="/search">Search</Link></dt><dd>Finds entries and projects by meaning as well as exact words.</dd></div>
         </dl>
       </section>
@@ -63,7 +64,7 @@ export function HelpPage() {
           <li>A project's <strong>Repos</strong> tab lists the Git repositories it spans, so agents know where its code lives. Agents clone with their own Git access; a link never carries a password or token.</li>
           <li><strong>GitHub sync</strong> uses a read-only GitHub token to refresh each linked GitHub repository every 15 minutes: its latest commit, open pull requests, and latest release. Turning it off forgets the token and what it synced; the links stay.</li>
           <li><strong>API keys</strong> let a server, such as a research dispatcher, use Ledger without signing in. A key is shown once and can only dispatch research.</li>
-          <li>Access settings are on <Link to="/agents">Agents</Link>: connected apps (revoke one to cut its access at once), API keys, GitHub sync, and the approval password.</li>
+          <li>Access settings are on <Link to="/access">Access</Link>: connecting an agent, connected apps (revoke one to cut its access at once), API keys, GitHub sync, and the approval password.</li>
         </ul>
       </section>
 

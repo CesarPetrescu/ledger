@@ -1086,10 +1086,32 @@ func TestSearchAddsProvenanceFiltersAndDegradesGracefully(t *testing.T) {
 	if err := json.Unmarshal(entriesOnly.Body.Bytes(), &result); err != nil || len(result.Hits) != 2 || result.Hits[0].Kind == "project" || result.Hits[1].Kind == "project" || requested.Limit != 30 {
 		t.Fatalf("entry search = %s (index limit %d)", entriesOnly.Body.String(), requested.Limit)
 	}
+	// With the index service down, the console still finds word matches in the
+	// stored chunks, with the same provenance and filters, marked degraded.
+	for i, row := range []struct{ ref, text string }{
+		{"entry:" + itoa(entry.ID), "[atlas | decision]\nFolosim PostgreSQL."},
+		{"entry:" + itoa(note.ID), "[atlas | note]\nNota despre PostgreSQL."},
+		{"project:atlas", "[project: Atlas (atlas)]\nAtlas pe PostgreSQL"},
+	} {
+		if _, err := db.Pool.Exec(ctx, `INSERT INTO chunk(ref,ord,text,text_hash,model) VALUES($1,0,$2,decode(repeat($3,32),'hex'),'qwen3-embedding')`, row.ref, row.text, fmt.Sprintf("%02x", i+1)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The indexer had processed these rows before it stopped.
+	if _, err := db.Pool.Exec(ctx, `DELETE FROM chunk_dirty`); err != nil {
+		t.Fatal(err)
+	}
 	index.Close()
-	down := request(t, server, http.MethodPost, "/admin/api/search", `{"q":"postgres"}`, authed(s, true))
-	if down.Code != http.StatusServiceUnavailable || !strings.Contains(down.Body.String(), "search unavailable") || strings.Contains(down.Body.String(), "127.0.0.1") {
+	down := request(t, server, http.MethodPost, "/admin/api/search", `{"q":"postgresql","kind":"entry"}`, authed(s, true))
+	if err := json.Unmarshal(down.Body.Bytes(), &result); err != nil || down.Code != http.StatusOK || strings.Contains(down.Body.String(), "127.0.0.1") {
 		t.Fatalf("index outage = %d %s", down.Code, down.Body.String())
+	}
+	kinds := map[string]bool{}
+	for _, hit := range result.Hits {
+		kinds[hit.Kind] = hit.ProjectName == "Atlas" && hit.Source == "agent" && hit.CreatedAt != ""
+	}
+	if len(result.Hits) != 2 || !kinds["decision"] || !kinds["note"] || strings.Join(result.Degraded, ",") != "vector,rerank" {
+		t.Fatalf("word-match fallback = %s", down.Body.String())
 	}
 }
 

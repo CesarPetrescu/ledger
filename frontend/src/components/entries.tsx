@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { api, describeError, ENTRY_KINDS, OWNER_SOURCE, type EntryFilter, type OwnerPatch, type ProjectSummary, type TableEntry } from '../api'
+import { api, describeError, ENTRY_KINDS, OWNER_SOURCE, type EntryFilter, type OwnerPatch, type TableEntry } from '../api'
 import { useResource } from '../hooks/useResource'
 import { useUndo } from '../hooks/useUndo'
 import { refreshAll } from '../live'
@@ -9,7 +9,7 @@ import { plainText } from './Markdown'
 import { OverflowMenu } from './OverflowMenu'
 import { Link } from '../router'
 import { useToast } from './Toast'
-import { EmptyState, ErrorState, Icon, KindBadge, Loading, StaleNotice, TierBadge, Timestamp } from './ui'
+import { EmptyState, ErrorState, FilterToggle, Icon, KindBadge, Loading, StaleNotice, Timestamp } from './ui'
 
 // Entry lists shared by the Inbox, the Table, project pages, and entry pages.
 
@@ -412,6 +412,8 @@ export function EntriesView({ view, initialProject = '', initialQuery = '', init
     hide_routine: initialQuery ? '' : '1',
   })
   const [loadingMore, setLoadingMore] = useState(false)
+  // Phones fold the dropdowns and the routine toggle behind a Filters button; desktop always shows them.
+  const [filtersOpen, setFiltersOpen] = useState(false)
   const effective: EntryFilter = {
     ...filter,
     project: fixedProject ?? filter.project ?? '',
@@ -426,6 +428,17 @@ export function EntriesView({ view, initialProject = '', initialQuery = '', init
   const projects = useResource(() => api.listProjects(), 'table-projects', 'project')
   const toast = useToast()
   const set = (field: keyof EntryFilter, value: string) => setFilter((current) => ({ ...current, [field]: value }))
+  const routineToggle = view === 'activity' || view === 'decisions'
+  // Folded filters set away from their defaults; the search box stays in view, so it is not counted.
+  const activeFilters = [
+    !fixedProject && filter.project,
+    view === 'todos' && filter.status !== 'open',
+    view === 'reading' && effective.reading !== 'unread',
+    view === 'activity' && filter.kind,
+    filter.source,
+    filter.tag,
+    routineToggle && !filter.hide_routine,
+  ].filter(Boolean).length
 
   // Todos read best per project, most important first. Fold while the list
   // is still newest first so each head is the newest copy, then sort heads.
@@ -461,19 +474,20 @@ export function EntriesView({ view, initialProject = '', initialQuery = '', init
     : 'No entries match.'
 
   return (
-    <div className="entries-view">
+    <div className="entries-view" data-filters={filtersOpen ? 'open' : undefined}>
       <div className="filters table-filters">
         <label><span className="visually-hidden">Search text</span><input type="search" maxLength={1000} placeholder="Search titles and text" value={filter.q ?? ''} onChange={(event) => set('q', event.target.value)} /></label>
-        {!fixedProject && <label><span className="visually-hidden">Filter by project</span><select value={filter.project ?? ''} onChange={(event) => set('project', event.target.value)}><option value="">Any project</option>{(projects.data ?? []).map((item) => <option key={item.slug} value={item.slug}>{projectLabel(item, projects.data ?? [])}</option>)}</select></label>}
-        {view === 'todos' && <label><span className="visually-hidden">Filter by state</span><select value={filter.status ?? ''} onChange={(event) => set('status', event.target.value)}><option value="open">Open</option><option value="done">Done</option><option value="">Open and done</option></select></label>}
-        {view === 'reading' && <label><span className="visually-hidden">Filter reading</span><select value={effective.reading} onChange={(event) => set('reading', event.target.value)}><option value="unread">Unread</option><option value="starred">Starred</option><option value="all">All</option></select></label>}
-        {view === 'activity' && <label><span className="visually-hidden">Filter by kind</span><select value={filter.kind ?? ''} onChange={(event) => set('kind', event.target.value)}><option value="">Any kind</option>{ENTRY_KINDS.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>}
-        <label><span className="visually-hidden">Filter by agent</span><select value={filter.source ?? ''} onChange={(event) => set('source', event.target.value)}><option value="">Any agent</option>{[...new Set([...(filter.source ? [filter.source] : []), ...(table.data?.sources ?? [])])].map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
-        <label><span className="visually-hidden">Filter by tag</span><select value={filter.tag ?? ''} onChange={(event) => set('tag', event.target.value)}><option value="">Any tag</option>{[...new Set([...(filter.tag ? [filter.tag] : []), ...(table.data?.tags ?? [])])].map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+        <FilterToggle open={filtersOpen} active={activeFilters} onToggle={() => setFiltersOpen((open) => !open)} />
+        {!fixedProject && <label className="filter-extra"><span className="visually-hidden">Filter by project</span><select value={filter.project ?? ''} onChange={(event) => set('project', event.target.value)}><option value="">Any project</option>{(projects.data ?? []).map((item) => <option key={item.slug} value={item.slug}>{projectLabel(item, projects.data ?? [])}</option>)}</select></label>}
+        {view === 'todos' && <label className="filter-extra"><span className="visually-hidden">Filter by state</span><select value={filter.status ?? ''} onChange={(event) => set('status', event.target.value)}><option value="open">Open</option><option value="done">Done</option><option value="">Open and done</option></select></label>}
+        {view === 'reading' && <label className="filter-extra"><span className="visually-hidden">Filter reading</span><select value={effective.reading} onChange={(event) => set('reading', event.target.value)}><option value="unread">Unread</option><option value="starred">Starred</option><option value="all">All</option></select></label>}
+        {view === 'activity' && <label className="filter-extra"><span className="visually-hidden">Filter by kind</span><select value={filter.kind ?? ''} onChange={(event) => set('kind', event.target.value)}><option value="">Any kind</option>{ENTRY_KINDS.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>}
+        <label className="filter-extra"><span className="visually-hidden">Filter by agent</span><select value={filter.source ?? ''} onChange={(event) => set('source', event.target.value)}><option value="">Any agent</option>{[...new Set([...(filter.source ? [filter.source] : []), ...(table.data?.sources ?? [])])].map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+        <label className="filter-extra"><span className="visually-hidden">Filter by tag</span><select value={filter.tag ?? ''} onChange={(event) => set('tag', event.target.value)}><option value="">Any tag</option>{[...new Set([...(filter.tag ? [filter.tag] : []), ...(table.data?.tags ?? [])])].map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
       </div>
       {view === 'reading' && effective.reading === 'unread' && count > 0 && <MarkAllRead filter={effective} onChanged={refreshAll} />}
-      {(view === 'activity' || view === 'decisions') && (
-        <label className="check"><input type="checkbox" checked={!filter.hide_routine} onChange={(event) => set('hide_routine', event.target.checked ? '' : '1')} /> Show routine entries</label>
+      {routineToggle && (
+        <label className="check filter-extra"><input type="checkbox" checked={!filter.hide_routine} onChange={(event) => set('hide_routine', event.target.checked ? '' : '1')} /> Show routine entries</label>
       )}
       {/* A project page adds to its own project, whether or not the project list loaded. */}
       {view !== 'reading' && (fixedProject || (projects.data?.length ?? 0) > 0) && (
@@ -576,57 +590,6 @@ export function InboxView() {
         </section>
       )}
     </div>
-  )
-}
-
-export function ProjectSummaryTable({ projects }: { projects: ProjectSummary[] }) {
-  if (projects.length === 0) {
-    return <EmptyState><p>No projects yet.</p><Link className="btn btn-primary" to="/projects/_new">Create a project</Link></EmptyState>
-  }
-  return (
-    <table className="table summary-table">
-      <thead>
-        <tr>
-          <th scope="col">Project</th>
-          <th scope="col">This week</th>
-          <th scope="col" className="num">Open todos</th>
-          <th scope="col">Last 7 days</th>
-          <th scope="col">Deadline</th>
-        </tr>
-      </thead>
-      <tbody>
-        {projects.map((project) => (
-          <tr key={project.slug}>
-            <td data-label="Project"><div>
-              <Link to={`/projects/${encodeURIComponent(project.slug)}`}>{project.name}</Link> <TierBadge tier={project.tier} /> <HealthBadge state={project.status_state} />
-              {project.needs_you > 0 && <p className="small"><Link to="/">{project.needs_you} {project.needs_you === 1 ? 'thing needs' : 'things need'} you</Link></p>}
-              {project.needs_me && <p className="small needs-me clamp" title={project.needs_me}>Needs you: {project.needs_me}</p>}
-            </div></td>
-            <td data-label="This week"><div>
-              {project.digest ? <p className="clamp digest" title={plainText(project.digest)}>{plainText(project.digest)}</p> : !project.status_at && <span className="muted">No status yet</span>}
-              {project.status_at && (
-                <p className={project.digest ? 'muted small latest-status' : 'status-text'}>
-                  {project.digest && 'Latest: '}<span className={project.digest ? undefined : 'clamp'}>{plainText(project.status_title || project.status_body)}</span>
-                  <span className="muted small"> · <Timestamp iso={project.status_at} /> · {project.status_source}</span>
-                </p>
-              )}
-            </div></td>
-            <td data-label="Open todos" className="num"><div>
-              {project.open_todos > 0 ? <Link to={`/projects/${encodeURIComponent(project.slug)}/todos`}>{project.open_todos}</Link> : <span className="muted">0</span>}
-            </div></td>
-            <td data-label="Last 7 days"><div>
-              {project.week_entries > 0 ? (
-                <>
-                  {project.week_entries} {project.week_entries === 1 ? 'entry' : 'entries'}
-                  <span className="agents">{project.week_agents.map((agent) => <code key={agent}>{agent}</code>)}</span>
-                </>
-              ) : <span className="muted">Quiet{project.last_entry_at ? <> · last <Timestamp iso={project.last_entry_at} /></> : ''}</span>}
-            </div></td>
-            <td data-label="Deadline"><div>{project.deadline || <span className="muted">—</span>}</div></td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
   )
 }
 

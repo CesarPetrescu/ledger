@@ -3,18 +3,17 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { authenticatedSession, clients, mockApi, overview, renderApp } from './helpers'
 
-describe('oauth clients', () => {
+describe('access', () => {
   it('creates an API key, shows its secret once, and revokes it', async () => {
     const key = { id: 7, name: 'Adastrion Core', prefix: 'ledger_AbCdEfG', scopes: ['research:dispatch'], created_at: '2026-10-06T08:00:00Z' }
     const { calls } = mockApi({
       'GET /admin/api/session': authenticatedSession,
       'GET /admin/api/oauth/clients': { body: { clients: [] } },
-      'GET /admin/api/agents': { body: { agents: [] } },
       'GET /admin/api/api-keys': [{ body: { keys: [] } }, { body: { keys: [key] } }, { body: { keys: [{ ...key, revoked_at: '2026-10-06T09:00:00Z' }] } }],
       'POST /admin/api/api-keys': { status: 201, body: { key, secret: 'ledger_AbCdEfGsecret-value' } },
       'DELETE /admin/api/api-keys/7': { body: { ...key, revoked_at: '2026-10-06T09:00:00Z' } },
     })
-    renderApp('/admin/agents')
+    renderApp('/admin/access')
     const section = await screen.findByRole('region', { name: 'API keys' })
     expect(await within(section).findByText('No API keys yet.')).toBeInTheDocument()
     const user = userEvent.setup()
@@ -27,6 +26,7 @@ describe('oauth clients', () => {
     const table = await within(section).findByRole('table', { name: 'API keys' })
     expect(table).toHaveTextContent('ledger_AbCdEfG…')
     expect(table).toHaveTextContent('Dispatch research')
+    expect(within(table).getByRole('button', { name: 'Revoke' }).closest('td')).toHaveClass('actions')
     expect(table.textContent).not.toContain('secret-value')
     await user.click(within(section).getByRole('button', { name: 'Done' }))
     expect(within(section).queryByText('ledger_AbCdEfGsecret-value')).not.toBeInTheDocument()
@@ -41,13 +41,12 @@ describe('oauth clients', () => {
     const { calls } = mockApi({
       'GET /admin/api/session': authenticatedSession,
       'GET /admin/api/oauth/clients': { body: { clients: [] } },
-      'GET /admin/api/agents': { body: { agents: [] } },
       'GET /admin/api/api-keys': { body: { keys: [] } },
       'GET /admin/api/github-sync': { body: { configured: false } },
       'PUT /admin/api/github-sync': { body: { configured: true, hint: '…wxyz', login: 'CesarPetrescu', saved_at: '2026-10-08T10:00:00Z' } },
       'DELETE /admin/api/github-sync': { status: 204 },
     })
-    renderApp('/admin/agents')
+    renderApp('/admin/access')
     const section = await screen.findByRole('region', { name: 'GitHub sync' })
     const user = userEvent.setup()
     const field = await within(section).findByLabelText('Token')
@@ -67,10 +66,12 @@ describe('oauth clients', () => {
 
   it('lists safe metadata only', async () => {
     mockApi({ 'GET /admin/api/session': authenticatedSession, 'GET /admin/api/oauth/clients': { body: { clients } }, 'GET /admin/api/overview': { body: overview } })
-    renderApp('/admin/clients')
+    renderApp('/admin/access')
     // The counters the old overview page showed live here now.
     const counts = await screen.findByRole('list', { name: 'Counts' })
     expect(counts).toHaveTextContent('Active access tokens3')
+    // Only what concerns access: no project or entry totals, no ever-growing admin session count.
+    expect(within(counts).getAllByRole('listitem').map((item) => item.firstChild?.textContent)).toEqual(['OAuth clients', 'Active access tokens'])
     const table = await screen.findByRole('table', { name: /oauth clients/i })
     const rows = within(table).getAllByRole('row').slice(1)
     expect(rows).toHaveLength(2)
@@ -85,6 +86,8 @@ describe('oauth clients', () => {
     expect(table.textContent).not.toMatch(/hash|secret|refresh_token/i)
     const firstRowCells = within(rows[0]!).getAllByRole('cell')
     expect(firstRowCells.map((cell) => cell.getAttribute('data-label'))).toEqual(['Name', 'Type', 'Client ID', 'Redirect URIs', 'Created', 'Last used', 'Access tokens', 'Refresh tokens', 'Actions'])
+    // The action column is right-aligned, like the API keys table's, so the Revoke buttons line up.
+    expect(firstRowCells.at(-1)).toHaveClass('actions')
   })
 
   it('requires explicit confirmation before revoking and reports the result', async () => {
@@ -93,7 +96,7 @@ describe('oauth clients', () => {
       'GET /admin/api/oauth/clients': [{ body: { clients } }, { body: { clients: [{ ...clients[0]!, active_access_tokens: 0, active_refresh_tokens: 0 }, clients[1]!] } }],
       'POST /admin/api/oauth/revoke': { body: { revoked: 3 } },
     })
-    renderApp('/admin/clients')
+    renderApp('/admin/access')
     await screen.findByRole('table', { name: /oauth clients/i })
     const user = userEvent.setup()
     await user.click(screen.getAllByRole('button', { name: /revoke tokens/i })[0]!)
@@ -114,16 +117,35 @@ describe('oauth clients', () => {
 
   it('says so when the counts fail to load, with a retry', async () => {
     mockApi({ 'GET /admin/api/session': authenticatedSession, 'GET /admin/api/oauth/clients': { body: { clients } }, 'GET /admin/api/overview': { status: 500, body: { error: 'hidden' } } })
-    renderApp('/admin/clients')
+    renderApp('/admin/access')
     expect(await screen.findByText("Couldn't load the counts.")).toBeInTheDocument()
   })
 
-  it('shows an empty state when nothing is registered', async () => {
-    mockApi({ 'GET /admin/api/session': authenticatedSession, 'GET /admin/api/oauth/clients': { body: { clients: [] } }, 'GET /admin/api/agents': { body: { agents: [] } } })
+  it('holds connecting and every access setting, also at the old /clients address', async () => {
+    const { calls } = mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/oauth/clients': { body: { clients } },
+      'GET /admin/api/overview': { body: overview },
+      'GET /admin/api/api-keys': { body: { keys: [] } },
+      'GET /admin/api/github-sync': { body: { configured: false } },
+    })
     renderApp('/admin/clients')
+    expect(await screen.findByRole('heading', { name: 'Access', level: 1 })).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/admin/access')
+    for (const section of ['Connect an agent', 'Connected apps and access', 'API keys', 'GitHub sync', 'Approval password']) {
+      expect(screen.getByRole('region', { name: section })).toBeInTheDocument()
+    }
+    expect(screen.getAllByRole('link', { name: 'Connect a machine' })[0]).toHaveAttribute('href', '/admin/connect')
+    // Agent activity stays on Agents.
+    expect(screen.queryByRole('list', { name: 'Agents' })).not.toBeInTheDocument()
+    expect(calls.some((call) => call.path === '/admin/api/agents')).toBe(false)
+  })
+
+  it('shows an empty state when nothing is registered', async () => {
+    mockApi({ 'GET /admin/api/session': authenticatedSession, 'GET /admin/api/oauth/clients': { body: { clients: [] } } })
+    renderApp('/admin/access')
     expect(await screen.findByText(/no apps have connected yet/i)).toBeInTheDocument()
-    // With no agent yet, the page explains how to connect one, with this server's address.
-    expect(screen.getByText(/no agent has written to ledger yet/i)).toBeInTheDocument()
+    // The page explains how to connect an agent, with this server's address.
     const guide = screen.getByRole('region', { name: 'Connect an agent' })
     expect(guide).toHaveTextContent(`${window.location.origin}/mcp`)
     expect(guide).toHaveTextContent(`ledger connect codex --server ${window.location.origin}`)
@@ -134,7 +156,7 @@ describe('oauth clients', () => {
       'GET /admin/api/session': authenticatedSession,
       'GET /admin/api/oauth/clients': [{ body: { clients: [clients[0]], next_offset: 50 } }, { body: { clients: [clients[1]] } }],
     })
-    renderApp('/admin/clients')
+    renderApp('/admin/access')
     expect(await screen.findByText('Agent One')).toBeInTheDocument()
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: /next page/i }))

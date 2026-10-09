@@ -2,6 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import type { ProjectSummary, TableEntry } from '../api'
+import { deadlineLabel } from '../pages/ProjectsPage'
 import { atlas, atlasDetail, authenticatedSession, beacon, decisionEntry, mockApi, noSummaries, renderApp } from './helpers'
 
 const projectBase = {
@@ -54,18 +55,92 @@ describe('project browser', () => {
     expect(section).toHaveTextContent('<img src=x onerror=alert(1)> Fix login')
     expect(section.querySelector('img')).toBeNull()
     expect(section).toHaveTextContent('Linked by claude-code')
+    // GitHub sync is switched on under Access.
+    expect(within(section).getByRole('link', { name: 'Access' })).toHaveAttribute('href', '/admin/access')
+    // The link form stays folded behind a quiet button while repositories are listed.
+    expect(within(section).queryByRole('form', { name: 'Link a repository' })).not.toBeInTheDocument()
     const user = userEvent.setup()
+    const open = within(section).getByRole('button', { name: 'Link a repository' })
+    expect(open).not.toHaveClass('btn-primary')
+    await user.click(open)
     const form = within(section).getByRole('form', { name: 'Link a repository' })
+    expect(within(form).getByLabelText('Repository URL')).toHaveFocus()
+    expect(within(section).queryByRole('button', { name: 'Link a repository' })).not.toBeInTheDocument()
     await user.type(within(form).getByLabelText('Repository URL'), 'git@github.com:acme/atlas-web.git')
     await user.type(within(form).getByLabelText('Role'), 'frontend')
     await user.click(within(form).getByRole('button', { name: 'Link repository' }))
     expect(await within(section).findByText('acme/atlas-web')).toBeInTheDocument()
     expect(section).toHaveTextContent('Linked by you')
     expect(calls.find((call) => call.method === 'POST' && call.path === '/admin/api/projects/atlas/repos')?.body).toEqual({ url: 'git@github.com:acme/atlas-web.git', role: 'frontend', branch: '', path: '', note: '' })
-    expect(within(form).getByLabelText('Repository URL')).toHaveValue('')
+    // Linked: the form folds away and focus returns to its button; opened again, it starts empty.
+    expect(within(section).queryByRole('form', { name: 'Link a repository' })).not.toBeInTheDocument()
+    expect(within(section).getByRole('button', { name: 'Link a repository' })).toHaveFocus()
+    await user.click(within(section).getByRole('button', { name: 'Link a repository' }))
+    expect(within(within(section).getByRole('form', { name: 'Link a repository' })).getByLabelText('Repository URL')).toHaveValue('')
+    await user.click(within(section).getByRole('button', { name: 'Cancel' }))
+    expect(within(section).queryByRole('form', { name: 'Link a repository' })).not.toBeInTheDocument()
     await user.click(within(section).getAllByRole('button', { name: 'Unlink' })[0]!)
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Unlink' }))
     await waitFor(() => expect(within(section).queryByRole('link', { name: 'acme/atlas-api' })).not.toBeInTheDocument())
+  })
+
+  it('makes Link a repository the main action while a project has none', async () => {
+    mockApi({
+      ...projectBase,
+      'GET /admin/api/projects': { body: { projects: [atlas] } },
+      'GET /admin/api/projects/atlas': { body: atlasDetail },
+      'GET /admin/api/projects/atlas/repos': { body: { repos: [] } },
+    })
+    renderApp('/admin/projects/atlas/repos')
+    const section = await screen.findByRole('region', { name: 'Project repositories' })
+    expect(await within(section).findByText('No repositories linked yet.')).toBeInTheDocument()
+    expect(within(section).getByRole('button', { name: 'Link a repository' })).toHaveClass('btn-primary')
+    expect(within(section).queryByRole('form', { name: 'Link a repository' })).not.toBeInTheDocument()
+  })
+
+  it('lists every project once, with its week, open todos, what waits for you, deadline, and last activity', async () => {
+    const dated = { ...beacon, deadline: '2026-11-15', last_entry_at: '2026-09-01T08:00:00Z' }
+    mockApi({
+      ...projectBase,
+      'GET /admin/api/projects': { body: { projects: [atlas, dated] } },
+      'GET /admin/api/table/projects': { body: { ...noSummaries, projects: [
+        { ...atlasSummary, digest: 'Shipped the **table** page; two todos remain.' },
+        { ...atlasSummary, slug: 'beacon', name: 'Beacon', tier: 'park', deadline: '2026-11-15', needs_me: '', open_todos: 0, week_entries: 0, week_agents: [], status_title: '', digest: '', status_state: 'blocked', status_detail: 'Waiting on legal', needs_you: 0 },
+      ] } },
+    })
+    renderApp('/admin/projects')
+    const list = await screen.findByRole('list', { name: 'Projects' })
+    // One list: the old second table of the same projects is gone, and so is the empty inspector beside it.
+    expect(screen.queryByRole('table')).not.toBeInTheDocument()
+    expect(screen.queryByText('All projects this week')).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Project inspector' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Projects', current: 'page' })).toBeInTheDocument()
+    const [atlasRow, beaconRow] = within(list).getAllByRole('link')
+    expect(atlasRow).toHaveAttribute('href', '/admin/projects/atlas')
+    // The week as plain words, then the facts.
+    expect(atlasRow).toHaveTextContent('Shipped the table page; two todos remain.')
+    expect(atlasRow!.querySelector('strong')).toBeNull()
+    expect(atlasRow).toHaveTextContent('2 open todos')
+    expect(within(atlasRow!).getByText('1 for you')).toBeInTheDocument()
+    expect(atlasRow).toHaveTextContent('Due Friday')
+    expect(atlasRow!.querySelector('time')).toHaveAttribute('datetime', atlas.last_entry_at)
+    expect(within(atlasRow!).getByText('focus')).toBeInTheDocument()
+    // Only a blocked project gets a health label; an in-progress one gets none.
+    expect(within(atlasRow!).queryByText(/in progress/i)).not.toBeInTheDocument()
+    expect(within(beaconRow!).getByText('Blocked')).toBeInTheDocument()
+    expect(beaconRow).toHaveTextContent('No status yet')
+    expect(beaconRow).toHaveTextContent('No open todos')
+    expect(within(beaconRow!).queryByText(/for you/)).not.toBeInTheDocument()
+    // A date deadline reads as a short date, never as the raw ISO day.
+    const due = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(2026, 10, 15))
+    expect(beaconRow).toHaveTextContent(`Due ${due}`)
+    expect(beaconRow).not.toHaveTextContent('2026-11-15')
+  })
+
+  it('reads a deadline as a short date only when it is a real day', () => {
+    expect(deadlineLabel('2027-01-20')).toBe(new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(2027, 0, 20)))
+    expect(deadlineLabel('2026-09-31')).toBe('2026-09-31')
+    expect(deadlineLabel('end of Q4')).toBe('end of Q4')
   })
 
   it('lists projects densely, filters by text and tier, and opens a project page with AI titles instead of raw text', async () => {
@@ -95,6 +170,8 @@ describe('project browser', () => {
     await user.click(screen.getByRole('radio', { name: /^all$/i }))
     await user.click(within(screen.getByRole('list', { name: /projects/i })).getByRole('link', { name: /atlas/i }))
     expect(await screen.findByRole('heading', { name: 'Atlas', level: 1 })).toBeInTheDocument()
+    // With a project open the list beside it is the compact one, without each project's week.
+    expect(within(screen.getByRole('list', { name: /projects/i })).queryByText('Shipped the table page; two todos remain.')).not.toBeInTheDocument()
     const status = screen.getByRole('region', { name: 'Project status' })
     expect(status).toHaveTextContent('Shipped the table page; two todos remain.')
     expect(within(status).getByRole('link', { name: /1\s*question waits for you/i })).toHaveAttribute('href', '/admin/')
@@ -208,7 +285,7 @@ describe('project browser', () => {
   })
 
   it('edits an existing project in place', async () => {
-    const savedAtlas = Object.fromEntries(Object.entries({ ...atlas, goal: 'Ship v2' }).filter(([key]) => key !== 'last_entry_at'))
+    const savedAtlas = Object.fromEntries(Object.entries({ ...atlas, goal: 'Ship v2', deadline: '2026-11-15' }).filter(([key]) => key !== 'last_entry_at'))
     const { calls } = mockApi({
       ...projectBase,
       'GET /admin/api/projects': { body: { projects: [atlas] } },
@@ -227,12 +304,17 @@ describe('project browser', () => {
     expect(await screen.findByRole('status')).toHaveTextContent(/project saved/i)
     const meta = screen.getByRole('list', { name: /project details/i })
     expect(within(meta).getByText('Goal').nextElementSibling).toHaveTextContent('Ship v2')
+    // A date deadline reads as a short date, as in the header; the edit form keeps the ISO day.
+    expect(within(meta).getByText('Deadline').nextElementSibling).toHaveTextContent(deadlineLabel('2026-11-15'))
+    expect(meta).not.toHaveTextContent('2026-11-15')
     const body = calls.find((call) => call.method === 'PUT')?.body
     expect(body).toMatchObject({ goal: 'Ship v2', name: 'Atlas' })
     expect(body).not.toHaveProperty('slug')
     expect(body).not.toHaveProperty('updated_at')
     expect(body).not.toHaveProperty('last_entry_at')
     expect(within(screen.getByRole('list', { name: /projects/i })).getByRole('link', { name: /atlas/i }).querySelector('time')).toHaveAttribute('datetime', atlas.last_entry_at)
+    await user.click(screen.getByRole('button', { name: /edit project/i }))
+    expect(within(screen.getByRole('form', { name: /edit project/i })).getByLabelText(/^deadline/i)).toHaveValue('2026-11-15')
   })
 
   it('opens a project whose slug is new instead of the create form', async () => {

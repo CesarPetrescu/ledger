@@ -157,7 +157,7 @@ Pass the same option to `auth status` or `auth logout` to inspect that directory
 from elsewhere.
 `logout` revokes the token family on Ledger before deleting the local file. If
 revocation fails, credentials stay available so logout can be retried. You can
-also revoke the machine from the console's Agents page, including outstanding
+also revoke the machine from the console's Access page, including outstanding
 device approvals.
 
 Credentials are stored under `$XDG_CONFIG_HOME/ledger` (default

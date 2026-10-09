@@ -80,7 +80,7 @@ func NewServer(config Config, db *store.DB) *Server {
 	if !strings.HasPrefix(config.PasswordHash, "$argon2id$") {
 		panic("LEDGER_ADMIN_PASSWORD_HASH must be an Argon2id PHC string")
 	}
-	s := &Server{config: config, origin: publicOrigin(config.PublicURL), db: db, index: retrieval.NewClient(config.IndexURL), mux: http.NewServeMux(), requests: oauth.NewRateLimiter(), failures: oauth.NewRateLimiter(), events: newEventStream(db), calendar: config.Calendar, github: config.GitHub}
+	s := &Server{config: config, origin: publicOrigin(config.PublicURL), db: db, index: retrieval.NewClient(config.IndexURL, db), mux: http.NewServeMux(), requests: oauth.NewRateLimiter(), failures: oauth.NewRateLimiter(), events: newEventStream(db), calendar: config.Calendar, github: config.GitHub}
 	s.oauth = oauth.NewServer(oauth.Config{PublicURL: config.PublicURL}, db)
 	if config.InternalProxyCIDR != "" {
 		prefix, err := netip.ParsePrefix(config.InternalProxyCIDR)

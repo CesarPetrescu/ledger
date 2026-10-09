@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from 'react'
 import { api, describeError, type DeviceRequest } from '../api'
-import { ErrorState, Loading, Timestamp } from '../components/ui'
+import { ErrorState, Icon, Loading, Timestamp } from '../components/ui'
 import { useResource } from '../hooks/useResource'
+import { Link } from '../router'
 
 const permissions: Record<string, string> = {
   'ledger:read': 'Read project memory',
@@ -69,6 +70,8 @@ export function ConnectPage() {
   }
 
   return <>
+    {/* Phones hide Access from the bottom nav, so the way back is spelled out (desktop has the sidebar). */}
+    <Link to="/access" className="back-link"><Icon name="back" /> Access</Link>
     <header className="page-head"><h1>Connect a machine</h1><p className="muted">Run <code>ledger connect codex --server {window.location.origin}</code> on the machine you want to connect, then enter its code here.</p></header>
     {error && <p role="alert">{error}</p>}
     {result ? <p role="status">{result}</p> : request ? <section aria-label="Review connection">

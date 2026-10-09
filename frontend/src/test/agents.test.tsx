@@ -1,7 +1,7 @@
 import { screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { AgentSummary } from '../api'
-import { authenticatedSession, mockApi, noteEntry, overview, renderApp } from './helpers'
+import { authenticatedSession, mockApi, noteEntry, renderApp } from './helpers'
 
 const now = new Date().toISOString()
 const codex: AgentSummary = {
@@ -12,11 +12,9 @@ const quiet: AgentSummary = { name: 'claude-code', week_entries: 0, entries: 3, 
 
 describe('agents', () => {
   it('shows what each agent did lately and what it waits on you for', async () => {
-    mockApi({
+    const { calls } = mockApi({
       'GET /admin/api/session': authenticatedSession,
       'GET /admin/api/agents': { body: { agents: [codex, quiet] } },
-      'GET /admin/api/oauth/clients': { body: { clients: [] } },
-      'GET /admin/api/overview': { body: overview },
     })
     renderApp('/admin/agents')
     const cards = within(await screen.findByRole('list', { name: 'Agents' })).getAllByRole('listitem').filter((item) => item.classList.contains('agent-card'))
@@ -29,6 +27,19 @@ describe('agents', () => {
     expect(within(cards[0]!).getByRole('link', { name: 'All of its activity' })).toHaveAttribute('href', '/admin/table?view=activity&source=codex')
     expect(cards[1]).toHaveTextContent('Quiet this week · 3 in total')
     expect(screen.getByRole('link', { name: 'Agents', current: 'page' })).toBeInTheDocument()
+    // Connecting and access settings live on their own page; Agents only links there.
+    expect(screen.getByRole('link', { name: 'Manage access' })).toHaveAttribute('href', '/admin/access')
+    for (const section of ['Connect an agent', 'Connected apps and access', 'API keys', 'GitHub sync', 'Approval password']) {
+      expect(screen.queryByRole('region', { name: section })).not.toBeInTheDocument()
+    }
+    expect(calls.map((call) => call.path)).toEqual(['/admin/api/session', '/admin/api/agents'])
+  })
+
+  it('sends you to Access to connect the first agent', async () => {
+    mockApi({ 'GET /admin/api/session': authenticatedSession, 'GET /admin/api/agents': { body: { agents: [] } } })
+    renderApp('/admin/agents')
+    expect(await screen.findByText(/no agent has written to ledger yet/i)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Connect one on Access' })).toHaveAttribute('href', '/admin/access')
   })
 })
 

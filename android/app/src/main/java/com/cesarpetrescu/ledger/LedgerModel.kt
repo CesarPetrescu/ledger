@@ -2,6 +2,7 @@ package com.cesarpetrescu.ledger
 
 import android.app.Application
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
@@ -31,6 +32,15 @@ class LedgerModel(application: Application) : AndroidViewModel(application) {
     var revision by mutableStateOf(0); private set
     var stack by mutableStateOf(listOf("inbox")); private set
     val route get() = stack.last()
+    /** Project names by slug, from lists already loaded, so a project's top bar can name it. */
+    val projectNames = mutableStateMapOf<String, String>()
+
+    fun knowProjects(projects: List<JSONObject>) = projects.forEach { p ->
+        if (p.text("slug").isNotBlank() && p.text("name").isNotBlank()) projectNames[p.text("slug")] = p.text("name")
+    }
+
+    /** Back to the Inbox with nothing from the previous session, such as another server's project names. */
+    private fun home() { stack = listOf("inbox"); projectNames.clear() }
 
     init {
         viewModelScope.launch {
@@ -60,7 +70,7 @@ class LedgerModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                 }
-                if (!reauthRequired || api?.origin != client.origin) stack = listOf("inbox")
+                if (!reauthRequired || api?.origin != client.origin) home()
                 api = client
                 reauthRequired = false
                 notice = null
@@ -106,7 +116,7 @@ class LedgerModel(application: Application) : AndroidViewModel(application) {
         notice = errorMessage(error)
     }
 
-    fun logout() = act("Signed out", after = { api = null; stack = listOf("inbox") }) { client ->
+    fun logout() = act("Signed out", after = { api = null; home() }) { client ->
         try { client.request("POST", "/logout") }
         catch (e: ApiError) { if (e.status != 401) throw e }
         sessions.clear()
@@ -120,7 +130,7 @@ class LedgerModel(application: Application) : AndroidViewModel(application) {
                 withContext(Dispatchers.IO) { sessions.clear() }
                 api = null
                 reauthRequired = false
-                stack = listOf("inbox")
+                home()
                 notice = "Removed from this phone. The server session will expire automatically."
             } catch (e: Exception) { notice = errorMessage(e) }
             finally { busy = false }

@@ -34,7 +34,8 @@ private fun ProjectForm(model: LedgerModel, existingSlug: String, p: JSONObject)
     var automate by rememberSaveable { mutableStateOf(p.text("automate")) }
     var stack by rememberSaveable { mutableStateOf(p.text("stack")) }
     Page {
-        item { Text(if (existingSlug.isBlank()) "New project" else "Edit project", style = MaterialTheme.typography.headlineSmall) }
+        // Editing, the top bar already says "<Project> · Edit".
+        if (existingSlug.isBlank()) item { Text("New project", style = MaterialTheme.typography.headlineSmall) }
         item { Field("Project slug", slug, { slug = it }, max = 64, enabled = existingSlug.isBlank(), placeholder = "atlas") }
         item { Field("Name", name, { name = it }, max = 200) }
         item { Choice("Tier", tier, tiers) { tier = it } }
@@ -119,30 +120,43 @@ fun ProjectRepos(model: LedgerModel, slug: String) {
     var url by rememberSaveable { mutableStateOf("") }
     var role by rememberSaveable { mutableStateOf("") }
     var branch by rememberSaveable { mutableStateOf("") }
+    // The form stays folded until asked for, and folds again once a link succeeds.
+    var linking by rememberSaveable { mutableStateOf(false) }
     Load(model, "repos:$slug", { it.request("GET", "/projects/${segment(slug)}/repos") }) { data ->
+        val repos = data.rows("repos")
         Page {
             item { Text("Where this project's code lives; link every repository it spans. Agents see them with the project and clone with their own Git access.",
                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            if (data.rows("repos").isEmpty()) item { Empty("No repositories linked yet.") }
-            items(data.rows("repos"), key = { it.text("id") }) { repo ->
-                val (subtitle, body) = repoSummary(repo)
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SummaryCard(repo.text("repo"), subtitle, body)
-                    ConfirmButton("Unlink", "Unlink ${repo.text("repo")}? Agents stop seeing it with this project. The repository itself is not touched.", !model.busy, danger = true) {
-                        model.act("Repository unlinked") { it.request("DELETE", "/repos/${segment(repo.text("id"))}") }
+            // The state comes before the action it motivates.
+            if (repos.isEmpty()) item { Empty("No repositories linked yet.") }
+            // Above the list, so the button is in sight without scrolling past every repo and the form opens where it was tapped.
+            if (!linking) item {
+                // With nothing linked yet, linking is the screen's one job; otherwise it is tonal, apart from each card's red Unlink.
+                if (repos.isEmpty()) Button(onClick = { linking = true }, enabled = !model.busy) { Text("Link a repository") }
+                else FilledTonalButton(onClick = { linking = true }, enabled = !model.busy) { Text("Link a repository") }
+            } else {
+                item { Text("Link a repository", style = MaterialTheme.typography.titleMedium) }
+                item { Field("Repository URL", url, { url = it }, max = 500, placeholder = "https://github.com/owner/repo", keyboard = KeyboardType.Uri) }
+                item { Field("Role", role, { role = it }, max = 60, placeholder = "backend, android, docs…") }
+                item { Field("Branch", branch, { branch = it }, max = 200, placeholder = "Default branch") }
+                item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(enabled = !model.busy && url.isNotBlank(), onClick = {
+                            model.act("Repository linked", after = { url = ""; role = ""; branch = ""; linking = false }) {
+                                it.request("POST", "/projects/${segment(slug)}/repos", json("url" to url.trim(), "role" to role.trim(), "branch" to branch.trim(), "path" to "", "note" to ""))
+                            }
+                        }) { Text("Link repository") }
+                        TextButton(onClick = { linking = false }, enabled = !model.busy) { Text("Cancel") }
                     }
                 }
             }
-            item { Text("Link a repository", style = MaterialTheme.typography.titleMedium) }
-            item { Field("Repository URL", url, { url = it }, max = 500, placeholder = "https://github.com/owner/repo", keyboard = KeyboardType.Uri) }
-            item { Field("Role", role, { role = it }, max = 60, placeholder = "backend, android, docs…") }
-            item { Field("Branch", branch, { branch = it }, max = 200, placeholder = "Default branch") }
-            item {
-                Button(enabled = !model.busy && url.isNotBlank(), onClick = {
-                    model.act("Repository linked", after = { url = ""; role = ""; branch = "" }) {
-                        it.request("POST", "/projects/${segment(slug)}/repos", json("url" to url.trim(), "role" to role.trim(), "branch" to branch.trim(), "path" to "", "note" to ""))
+            items(repos, key = { it.text("id") }) { repo ->
+                val (subtitle, body) = repoSummary(repo)
+                SummaryCard(repo.text("repo"), subtitle, body, actions = {
+                    ConfirmButton("Unlink", "Unlink ${repo.text("repo")}? Agents stop seeing it with this project. The repository itself is not touched.", !model.busy, danger = true) {
+                        model.act("Repository unlinked") { it.request("DELETE", "/repos/${segment(repo.text("id"))}") }
                     }
-                }) { Text("Link repository") }
+                })
             }
         }
     }

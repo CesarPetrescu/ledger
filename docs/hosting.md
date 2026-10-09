@@ -46,7 +46,7 @@ Type each password at the prompt and send end-of-file. Paste the returned Argon2
 
 The OAuth page also offers **Continue with Ledger owner login**. Sign in with your console password, review the client's permissions, then choose **Allow access** or **Deny**.
 
-If you forget the approval password, open **Agents → Approval password** in the console. Confirm your owner password and choose a new approval password of at least 12 characters. You do not need the old approval password. Ledger stores its Argon2id hash in PostgreSQL; it takes effect immediately and survives restarts. Once set in the console, this value takes precedence over `LEDGER_PASSWORD_HASH`. Include it in database backups. To restore the environment setting during server recovery, delete the singleton row from `oauth_password`.
+If you forget the approval password, open **Access → Approval password** in the console. Confirm your owner password and choose a new approval password of at least 12 characters. You do not need the old approval password. Ledger stores its Argon2id hash in PostgreSQL; it takes effect immediately and survives restarts. Once set in the console, this value takes precedence over `LEDGER_PASSWORD_HASH`. Include it in database backups. To restore the environment setting during server recovery, delete the singleton row from `oauth_password`.
 
 ### 3. Run
 

@@ -40,7 +40,7 @@ func NewServer(db *store.DB, indexURL string, services ...*calendarapi.Service) 
 
 func NewServerWithSpeech(db *store.DB, indexURL string, calendar *calendarapi.Service, speech *transcription.Client) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "ledger", Version: "8"}, nil)
-	client := retrieval.NewClient(indexURL)
+	client := retrieval.NewClient(indexURL, db)
 	read := &mcp.ToolAnnotations{ReadOnlyHint: true}
 	write := &mcp.ToolAnnotations{ReadOnlyHint: false}
 	calendarRead := &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: boolPointer(true)}

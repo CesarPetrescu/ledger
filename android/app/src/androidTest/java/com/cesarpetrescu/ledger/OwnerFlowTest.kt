@@ -212,6 +212,24 @@ class OwnerFlowTest {
             awaitText("Activity")
             scrollTo("Android verification note")
             ui.onNodeWithText("Android verification note").assertExists()
+            // The top bar names the project; Repos keeps its link form folded until asked for, and folds it again after linking.
+            awaitText("Atlas")
+            ui.onNodeWithContentDescription("More actions for Atlas").performClick()
+            tap("Repos")
+            awaitText("Atlas · Repos")
+            awaitText("No repositories linked yet.")
+            ui.onNodeWithText("Repository URL").assertDoesNotExist()
+            // The empty state reads before the button it motivates.
+            assertTrue(ui.onNodeWithText("No repositories linked yet.").fetchSemanticsNode().boundsInRoot.top < ui.onNodeWithText("Link a repository").fetchSemanticsNode().boundsInRoot.top)
+            tap("Link a repository")
+            fillField("Repository URL", "https://github.com/acme/atlas")
+            scrollTo("Link repository")
+            tap("Link repository")
+            awaitText("acme/atlas")
+            ui.waitUntilDoesNotExist(hasText("Repository URL"), 15_000)
+            tap("Unlink")
+            tap("Cancel")
+            ui.onNodeWithContentDescription("Back").performClick()
             ui.onNodeWithContentDescription("Back").performClick()
             tap("Handoffs")
             tap("Atlas handoff")
@@ -265,6 +283,9 @@ class OwnerFlowTest {
             // Inbox: answer an ask from its sheet (its history shows where it came from), then complete a todo.
             tap("Confirm the fixture pricing")
             ui.waitUntilAtLeastOneExists(hasText("claude-code wrote it through Fixture Agent", substring = true), 15_000)
+            // The question sits above the box that answers it.
+            val question = ui.onNodeWithText("Confirm the fixture pricing").fetchSemanticsNode().boundsInRoot.top
+            assertTrue(question < ui.onNodeWithText("Answer claude-code").fetchSemanticsNode().boundsInRoot.top)
             fillField("Answer claude-code", "The fixture pricing is right.")
             tap("Send")
             awaitText("Nothing is waiting on you.")
@@ -317,25 +338,43 @@ class OwnerFlowTest {
             androidx.test.espresso.Espresso.pressBack()
             ui.waitUntilDoesNotExist(hasText("Chose"), 15_000)
             ui.onNodeWithContentDescription("Back").performClick()
-            // Agents shows what each agent did; Help explains the rules.
+            // Agents shows only what each agent did; connecting one lives under Settings › Access.
             scrollTo("Agents")
             tap("Agents")
             awaitText("Working on 1 handoff")
+            ui.onNodeWithText("Connect an agent").assertDoesNotExist()
+            tap("Manage access →")
+            // Settings opens at its Access heading, not at Appearance, with no cut-off end of Notifications above it.
             awaitText("Connect an agent")
+            ui.onNodeWithText("Access").assertIsDisplayed()
+            ui.onAllNodesWithText("nothing goes through Google", substring = true).let { notes ->
+                if (notes.fetchSemanticsNodes().isNotEmpty()) notes.onFirst().assertIsNotDisplayed()
+            }
+            ui.onNodeWithText("Connect an agent").assertIsDisplayed()
+            tap("Connect an agent")
+            awaitText("ledger connect codex --server https://localhost:8443")
             ui.onNodeWithContentDescription("Back").performClick()
+            ui.onNodeWithContentDescription("Back").performClick()
+            ui.onNodeWithContentDescription("Back").performClick()
+            // Help explains the rules.
             scrollTo("Help")
             tap("Help")
-            awaitText("How the Inbox decides")
+            awaitText("How Ledger works")
+            // Help is a lazy list: on a short screen (CI's Pixel 2) later sections exist only once scrolled to.
+            scrollTo("How the Inbox decides")
             ui.onNodeWithContentDescription("Back").performClick()
             ui.onNodeWithContentDescription("Settings").performClick()
             tap("Dark")
             tap("System")
             ui.onNodeWithContentDescription("Back").performClick()
             ui.onNodeWithContentDescription("Settings").performClick()
+            scrollTo("Connected apps")
             tap("Connected apps")
             tap("Revoke access")
             tap("Cancel")
             ui.onNodeWithContentDescription("Back").performClick()
+            // Sign-out sits under its own heading, not inside Access.
+            scrollTo("This phone")
             scrollTo("Sign out")
             tap("Sign out")
             ui.onNode(hasText("Sign out") and hasClickAction() and hasAnyAncestor(isDialog())).performClick()

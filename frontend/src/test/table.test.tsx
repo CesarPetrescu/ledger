@@ -21,24 +21,6 @@ const doneTodo: TableEntry = { ...todo, id: '49', meta: { ...todo.meta!, title: 
 const base = { 'GET /admin/api/session': authenticatedSession, 'GET /admin/api/projects': { body: { projects: [atlas, beacon] } }, 'GET /admin/api/table/projects': { body: summaries } }
 
 describe('table', () => {
-  it('summarizes every project this week on the projects page', async () => {
-    mockApi(base)
-    renderApp('/admin/projects')
-    const table = await screen.findByRole('table')
-    const atlasRow = within(table).getAllByRole('row')[1]!
-    expect(atlasRow).toHaveTextContent('Shipped the table page; two todos remain.')
-    expect(atlasRow).toHaveTextContent('Latest: Deployed table page')
-    expect(atlasRow).toHaveTextContent('Needs you: Review the migration')
-    expect(within(atlasRow).getByRole('link', { name: '2' })).toHaveAttribute('href', '/admin/projects/atlas/todos')
-    expect(within(atlasRow).getByRole('link', { name: 'Atlas' })).toHaveAttribute('href', '/admin/projects/atlas')
-    expect(within(atlasRow).getByText('codex')).toBeInTheDocument()
-    expect(within(table).getAllByRole('row')[2]).toHaveTextContent('No status yet')
-    expect(screen.getByRole('link', { name: 'Projects', current: 'page' })).toBeInTheDocument()
-    // Only a blocked project gets a health label; an in-progress one gets none.
-    expect(within(atlasRow).queryByText('In progress')).not.toBeInTheDocument()
-    expect(within(atlasRow).getByRole('link', { name: '1 thing needs you' })).toHaveAttribute('href', '/admin/')
-  })
-
   it('shows extraction progress while a labeller runs, and sends old table views to their pages', async () => {
     mockApi({ ...base, 'GET /admin/api/entries': { body: { entries: [], sources: [], tags: [] } } })
     const first = renderApp('/admin/table')
@@ -333,6 +315,60 @@ describe('table', () => {
     expect(calls.find((call) => call.method === 'POST')?.body).toEqual({ read: true })
     await user.click(within(row).getByRole('button', { name: 'Ollama v0.40 ships MLX by default' }))
     expect(await within(await screen.findByRole('complementary', { name: 'Entry' })).findByText('Why it matters')).toBeInTheDocument()
+  })
+
+  it('puts Recent actions and Trash in the same tab row as the lists', async () => {
+    mockApi({ ...base, 'GET /admin/api/entries': { body: { entries: [], sources: [], tags: [] } }, 'GET /admin/api/trash': { body: { items: [] } } })
+    renderApp('/admin/table')
+    const tabs = await screen.findByRole('navigation', { name: 'Table views' })
+    expect(within(tabs).getAllByRole('link').map((link) => link.textContent)).toEqual(['Activity', 'Todos', 'Decisions', 'Reading', 'Recent actions', 'Trash'])
+    expect(screen.queryByRole('navigation', { name: 'History' })).not.toBeInTheDocument()
+    await userEvent.setup().click(within(tabs).getByRole('link', { name: 'Trash' }))
+    expect(await screen.findByText('Trash is empty.')).toBeInTheDocument()
+    expect(window.location.search).toBe('?view=trash')
+    expect(within(tabs).getByRole('link', { name: 'Trash', current: 'page' })).toBeInTheDocument()
+    expect(within(tabs).getByRole('link', { name: 'Activity' })).not.toHaveAttribute('aria-current')
+  })
+
+  it('folds the dropdowns behind a Filters button that counts the active ones', async () => {
+    mockApi({ ...base, 'GET /admin/api/entries': { body: { entries: [], sources: ['codex'], tags: ['export'] } } })
+    renderApp('/admin/table?view=activity&tag=export&source=codex')
+    // The search box stays out; the tag and agent from the address count.
+    const toggle = await screen.findByRole('button', { name: 'Filters 2 active' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('checkbox', { name: /show routine entries/i }))
+    expect(toggle).toHaveAccessibleName('Filters 3 active')
+    await user.type(screen.getByRole('searchbox', { name: /search text/i }), 'checkpoint')
+    expect(toggle).toHaveAccessibleName('Filters 3 active')
+    await user.selectOptions(screen.getByRole('combobox', { name: /filter by tag/i }), '')
+    await user.selectOptions(screen.getByRole('combobox', { name: /filter by agent/i }), '')
+    await user.click(screen.getByRole('checkbox', { name: /show routine entries/i }))
+    expect(toggle).toHaveAccessibleName('Filters')
+    // On a phone the stylesheet hides every .filter-extra until the view is marked open.
+    const view = document.querySelector('.entries-view')!
+    expect(view).not.toHaveAttribute('data-filters')
+    for (const name of [/filter by project/i, /filter by kind/i, /filter by agent/i, /filter by tag/i]) expect(screen.getByRole('combobox', { name }).closest('label')).toHaveClass('filter-extra')
+    expect(screen.getByRole('checkbox', { name: /show routine entries/i }).closest('label')).toHaveClass('filter-extra')
+    expect(screen.getByRole('searchbox', { name: /search text/i }).closest('label')).not.toHaveClass('filter-extra')
+    await user.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(view).toHaveAttribute('data-filters', 'open')
+    await user.click(toggle)
+    expect(view).not.toHaveAttribute('data-filters')
+  })
+
+  it('counts a todo state or reading list other than the default as a filter', async () => {
+    mockApi({ ...base, 'GET /admin/api/entries': { body: { entries: [], sources: [], tags: [] } } })
+    const first = renderApp('/admin/table?view=todos')
+    const toggle = await screen.findByRole('button', { name: 'Filters' })
+    await userEvent.setup().selectOptions(screen.getByRole('combobox', { name: /filter by state/i }), 'done')
+    expect(toggle).toHaveAccessibleName('Filters 1 active')
+    first.unmount()
+    renderApp('/admin/table?view=reading')
+    const reading = await screen.findByRole('button', { name: 'Filters' })
+    await userEvent.setup().selectOptions(screen.getByRole('combobox', { name: /filter reading/i }), 'starred')
+    expect(reading).toHaveAccessibleName('Filters 1 active')
   })
 
   it('shows an empty todo state', async () => {

@@ -1,8 +1,10 @@
+import { useEffect } from 'react'
 import { AuthProvider, useAuth } from './auth'
 import { Shell } from './components/Shell'
 import { ToastProvider } from './components/Toast'
-import { Link, useLocation } from './router'
+import { Link, navigate, useLocation } from './router'
 import { AuthorizePage, ConnectPage } from './pages/ConnectPage'
+import { AccessPage } from './pages/AccessPage'
 import { AgentsPage } from './pages/AgentsPage'
 import { HelpPage } from './pages/HelpPage'
 import { LoginPage } from './pages/LoginPage'
@@ -34,7 +36,8 @@ function resolve(path: string, query: URLSearchParams): { title: string; page: R
   if (handoff?.[1]) return { title: 'Handoffs', page: <HandoffsPage id={decodeURIComponent(handoff[1])} /> }
   if (path === '/connect') return { title: 'Connect a machine', page: <ConnectPage /> }
   if (path === '/authorize') return { title: 'Access request', page: <AuthorizePage key={query.toString()} query={query.toString()} /> }
-  if (path === '/agents' || path === '/clients') return { title: 'Agents', page: <AgentsPage /> }
+  if (path === '/agents') return { title: 'Agents', page: <AgentsPage /> }
+  if (path === '/access' || path === '/clients') return { title: 'Access', page: <AccessPage /> }
   if (path === '/help') return { title: 'Help', page: <HelpPage /> }
   return {
     title: 'Not found',
@@ -52,6 +55,10 @@ function resolve(path: string, query: URLSearchParams): { title: string; page: R
 function Root() {
   const { state } = useAuth()
   const { path, query } = useLocation()
+  // The old address of the access settings.
+  useEffect(() => {
+    if (path === '/clients') navigate('/access', { replace: true })
+  }, [path])
   if (state.status === 'loading') {
     return (
       <p className="splash muted" aria-busy="true">
