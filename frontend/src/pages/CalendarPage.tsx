@@ -36,6 +36,20 @@ function localDateTime(value: string): string {
   return local.toISOString().slice(0, 16)
 }
 
+const VIEW_KEY = 'ledger.calendar-view'
+
+/**
+ * The view the owner last chose on this browser; otherwise Agenda on a phone, where the
+ * month grid shrinks every item to an unlabeled bar (styles.css, max-width 620px), and Month elsewhere.
+ */
+function initialMode(): CalendarMode {
+  try {
+    const saved = localStorage.getItem(VIEW_KEY)
+    if (saved === 'month' || saved === 'week' || saved === 'agenda') return saved
+  } catch { /* blocked storage: fall back to the screen size */ }
+  return window.matchMedia?.('(max-width: 620px)').matches ? 'agenda' : 'month'
+}
+
 function eventColor(calendarID: string): number {
   let hash = 0
   for (const character of calendarID) hash = (hash * 31 + character.charCodeAt(0)) >>> 0
@@ -281,7 +295,7 @@ function CalendarWorkspace({ connection, onDisconnected }: { connection: Calenda
   const [disconnecting, setDisconnecting] = useState(false)
   const [confirmDisconnect, setConfirmDisconnect] = useState(false)
   const [anchor, setAnchor] = useState(today())
-  const [mode, setMode] = useState<CalendarMode>('month')
+  const [mode, setMode] = useState<CalendarMode>(initialMode)
   const [calendarFilter, setCalendarFilter] = useState('')
   const [editing, setEditing] = useState<CalendarEvent | 'new' | null>(null)
   const toast = useToast()
@@ -354,6 +368,12 @@ function CalendarWorkspace({ connection, onDisconnected }: { connection: Calenda
     }
   }
 
+  // Only a pick from the view switch is remembered; opening a day from the month grid is not.
+  const chooseMode = (next: CalendarMode) => {
+    setMode(next)
+    try { localStorage.setItem(VIEW_KEY, next) } catch { /* private mode: the choice lasts this page */ }
+  }
+
   const disconnect = async () => {
     setDisconnecting(true)
     try {
@@ -421,7 +441,7 @@ function CalendarWorkspace({ connection, onDisconnected }: { connection: Calenda
         </div>
         <fieldset className="segmented">
           <legend className="visually-hidden">View</legend>
-          <div>{(['month', 'week', 'agenda'] as const).map((option) => <label key={option}><input type="radio" name="calendar-view" checked={mode === option} onChange={() => setMode(option)} /><span>{option === 'month' ? 'Month' : option === 'week' ? 'Week' : 'Agenda'}</span></label>)}</div>
+          <div>{(['month', 'week', 'agenda'] as const).map((option) => <label key={option}><input type="radio" name="calendar-view" checked={mode === option} onChange={() => chooseMode(option)} /><span>{option === 'month' ? 'Month' : option === 'week' ? 'Week' : 'Agenda'}</span></label>)}</div>
         </fieldset>
         {hasCalendars && (
           <label className="cal-filter">
