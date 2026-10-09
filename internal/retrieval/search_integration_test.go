@@ -254,7 +254,7 @@ func TestLexicalSearchMatchesRowsTheIndexerNeverChunked(t *testing.T) {
 	if hit := hits[freshRef]; hit.Kind != "note" || hit.ProjectSlug != "beacon" || hit.Snippet != "Measured it.\nSwapped the reranker for a smaller one." {
 		t.Fatalf("unchunked entry = %#v", hit)
 	}
-	if hit := hits["project:atlas"]; hit.Kind != "project" || hit.ProjectSlug != "atlas" || hit.Snippet != "Ship the reranker" {
+	if hit := hits["project:atlas"]; hit.Kind != "project" || hit.ProjectSlug != "atlas" || !strings.Contains(hit.Snippet, "\nGoal: Ship the reranker\n") {
 		t.Fatalf("unchunked project = %#v", hit)
 	}
 	if strings.Join(result.Degraded, ",") != "vector,rerank" {
@@ -281,11 +281,50 @@ func TestLexicalSearchReadsCurrentTextOfRowsQueuedForReindexing(t *testing.T) {
 	}
 	searcher := NewSearcher(db, nil)
 	current, err := searcher.Lexical(ctx, "planner", 10)
-	if err != nil || len(current.Hits) != 1 || current.Hits[0].Ref != "project:atlas" || current.Hits[0].Snippet != "Ship the planner" {
+	if err != nil || len(current.Hits) != 1 || current.Hits[0].Ref != "project:atlas" || !strings.Contains(current.Hits[0].Snippet, "\nGoal: Ship the planner\n") {
 		t.Fatalf("current text = %#v, %v", current, err)
 	}
 	if removed, err := searcher.Lexical(ctx, "reranker", 10); err != nil || len(removed.Hits) != 0 {
 		t.Fatalf("removed words still match the stale chunk: %#v, %v", removed, err)
+	}
+}
+
+// Live text carries every field the indexer makes searchable: a project's tier,
+// deadline, and hours, and an entry's date and author.
+func TestLexicalLiveTextMatchesWhatTheIndexerWouldStore(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "maintain", HoursWK: 12, Deadline: "2026-11-15", Goal: "Ship it"}); err != nil {
+		t.Fatal(err)
+	}
+	entry, err := db.AppendEntry(ctx, "atlas", "note", "Measured the latency.", "codex", "client-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	searcher := NewSearcher(db, nil)
+	for query, want := range map[string]string{"maintain": "project:atlas", "2026-11-15": "project:atlas", "codex": "entry:" + strconv.FormatInt(entry.ID, 10)} {
+		result, err := searcher.Lexical(ctx, query, 10)
+		if err != nil || len(result.Hits) != 1 || result.Hits[0].Ref != want {
+			t.Fatalf("%q = %#v, %v", query, result, err)
+		}
+	}
+	// Built exactly as buildRef builds it, so a fallback hit reads like an indexed one.
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	for _, ref := range []string{"project:atlas", "entry:" + strconv.FormatInt(entry.ID, 10)} {
+		chunks, err := buildRef(ctx, tx, ref)
+		if err != nil || len(chunks) != 1 {
+			t.Fatalf("buildRef(%s) = %#v, %v", ref, chunks, err)
+		}
+		var live string
+		if err := db.Pool.QueryRow(ctx, `SELECT text FROM (`+liveDocuments+`) l WHERE ref=$1`, ref).Scan(&live); err != nil {
+			t.Fatal(err)
+		}
+		if live != chunks[0].Text {
+			t.Fatalf("%s live text %q, indexer %q", ref, live, chunks[0].Text)
+		}
 	}
 }
 

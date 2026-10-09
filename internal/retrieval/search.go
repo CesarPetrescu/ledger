@@ -93,35 +93,38 @@ func (s *Searcher) Search(ctx context.Context, query string, limit int) (SearchR
 	return SearchResult{Hits: hits, Degraded: degraded}, nil
 }
 
+// liveDocuments is the current text of the entries and projects the indexer
+// has not chunked, or must chunk again, written like buildRef writes it.
+const liveDocuments = `
+ SELECT 'entry:'||e.id ref,e.kind,e.slug,format(E'[project: %s (%s) | %s | %s | by %s]\n%s',p.name,e.slug,e.kind,to_char(e.created_at AT TIME ZONE 'UTC','YYYY-MM-DD'),e.source,e.body) text
+ FROM entry e JOIN project p ON p.slug=e.slug
+ WHERE NOT EXISTS(SELECT 1 FROM chunk c WHERE c.ref='entry:'||e.id) OR 'entry:'||e.id IN (SELECT ref FROM chunk_dirty)
+ UNION ALL
+ SELECT 'project:'||p.slug,'project',p.slug,format(E'[project: %s (%s) | tier: %s | deadline: %s]\nHours/week: %s\nType: %s\nDescription: %s\nGoal: %s\nNeeds me: %s\nAutomate: %s\nStack: %s',p.name,p.slug,p.tier,p.deadline,p.hours_wk,p.type,p.description,p.goal,p.needs_me,p.automate,p.stack)
+ FROM project p
+ WHERE NOT EXISTS(SELECT 1 FROM chunk c WHERE c.ref='project:'||p.slug) OR 'project:'||p.slug IN (SELECT ref FROM chunk_dirty)
+`
+
 // Lexical ranks Postgres full-text matches alone and never calls the
 // inference service (the Searcher may have none), so it still answers while
 // ledger-index is unreachable. It reads the stored chunks of any embedding
 // model, skipping chunks of deleted entries and projects that the stopped
 // indexer has not dropped yet. Entries and projects the indexer never chunked,
 // or that changed since (still queued in chunk_dirty), are matched on their
-// live text instead of a missing or stale chunk. Each ref counts once, by its
-// best chunk, before the limit. The result reports the vector and rerank
-// stages as degraded.
+// live text, built like buildRef builds it, instead of a missing or stale
+// chunk. Each ref counts once, by its best chunk, before the limit. The result
+// reports the vector and rerank stages as degraded.
 //
 // ponytail: live rows are tokenized per query with no index; fine while the
 // backlog is small, add a GIN index on entry body if installs run without an
 // indexer for long.
 func (s *Searcher) Lexical(ctx context.Context, query string, limit int) (SearchResult, error) {
 	rows, err := s.db.Pool.Query(ctx, `WITH q AS (SELECT websearch_to_tsquery('public.ledger_ts'::regconfig,$1) q),
-stale AS (SELECT ref FROM chunk_dirty),
-live AS (
- SELECT 'entry:'||e.id ref,e.kind,e.slug,'[project: '||p.name||' ('||e.slug||') | '||e.kind||']'||E'\n'||e.body text
- FROM entry e JOIN project p ON p.slug=e.slug
- WHERE NOT EXISTS(SELECT 1 FROM chunk c WHERE c.ref='entry:'||e.id) OR 'entry:'||e.id IN (SELECT ref FROM stale)
- UNION ALL
- SELECT 'project:'||p.slug,'project',p.slug,'[project: '||p.name||' ('||p.slug||')]'||E'\n'||concat_ws(E'\n',NULLIF(p.type,''),NULLIF(p.description,''),NULLIF(p.goal,''),NULLIF(p.needs_me,''),NULLIF(p.automate,''),NULLIF(p.stack,''))
- FROM project p
- WHERE NOT EXISTS(SELECT 1 FROM chunk c WHERE c.ref='project:'||p.slug) OR 'project:'||p.slug IN (SELECT ref FROM stale)
-),
+live AS (`+liveDocuments+`),
 matches AS (
  SELECT c.ref,c.ord,COALESCE(e.kind,'project') kind,COALESCE(e.slug,substring(c.ref from 9)) slug,c.text,ts_rank_cd(c.tsv,q.q) score
  FROM q,chunk c LEFT JOIN entry e ON c.ref='entry:'||e.id::text
- WHERE (e.id IS NOT NULL OR EXISTS(SELECT 1 FROM project p WHERE c.ref='project:'||p.slug)) AND c.ref NOT IN (SELECT ref FROM stale) AND c.tsv @@ q.q
+ WHERE (e.id IS NOT NULL OR EXISTS(SELECT 1 FROM project p WHERE c.ref='project:'||p.slug)) AND c.ref NOT IN (SELECT ref FROM chunk_dirty) AND c.tsv @@ q.q
  UNION ALL
  SELECT l.ref,0,l.kind,l.slug,l.text,ts_rank_cd(to_tsvector('public.ledger_ts'::regconfig,l.text),q.q)
  FROM q,live l WHERE to_tsvector('public.ledger_ts'::regconfig,l.text) @@ q.q
