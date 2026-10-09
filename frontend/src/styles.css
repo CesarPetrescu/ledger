@@ -826,7 +826,9 @@ label > textarea {
 .clients { border-top: 1px solid var(--border); }
 .clients td ul li + li { margin-top: 4px; }
 
-.entry-body { max-width: 76ch; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-body); }
+.entry-body { max-width: 76ch; overflow-wrap: anywhere; color: var(--text-body); }
+/* Entries are rendered as Markdown; a line break the agent typed still breaks the line. */
+.entry-body .markdown p { white-space: pre-line; }
 .clamp { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .rank { min-width: 1.5em; color: var(--text-faint); font-family: var(--mono); }
 .score { margin-left: auto; }
@@ -1017,9 +1019,7 @@ label > textarea {
 .related-title { margin: 0 0 4px; color: var(--text-faint); font-size: 0.67rem; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; }
 .related ul { margin: 0; padding: 0; list-style: none; font-size: 0.82rem; }
 
-/* Help, reasons, and agents */
-.why-here { margin: 4px 0 0; color: var(--text-soft); font-size: 0.8rem; }
-.why-here::before { content: 'Why: '; color: var(--text-faint); font-weight: 650; }
+/* Help and agents */
 .legend-button { font-size: 0.8rem; }
 .mark-all { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0 0 16px; }
 .dialog-wide { width: min(620px, calc(100vw - 32px)); }
@@ -1439,7 +1439,6 @@ label > textarea {
 .entry-row[aria-current='true'] { margin: 0 -12px; padding-left: 12px; padding-right: 12px; background: var(--surface-accent); box-shadow: inset 3px 0 0 var(--accent); }
 .entry-row[aria-current='true'] .entry-row-title { color: var(--accent); }
 .entry-split[data-open='true'] .entry-row-gist { -webkit-line-clamp: 1; }
-.entry-split[data-open='true'] .why-here { display: none; }
 .row-note { padding: 0 6px; border: 1px solid var(--border); color: var(--text-soft); font-size: 0.7rem; line-height: 1.6; }
 
 .entry-detail { display: grid; gap: 16px; }
@@ -1455,8 +1454,7 @@ label > textarea {
 
 .entry-question { padding: 14px 16px; border-left: 3px solid var(--tone-amber); background: var(--tone-amber-bg); }
 .entry-question .eyebrow { margin: 0 0 4px; color: var(--tone-amber); }
-.entry-question-text { margin: 0 0 4px; color: var(--text); font-size: 1rem; font-weight: 600; line-height: 1.45; }
-.entry-question .muted { margin: 0; }
+.entry-question-text { margin: 0; color: var(--text); font-size: 1rem; font-weight: 600; line-height: 1.45; }
 
 .entry-detail-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 12px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
 .entry-detail-actions-end { margin-left: auto; }

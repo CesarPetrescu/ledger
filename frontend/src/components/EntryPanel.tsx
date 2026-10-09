@@ -3,9 +3,10 @@ import { api, describeError, OWNER_SOURCE, type HistoryEvent, type TableEntry } 
 import { useResource } from '../hooks/useResource'
 import { useUndo } from '../hooks/useUndo'
 import { refreshAll } from '../live'
-import { DeleteEntry, Facts, FocusBadges, LIVE, RelatedList, TodoState, titleOf, useOwnerAction, whyHere } from './entries'
+import { DeleteEntry, Facts, FocusBadges, LIVE, RelatedList, TodoState, titleOf, useOwnerAction } from './entries'
 import { LegendButton } from './help'
 import { LabelEditor } from './LabelEditor'
+import { MarkdownText, plainText } from './Markdown'
 import { Link, navigate, useLocation } from '../router'
 import { useToast } from './Toast'
 import { ErrorState, Icon, KindBadge, Loading, StaleNotice, Timestamp } from './ui'
@@ -56,6 +57,8 @@ export function EntrySplit({ children }: { children: ReactNode }) {
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || isTyping(event.target)) return
       if (document.querySelector('dialog[open]')) return
+      // An open ⋯ menu owns its keys: Escape closes the menu, not the entry.
+      if (event.target instanceof Element && event.target.closest('[role="menu"]')) return
       if (event.key === 'Escape') {
         event.preventDefault()
         close()
@@ -126,15 +129,14 @@ export function EntryDetail({ id, onClose }: { id: string; onClose?: () => void 
         </p>
         <h2 ref={headingRef} tabIndex={-1}>{titleOf(e)}</h2>
         <p className="entry-detail-badges"><FocusBadges entry={e} /> <LegendButton /></p>
-        {meta?.gist && <p className="lede">{meta.gist}</p>}
+        {meta?.gist && <p className="lede">{plainText(meta.gist)}</p>}
         {e.reply_to && <p className="entry-detail-note">A reply to <Link to={`/entries/${e.reply_to}`}>an earlier entry</Link>.</p>}
       </header>
 
       {asking && (
         <section className="entry-question" aria-label="Question for you">
           <p className="eyebrow">{e.source} asks you</p>
-          <p className="entry-question-text">{meta?.ask}</p>
-          {whyHere(e) && <p className="muted small">{whyHere(e)}</p>}
+          <p className="entry-question-text">{plainText(meta?.ask ?? '')}</p>
         </section>
       )}
 
@@ -154,7 +156,7 @@ export function EntryDetail({ id, onClose }: { id: string; onClose?: () => void 
 
       <details className="entry-detail-section" open={!meta?.gist}>
         <summary>Full text</summary>
-        <p className="entry-body">{e.body}</p>
+        <div className="entry-body"><MarkdownText text={e.body} /></div>
         {meta && meta.refs.length > 0 && <ul className="refs" aria-label="References">{meta.refs.map((ref) => <li key={ref}><code>{ref}</code></li>)}</ul>}
       </details>
 

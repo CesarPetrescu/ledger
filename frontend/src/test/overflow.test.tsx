@@ -25,6 +25,15 @@ describe('overflow menu', () => {
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })
 
+  it('hands focus back to its button before running an item, so a dialog the item opens returns focus there', async () => {
+    let focused: Element | null = null
+    render(<OverflowMenu label="More actions for this entry" items={[{ label: 'Delete entry', onSelect: () => { focused = document.activeElement }, danger: true }]} />)
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'More actions for this entry' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Delete entry' }))
+    expect(focused).toBe(screen.getByRole('button', { name: 'More actions for this entry' }))
+  })
+
   it('names every research state the same way', () => {
     expect(researchStatusLabel('review')).toBe('Ready for review')
     expect(researchStatusLabel('question')).toBe('Question for you')

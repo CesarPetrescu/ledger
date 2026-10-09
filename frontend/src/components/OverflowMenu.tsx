@@ -9,7 +9,8 @@ export interface OverflowItem {
 }
 
 /** A "⋯" button holding secondary actions, such as Delete, so they stay out of the main row. Escape or a
- * click outside closes it; the menu's first item takes focus when it opens. */
+ * click outside closes it; the menu's first item takes focus when it opens. Choosing an item hands focus back to
+ * the button first, so a confirmation dialog it opens returns focus there when it closes. */
 export function OverflowMenu({ label, items }: { label: string; items: OverflowItem[] }) {
   const [open, setOpen] = useState(false)
   const root = useRef<HTMLDivElement>(null)
@@ -36,7 +37,7 @@ export function OverflowMenu({ label, items }: { label: string; items: OverflowI
         <div role="menu" aria-label={label} className="overflow-menu-list">
           {items.map((item) => (
             <button key={item.label} type="button" role="menuitem" className={item.danger ? 'overflow-menu-danger' : undefined} disabled={item.disabled}
-              onClick={() => { setOpen(false); item.onSelect() }}>
+              onClick={() => { setOpen(false); button.current?.focus(); item.onSelect() }}>
               {item.label}
             </button>
           ))}

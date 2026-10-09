@@ -2,6 +2,7 @@ import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import type { HistoryEvent, TableEntry } from '../api'
+import { plainText } from '../components/Markdown'
 import { authenticatedSession, mockApi, noteEntry, renderApp } from './helpers'
 
 const owner = { read: false, starred: false, handled: false }
@@ -20,6 +21,16 @@ const history: HistoryEvent[] = [
 ]
 const ask: TableEntry = { ...noteEntry, owner, id: '70', kind: 'note', source: 'claude-code', created_at: now, project_name: 'Atlas', meta: { title: 'Pricing', tags: [], refs: [], origin: 'model', ask: 'Confirm the pricing claims' } }
 
+describe('plain text from Markdown', () => {
+  it('drops the syntax and keeps the words, leaving marks inside words and between spaces', () => {
+    expect(plainText('Use **Qwen3 reranker** for…')).toBe('Use Qwen3 reranker for…')
+    expect(plainText('## Pick `pgvector`, see [the docs](https://example.com)')).toBe('Pick pgvector, see the docs')
+    expect(plainText('- [ ] *really* _soon_ ~~not~~ __now__')).toBe('really soon not now')
+    expect(plainText('> 1. snake_case_name is 2 * 3')).toBe('1. snake_case_name is 2 * 3')
+    expect(plainText('Use PostgreSQL <b>everywhere</b>.')).toBe('Use PostgreSQL <b>everywhere</b>.')
+  })
+})
+
 describe('entry page', () => {
   it('shows one entry whole: labels, full text, where it came from, its history, related entries, and its actions', async () => {
     const { calls } = mockApi({
@@ -32,7 +43,7 @@ describe('entry page', () => {
     renderApp('/admin/entries/50')
     expect(await screen.findByRole('heading', { name: 'Add CSV export', level: 2 })).toBeInTheDocument()
     expect(screen.getByText('Phones need spreadsheets.')).toBeInTheDocument()
-    expect(screen.getByText('high')).toBeInTheDocument()
+    expect(screen.getByText('High')).toBeInTheDocument()
     expect(screen.getAllByRole('link', { name: 'Atlas' })[0]).toHaveAttribute('href', '/admin/projects/atlas')
     expect(screen.getByRole('link', { name: 'export' })).toHaveAttribute('href', '/admin/table?view=activity&tag=export')
     expect(screen.getByText(/phones…/)).toBeInTheDocument()
@@ -61,6 +72,8 @@ describe('entry page', () => {
     const question = await screen.findByRole('region', { name: 'Question for you' })
     expect(question).toHaveTextContent('claude-code asks you')
     expect(question).toHaveTextContent('Confirm the pricing claims')
+    // Who asked and when is already in the line above; no "waiting on your answer" repeat.
+    expect(question).not.toHaveTextContent(/waiting on your answer/)
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: 'Send answer' }))
     expect(screen.getByRole('alert')).toHaveTextContent('Write a reply first.')
@@ -98,10 +111,48 @@ describe('entry page', () => {
     })
     renderApp('/admin/entries/50')
     const user = userEvent.setup()
-    await user.click(await screen.findByRole('button', { name: /delete entry/i }))
+    // Delete lives in the ⋯ menu, out of the main actions.
+    await user.click(await screen.findByRole('button', { name: 'More actions for this entry' }))
+    expect(screen.queryByRole('button', { name: /delete entry/i })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('menuitem', { name: 'Delete entry' }))
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete entry' }))
     expect(await screen.findByText('Entry moved to Trash.')).toBeInTheDocument()
     expect(window.location.pathname).toBe('/admin/projects/atlas')
+  })
+
+  it('renders the full text as Markdown, without raw HTML, and shows the title and summary as plain text', async () => {
+    const formatted: TableEntry = {
+      ...todo, id: '80', body: 'Use **Qwen3 reranker** for search.\nIt beats `bge` on recall.\n\n- [docs](https://example.com/rerank)\n\n<img src=x onerror=alert(1)><script>alert(1)</script>',
+      meta: { ...todo.meta!, title: 'Use **Qwen3 reranker**', gist: 'Beats `bge` on recall.', priority: 'normal' },
+    }
+    mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/entries/80': { body: { ...formatted, repeats: [], repeats_total: 0 } },
+      'GET /admin/api/entries/80/history': { body: { history: [] } },
+      'GET /admin/api/entries/80/related': { body: { related: [] } },
+    })
+    renderApp('/admin/entries/80')
+    expect(await screen.findByRole('heading', { name: 'Use Qwen3 reranker', level: 2 })).toBeInTheDocument()
+    expect(screen.getByText('Beats bge on recall.')).toHaveClass('lede')
+    const body = document.querySelector('.entry-body')!
+    expect(within(body as HTMLElement).getByText('Qwen3 reranker').tagName).toBe('STRONG')
+    expect(within(body as HTMLElement).getByText('bge').tagName).toBe('CODE')
+    expect(within(body as HTMLElement).getByRole('link', { name: 'docs' })).toHaveAttribute('rel', 'noopener noreferrer')
+    expect(body).not.toHaveTextContent('**')
+    expect(body.querySelector('script, img')).toBeNull()
+  })
+
+  it('shows one emphasis at most: High, else Important, else Low', async () => {
+    const both: TableEntry = { ...todo, id: '81', meta: { ...todo.meta!, importance: 'important' } }
+    mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/entries/81': { body: { ...both, repeats: [], repeats_total: 0 } },
+      'GET /admin/api/entries/81/history': { body: { history: [] } },
+      'GET /admin/api/entries/81/related': { body: { related: [] } },
+    })
+    renderApp('/admin/entries/81')
+    const badges = await screen.findByText('High')
+    expect(badges.closest('.focus-badges')).not.toHaveTextContent('Important')
   })
 
   it('explains a missing entry and points to Trash', async () => {
