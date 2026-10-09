@@ -1368,6 +1368,8 @@ label > textarea {
   .search-filter-label { display: none; }
   .search-scope,
   .search-filter-toggle { padding: 10px 9px; }
+  /* Icon-only on phones: keep a full touch target. */
+  .search-filter-toggle { min-width: var(--control); justify-content: center; }
   .search-filters { grid-template-columns: 1fr; }
   .search-summary { margin-bottom: 14px; font-size: 0.76rem; }
   .result-group + .result-group { margin-top: 16px; }

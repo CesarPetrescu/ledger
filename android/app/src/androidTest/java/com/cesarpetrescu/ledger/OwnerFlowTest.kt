@@ -360,6 +360,8 @@ class OwnerFlowTest {
             tap("Revoke access")
             tap("Cancel")
             ui.onNodeWithContentDescription("Back").performClick()
+            // Sign-out sits under its own heading, not inside Access.
+            scrollTo("This phone")
             scrollTo("Sign out")
             tap("Sign out")
             ui.onNode(hasText("Sign out") and hasClickAction() and hasAnyAncestor(isDialog())).performClick()

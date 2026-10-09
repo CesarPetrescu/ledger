@@ -328,12 +328,17 @@ fun CalendarSettings(model: LedgerModel) {
             } else {
                 item { Text("Connect Nextcloud", style = MaterialTheme.typography.headlineSmall) }
                 item { Field("Nextcloud server address", url, { url = it }, placeholder = "https://cloud.example.com") }
-                item { Button(enabled = !model.busy && url.isNotBlank(), onClick = {
+                val connect = {
                     var result = JSONObject()
                     model.act("Complete the sign-in in your browser", after = { pending = result.text("id"); loginURL = result.text("login_url"); openBrowser(context, loginURL, model) }) {
                         result = it.request("POST", "/calendar/connect", json("server_url" to url.trim()))
                     }
-                }) { Text("Connect Nextcloud") } }
+                }
+                // While a sign-in is pending, "Finish connecting" is the one filled action; starting over stays outlined.
+                item {
+                    if (pending.isBlank()) Button(enabled = !model.busy && url.isNotBlank(), onClick = connect) { Text("Connect Nextcloud") }
+                    else OutlinedButton(enabled = !model.busy && url.isNotBlank(), onClick = connect) { Text("Connect Nextcloud") }
+                }
                 if (pending.isNotBlank()) {
                     item { Text("After approving access in the browser, return here and finish connecting.") }
                     item { OutlinedButton(onClick = { openBrowser(context, loginURL, model) }) { Text("Open sign-in again") } }

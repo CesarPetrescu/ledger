@@ -161,4 +161,11 @@ describe('search', () => {
       { q: 'postgres', limit: 20, kind: 'entry' },
     ])
   })
+
+  it('keeps the icon-only Filters toggle a full touch target on phones', () => {
+    // jsdom applies no media queries, so read the phone rule itself: the label hides at 620px.
+    const styles = Object.values(import.meta.glob<string>('../styles.css', { query: '?raw', import: 'default', eager: true }))[0] ?? ''
+    const phone = styles.slice(styles.indexOf('.search-filter-label { display: none; }'))
+    expect(phone).toMatch(/\.search-filter-toggle \{[^}]*min-width: var\(--control\)/)
+  })
 })
