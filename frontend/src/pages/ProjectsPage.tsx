@@ -2,8 +2,9 @@ import { useMemo, useState, type FormEvent, useLayoutEffect, useRef } from 'reac
 import { api, describeError, TIERS, type DeletionPreview, type Project, type ProjectInput, type ProjectRepo, type ProjectSummary, type RepoLinkInput } from '../api'
 import { useToast } from '../components/Toast'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import { OverflowMenu } from '../components/OverflowMenu'
 import { useUndo } from '../hooks/useUndo'
-import { EmptyState, ErrorState, Icon, Loading, StaleNotice, TierBadge, Timestamp } from '../components/ui'
+import { EmptyState, ErrorState, Icon, Loading, ResearchStatusBadge, StaleNotice, TierBadge, Timestamp } from '../components/ui'
 import { EntriesView, HealthBadge, LIVE, ProjectSummaryTable } from '../components/entries'
 import { EntrySplit, writerName } from '../components/EntryPanel'
 import { useResource } from '../hooks/useResource'
@@ -168,7 +169,19 @@ function ProjectHandoffs({ slug }: { slug: string }) {
   return (
     <section aria-label="Project handoffs" className="project-related">
       <div className="section-head"><h2 className="section-title">Handoffs</h2><Link className="btn btn-primary" to={`/handoffs/new?project=${encodeURIComponent(slug)}`}><Icon name="plus" /> New handoff</Link></div>
-      {handoffs.data.handoffs.length === 0 ? <p className="muted">No handoffs are linked to this project.</p> : <ul>{handoffs.data.handoffs.map((handoff) => <li key={handoff.id}><Link to={`/handoffs/${handoff.id}`}><strong>{handoff.title}</strong><span>{handoff.description}</span><span className="muted small">Updated <Timestamp iso={handoff.updated_at} /></span></Link></li>)}</ul>}
+      {handoffs.data.handoffs.length === 0 ? <p className="muted">No handoffs are linked to this project.</p> : (
+        <ul>
+          {handoffs.data.handoffs.map((handoff) => (
+            <li key={handoff.id}>
+              <Link to={`/handoffs/${handoff.id}`}>
+                <strong>{handoff.kind === 'research' && <span className="badge research-badge">Research</span>}{handoff.title}</strong>
+                {handoff.description && <span>{handoff.description}</span>}
+                <span className="muted small project-handoff-meta">{handoff.research_status && <ResearchStatusBadge status={handoff.research_status} />}<span>Updated <Timestamp iso={handoff.updated_at} /></span></span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
       {handoffs.data.next_before && <button type="button" className="btn" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? 'Loading…' : 'Load more handoffs'}</button>}
       {error && <p className="field-error" role="alert">{error}</p>}
     </section>
@@ -293,7 +306,7 @@ function ProjectRepos({ slug }: { slug: string }) {
   )
 }
 
-/** Deletes a project after the owner types its slug; it goes to Trash. */
+/** The project's "⋯" menu. Delete lives here, out of the main row; it asks for the slug and moves the project to Trash. */
 function DeleteProject({ project }: { project: Project }) {
   const [open, setOpen] = useState(false)
   const [typed, setTyped] = useState('')
@@ -326,9 +339,7 @@ function DeleteProject({ project }: { project: Project }) {
   }
   return (
     <>
-      <button type="button" className="btn btn-danger-quiet" onClick={() => void start()}>
-        <Icon name="trash" /> Delete project
-      </button>
+      <OverflowMenu label={`More actions for ${project.name}`} items={[{ label: 'Delete project', onSelect: () => void start(), danger: true }]} />
       <ConfirmDialog open={open} title={`Delete ${project.name}?`} confirmLabel="Delete project" busy={busy} confirmDisabled={typed !== project.slug}
         onConfirm={() => void confirm()} onCancel={() => setOpen(false)}>
         <p>
