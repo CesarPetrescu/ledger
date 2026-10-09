@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { api, describeError, ENTRY_KINDS, OWNER_SOURCE, type EntryFilter, type OwnerPatch, type ProjectSummary, type TableEntry } from '../api'
+import { api, describeError, ENTRY_KINDS, OWNER_SOURCE, type EntryFilter, type OwnerPatch, type TableEntry } from '../api'
 import { useResource } from '../hooks/useResource'
 import { useUndo } from '../hooks/useUndo'
 import { refreshAll } from '../live'
@@ -9,7 +9,7 @@ import { plainText } from './Markdown'
 import { OverflowMenu } from './OverflowMenu'
 import { Link } from '../router'
 import { useToast } from './Toast'
-import { EmptyState, ErrorState, Icon, KindBadge, Loading, StaleNotice, TierBadge, Timestamp } from './ui'
+import { EmptyState, ErrorState, Icon, KindBadge, Loading, StaleNotice, Timestamp } from './ui'
 
 // Entry lists shared by the Inbox, the Table, project pages, and entry pages.
 
@@ -576,57 +576,6 @@ export function InboxView() {
         </section>
       )}
     </div>
-  )
-}
-
-export function ProjectSummaryTable({ projects }: { projects: ProjectSummary[] }) {
-  if (projects.length === 0) {
-    return <EmptyState><p>No projects yet.</p><Link className="btn btn-primary" to="/projects/_new">Create a project</Link></EmptyState>
-  }
-  return (
-    <table className="table summary-table">
-      <thead>
-        <tr>
-          <th scope="col">Project</th>
-          <th scope="col">This week</th>
-          <th scope="col" className="num">Open todos</th>
-          <th scope="col">Last 7 days</th>
-          <th scope="col">Deadline</th>
-        </tr>
-      </thead>
-      <tbody>
-        {projects.map((project) => (
-          <tr key={project.slug}>
-            <td data-label="Project"><div>
-              <Link to={`/projects/${encodeURIComponent(project.slug)}`}>{project.name}</Link> <TierBadge tier={project.tier} /> <HealthBadge state={project.status_state} />
-              {project.needs_you > 0 && <p className="small"><Link to="/">{project.needs_you} {project.needs_you === 1 ? 'thing needs' : 'things need'} you</Link></p>}
-              {project.needs_me && <p className="small needs-me clamp" title={project.needs_me}>Needs you: {project.needs_me}</p>}
-            </div></td>
-            <td data-label="This week"><div>
-              {project.digest ? <p className="clamp digest" title={plainText(project.digest)}>{plainText(project.digest)}</p> : !project.status_at && <span className="muted">No status yet</span>}
-              {project.status_at && (
-                <p className={project.digest ? 'muted small latest-status' : 'status-text'}>
-                  {project.digest && 'Latest: '}<span className={project.digest ? undefined : 'clamp'}>{plainText(project.status_title || project.status_body)}</span>
-                  <span className="muted small"> · <Timestamp iso={project.status_at} /> · {project.status_source}</span>
-                </p>
-              )}
-            </div></td>
-            <td data-label="Open todos" className="num"><div>
-              {project.open_todos > 0 ? <Link to={`/projects/${encodeURIComponent(project.slug)}/todos`}>{project.open_todos}</Link> : <span className="muted">0</span>}
-            </div></td>
-            <td data-label="Last 7 days"><div>
-              {project.week_entries > 0 ? (
-                <>
-                  {project.week_entries} {project.week_entries === 1 ? 'entry' : 'entries'}
-                  <span className="agents">{project.week_agents.map((agent) => <code key={agent}>{agent}</code>)}</span>
-                </>
-              ) : <span className="muted">Quiet{project.last_entry_at ? <> · last <Timestamp iso={project.last_entry_at} /></> : ''}</span>}
-            </div></td>
-            <td data-label="Deadline"><div>{project.deadline || <span className="muted">—</span>}</div></td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
   )
 }
 

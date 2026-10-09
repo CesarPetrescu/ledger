@@ -4,14 +4,25 @@ import { useToast } from '../components/Toast'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { OverflowMenu } from '../components/OverflowMenu'
 import { useUndo } from '../hooks/useUndo'
-import { EmptyState, ErrorState, Icon, Loading, ResearchStatusBadge, StaleNotice, TierBadge, Timestamp } from '../components/ui'
-import { EntriesView, HealthBadge, LIVE, ProjectSummaryTable } from '../components/entries'
+import { ErrorState, Icon, Loading, ResearchStatusBadge, StaleNotice, TierBadge, Timestamp } from '../components/ui'
+import { EntriesView, HealthBadge, LIVE } from '../components/entries'
 import { EntrySplit, writerName } from '../components/EntryPanel'
 import { plainText } from '../components/Markdown'
 import { useResource } from '../hooks/useResource'
 import { Link, navigate } from '../router'
 
 const SLUG_PATTERN = '[a-z0-9][a-z0-9-]{1,63}'
+const deadlineFormat = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+
+/** A deadline that is a real date reads as a short date ("15 Nov 2026"); free text such as "Friday" stays as typed. */
+export function deadlineLabel(value: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (!match) return value
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])]
+  const date = new Date(year, month - 1, day)
+  // An impossible day such as 31 September rolls over; show it as typed.
+  return date.getMonth() === month - 1 && date.getDate() === day ? deadlineFormat.format(date) : value
+}
 
 interface ProjectFormProps {
   mode: 'create' | 'edit'
@@ -231,8 +242,17 @@ function ProjectRepos({ slug }: { slug: string }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [target, setTarget] = useState<ProjectRepo | null>(null)
+  // The form stays folded behind its button until asked for, and folds again once a repository is linked.
+  const [adding, setAdding] = useState(false)
+  const refocus = useRef(false)
   const toast = useToast()
   const set = (key: keyof RepoLinkInput, value: string) => setInput((current) => ({ ...current, [key]: value }))
+  const fold = () => {
+    setAdding(false)
+    setError('')
+    // The button comes back where the form was; focus goes to it rather than to the page.
+    refocus.current = true
+  }
 
   const link = async (event: FormEvent) => {
     event.preventDefault()
@@ -242,6 +262,7 @@ function ProjectRepos({ slug }: { slug: string }) {
     try {
       const repo = await api.linkProjectRepo(slug, input)
       setInput(EMPTY_REPO)
+      fold()
       // A live refresh may already have brought it in.
       repos.update((current) => current.some((item) => item.id === repo.id) ? current : [...current, repo])
       toast(`Linked ${repo.repo}.`)
@@ -271,8 +292,33 @@ function ProjectRepos({ slug }: { slug: string }) {
   if (!repos.data) return <ErrorState message="Couldn't load repositories." onRetry={repos.reload} />
   return (
     <section aria-label="Project repositories" className="project-related">
-      <h2 className="section-title">Repositories</h2>
-      <p className="muted small">Where this project's code lives; link every repository it spans. Agents see them with the project and clone with their own Git access. With GitHub sync on (<Link to="/access">Access</Link>), the latest commit, open pull requests, and release show here and for agents.</p>
+      <div className="section-head">
+        <h2 className="section-title">Repositories</h2>
+        {!adding && (
+          <button type="button" className={repos.data.length === 0 ? 'btn btn-primary' : 'btn'} onClick={() => setAdding(true)}
+            ref={(button) => { if (button && refocus.current) { refocus.current = false; button.focus() } }}>
+            <Icon name="plus" /> Link a repository
+          </button>
+        )}
+      </div>
+      <p className="muted small repo-hint">Where this project's code lives; link every repository it spans. Agents see them with the project and clone with their own Git access. With GitHub sync on (in <Link to="/access">Access</Link>), the latest commit, open pull requests, and release show here and for agents.</p>
+      {adding && (
+        <form className="form repo-form" aria-label="Link a repository" onSubmit={(event) => void link(event)}>
+          <div className="form-grid">
+            <label className="span-2">Repository URL<input autoFocus required maxLength={500} value={input.url} onChange={(event) => set('url', event.target.value)} placeholder="https://github.com/owner/repo or git@github.com:owner/repo.git" /></label>
+            <label>Role<input maxLength={60} value={input.role} onChange={(event) => set('role', event.target.value)} placeholder="backend, android, docs…" /></label>
+            <label>Branch<input maxLength={200} value={input.branch} onChange={(event) => set('branch', event.target.value)} placeholder="Default branch" /></label>
+            <label>Folder<input maxLength={300} value={input.path} onChange={(event) => set('path', event.target.value)} placeholder="For a monorepo" /></label>
+            <label>Note<input maxLength={500} value={input.note} onChange={(event) => set('note', event.target.value)} /></label>
+          </div>
+          {error && <p className="field-error" role="alert">{error}</p>}
+          <div className="form-actions">
+            <span className="muted small">Never paste a token into the URL.</span>
+            <button type="button" className="btn" disabled={busy} onClick={fold}>Cancel</button>
+            <button type="submit" className="btn btn-primary" disabled={busy || !input.url.trim()}>Link repository</button>
+          </div>
+        </form>
+      )}
       {repos.data.length === 0 ? <p className="muted">No repositories linked yet.</p> : (
         <ul className="repo-list">
           {repos.data.map((repo) => (
@@ -289,17 +335,6 @@ function ProjectRepos({ slug }: { slug: string }) {
           ))}
         </ul>
       )}
-      <form className="form repo-form" aria-label="Link a repository" onSubmit={(event) => void link(event)}>
-        <div className="form-grid">
-          <label className="span-2">Repository URL<input required maxLength={500} value={input.url} onChange={(event) => set('url', event.target.value)} placeholder="https://github.com/owner/repo or git@github.com:owner/repo.git" /></label>
-          <label>Role<input maxLength={60} value={input.role} onChange={(event) => set('role', event.target.value)} placeholder="backend, android, docs…" /></label>
-          <label>Branch<input maxLength={200} value={input.branch} onChange={(event) => set('branch', event.target.value)} placeholder="Default branch" /></label>
-          <label>Folder<input maxLength={300} value={input.path} onChange={(event) => set('path', event.target.value)} placeholder="For a monorepo" /></label>
-          <label>Note<input maxLength={500} value={input.note} onChange={(event) => set('note', event.target.value)} /></label>
-        </div>
-        {error && <p className="field-error" role="alert">{error}</p>}
-        <div className="form-actions"><span className="muted small">Never paste a token into the URL.</span><button type="submit" className="btn btn-primary" disabled={busy || !input.url.trim()}>Link repository</button></div>
-      </form>
       <ConfirmDialog open={target !== null} title={`Unlink ${target?.repo ?? ''}?`} confirmLabel="Unlink" busy={busy} onCancel={() => setTarget(null)} onConfirm={() => void unlink()}>
         <p>Agents will no longer see this repository with the project. The repository itself is not touched.</p>
       </ConfirmDialog>
@@ -461,7 +496,7 @@ function ProjectDetail({ slug, view, summary, onRetrySummary, onSaved }: { slug:
             <code>{project.slug}</code>
             <TierBadge tier={project.tier} />
             <span>{project.hours_wk} h/wk</span>
-            {project.deadline && <span>Due {project.deadline}</span>}
+            {project.deadline && <span>Due {deadlineLabel(project.deadline)}</span>}
           </div>
           {project.goal && <p className="project-goal">{project.goal}</p>}
         </div>
@@ -492,13 +527,16 @@ function ProjectDetail({ slug, view, summary, onRetrySummary, onSaved }: { slug:
           {/* The summary comes from a separate request that can fail or go stale on its own. */}
           {onRetrySummary && <StaleNotice message={summary ? "This project's week, health, and open questions may be out of date." : "Couldn't load this project's week, health, and open questions."} onRetry={onRetrySummary} />}
           <ProjectStatus slug={slug} summary={summary} />
-          <nav className="detail-tabs" aria-label="Project sections">
-            {PROJECT_TABS.map((tab) => (
-              <Link key={tab.id} to={base + tab.path} aria-current={view === tab.id ? 'page' : undefined}>
-                {tab.label}{tab.id === 'todos' && summary && summary.open_todos > 0 && <span className="count">{summary.open_todos}</span>}
-              </Link>
-            ))}
-          </nav>
+          {/* The frame is the width the tabs measure against: where one row would not fit, they wrap into full rows. */}
+          <div className="detail-tabs-frame">
+            <nav className="detail-tabs" aria-label="Project sections">
+              {PROJECT_TABS.map((tab) => (
+                <Link key={tab.id} to={base + tab.path} aria-current={view === tab.id ? 'page' : undefined}>
+                  {tab.label}{tab.id === 'todos' && summary && summary.open_todos > 0 && <span className="count">{summary.open_todos}</span>}
+                </Link>
+              ))}
+            </nav>
+          </div>
           {view === 'handoffs' ? <ProjectHandoffs slug={slug} />
             : view === 'files' ? <ProjectFiles slug={slug} />
             : view === 'repos' ? <ProjectRepos slug={slug} />
@@ -518,6 +556,26 @@ function ProjectDetail({ slug, view, summary, onRetrySummary, onSaved }: { slug:
         </>
       )}
     </article>
+  )
+}
+
+/** One project in the full list: its week in a line or two, then what is open, what waits for you, when it is due, and when it last moved. */
+function ProjectRow({ project, summary }: { project: Project; summary: ProjectSummary | undefined }) {
+  const headline = summary && (summary.digest || summary.status_title || summary.status_body)
+  const deadline = project.deadline && deadlineLabel(project.deadline)
+  return (
+    <li>
+      <Link to={`/projects/${project.slug}`}>
+        <span className="project-row-main">
+          <span className="project-row-title"><span className="project-name">{project.name}</span> <TierBadge tier={project.tier} /> <HealthBadge state={summary?.status_state ?? ''} /></span>
+          {summary && <span className={headline ? 'project-headline' : 'project-headline muted'}>{headline ? plainText(headline) : 'No status yet'}</span>}
+        </span>
+        <span className="project-fact">{summary && (summary.open_todos > 0 ? `${summary.open_todos} open ${summary.open_todos === 1 ? 'todo' : 'todos'}` : <span className="muted">No open todos</span>)}</span>
+        <span className="project-fact">{summary && summary.needs_you > 0 && <span className="badge" data-focus="ask">{summary.needs_you} for you</span>}</span>
+        <span className="project-fact" title={deadline || undefined}>{deadline && `Due ${deadline}`}</span>
+        <span className="project-fact muted">{project.last_entry_at ? <Timestamp iso={project.last_entry_at} /> : 'No entries'}</span>
+      </Link>
+    </li>
   )
 }
 
@@ -544,10 +602,11 @@ export function ProjectsPage({ slug, view = 'activity' }: { slug?: string | unde
     // The summaries carry the name, tier, and deadline too.
     summaries.reload()
   }
-  const mode = slug ? 'detail' : 'list'
+  // With no project open the list fills the page and each row carries the project's week.
+  const full = !slug
 
   return (
-    <div className="split" data-mode={mode}>
+    <div className="split projects" data-mode={full ? 'list' : 'detail'}>
       <section className="pane pane-list" aria-label="Project list">
         <header className="page-head">
           <h1>Projects</h1>
@@ -579,11 +638,16 @@ export function ProjectsPage({ slug, view = 'activity' }: { slug?: string | unde
         {list.loading && <Loading label="Loading projects…" />}
         {!list.loading && !list.data && <ErrorState message="Couldn't load projects." onRetry={list.reload} />}
         {list.stale && <StaleNotice message="Project list may be out of date." onRetry={list.reload} />}
-        {list.data && visible.length === 0 && <p className="muted">No projects match.</p>}
+        {/* A project page says this itself; the full list still works without the week. */}
+        {full && list.data && !summaries.loading && (!summaries.data || summaries.stale) && (
+          <StaleNotice message={summaries.data ? 'This week may be out of date.' : "Couldn't load this week's project summary."} onRetry={summaries.reload} />
+        )}
+        {list.data && visible.length === 0 && <p className="muted">{list.data.length === 0 ? 'No projects yet.' : 'No projects match.'}</p>}
         {list.data && visible.length > 0 && (
-          <ul className="project-list" aria-label="Projects">
+          <ul className="project-list" aria-label="Projects" data-full={full ? 'true' : undefined}>
             {visible.map((project) => {
               const summary = summaryOf(project.slug)
+              if (full) return <ProjectRow key={project.slug} project={project} summary={summary} />
               return (
                 <li key={project.slug}>
                   <Link to={`/projects/${project.slug}`} aria-current={project.slug === slug ? 'page' : undefined}>
@@ -602,39 +666,27 @@ export function ProjectsPage({ slug, view = 'activity' }: { slug?: string | unde
           </ul>
         )}
       </section>
-      <section className="pane pane-detail" aria-label="Project inspector">
-        {slug === '_new' ? (
-          <>
-            <Link to="/projects" className="back-link">
-              <Icon name="back" /> Projects
-            </Link>
-            <ProjectForm
-              mode="create"
-              onSaved={(saved) => {
-                upsertInList(saved)
-                toast('Project saved.')
-                navigate(`/projects/${saved.slug}`)
-              }}
-            />
-          </>
-        ) : slug ? (
-          <ProjectDetail key={slug} slug={slug} view={view} summary={summaryOf(slug)} onRetrySummary={summaries.stale || (!summaries.loading && !summaries.data) ? summaries.reload : undefined} onSaved={upsertInList} />
-        ) : summaries.loading ? (
-          <Loading label="Loading this week…" />
-        ) : !summaries.data ? (
-          <ErrorState message="Couldn't load this week's project summary." onRetry={summaries.reload} />
-        ) : summaries.data.projects.length > 0 ? (
-          <section aria-labelledby="all-projects-title">
-            <h2 id="all-projects-title" className="section-title">All projects this week</h2>
-            {summaries.stale && <StaleNotice message="This summary may be out of date." onRetry={summaries.reload} />}
-            <ProjectSummaryTable projects={summaries.data.projects} />
-          </section>
-        ) : (
-          <EmptyState>
-            <p>Select a project to see what its agents did, its todos, and its decisions.</p>
-          </EmptyState>
-        )}
-      </section>
+      {slug && (
+        <section className="pane pane-detail" aria-label="Project inspector">
+          {slug === '_new' ? (
+            <>
+              <Link to="/projects" className="back-link">
+                <Icon name="back" /> Projects
+              </Link>
+              <ProjectForm
+                mode="create"
+                onSaved={(saved) => {
+                  upsertInList(saved)
+                  toast('Project saved.')
+                  navigate(`/projects/${saved.slug}`)
+                }}
+              />
+            </>
+          ) : (
+            <ProjectDetail key={slug} slug={slug} view={view} summary={summaryOf(slug)} onRetrySummary={summaries.stale || (!summaries.loading && !summaries.data) ? summaries.reload : undefined} onSaved={upsertInList} />
+          )}
+        </section>
+      )}
     </div>
   )
 }
