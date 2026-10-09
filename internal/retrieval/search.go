@@ -125,7 +125,13 @@ func liveChunks(kind, header, body string) []Chunk {
 // by its best chunk, before the limit. The result reports the vector and
 // rerank stages as degraded.
 func (s *Searcher) Lexical(ctx context.Context, query string, limit int) (SearchResult, error) {
-	rows, err := s.db.Pool.Query(ctx, `WITH q AS (SELECT websearch_to_tsquery('public.ledger_ts'::regconfig,$1) q)
+	// Both reads see one snapshot, so an edit or a reindex between them cannot list a ref twice or drop it.
+	tx, err := s.db.Pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return SearchResult{}, err
+	}
+	defer tx.Rollback(ctx)
+	rows, err := tx.Query(ctx, `WITH q AS (SELECT websearch_to_tsquery('public.ledger_ts'::regconfig,$1) q)
 SELECT ref,ord,kind,slug,text,score FROM (
  SELECT DISTINCT ON (c.ref) c.ref,c.ord,COALESCE(e.kind,'project') kind,COALESCE(e.slug,substring(c.ref from 9)) slug,c.text,ts_rank_cd(c.tsv,q.q) score
  FROM q,chunk c LEFT JOIN entry e ON c.ref='entry:'||e.id::text
@@ -140,7 +146,7 @@ ORDER BY score DESC,ref LIMIT $2`, query, limit)
 	if err != nil {
 		return SearchResult{}, err
 	}
-	live, err := s.lexicalLive(ctx, query)
+	live, err := lexicalLive(ctx, tx, query)
 	if err != nil {
 		return SearchResult{}, err
 	}
@@ -164,8 +170,8 @@ ORDER BY score DESC,ref LIMIT $2`, query, limit)
 // ponytail: live rows are tokenized per query with no index, and only the 200
 // best matching documents are chunked; fine while the indexer's backlog is
 // small, index entry text if installs run without an indexer for long.
-func (s *Searcher) lexicalLive(ctx context.Context, query string) ([]Ranked, error) {
-	rows, err := s.db.Pool.Query(ctx, `WITH q AS (SELECT websearch_to_tsquery('public.ledger_ts'::regconfig,$1) q)
+func lexicalLive(ctx context.Context, tx pgx.Tx, query string) ([]Ranked, error) {
+	rows, err := tx.Query(ctx, `WITH q AS (SELECT websearch_to_tsquery('public.ledger_ts'::regconfig,$1) q)
 SELECT l.ref,l.kind,l.slug,l.header,l.body FROM q,(`+liveDocuments+`) l
 WHERE to_tsvector('public.ledger_ts'::regconfig,l.header||E'\n'||l.body) @@ q.q
 ORDER BY ts_rank_cd(to_tsvector('public.ledger_ts'::regconfig,l.header||E'\n'||l.body),q.q) DESC,l.ref LIMIT 200`, query)
@@ -189,7 +195,7 @@ ORDER BY ts_rank_cd(to_tsvector('public.ledger_ts'::regconfig,l.header||E'\n'||l
 	if err := rows.Err(); err != nil || len(texts) == 0 {
 		return []Ranked{}, err
 	}
-	rows, err = s.db.Pool.Query(ctx, `WITH q AS (SELECT websearch_to_tsquery('public.ledger_ts'::regconfig,$1) q)
+	rows, err = tx.Query(ctx, `WITH q AS (SELECT websearch_to_tsquery('public.ledger_ts'::regconfig,$1) q)
 SELECT u.i::int-1,ts_rank_cd(to_tsvector('public.ledger_ts'::regconfig,u.t),q.q) FROM q,unnest($2::text[]) WITH ORDINALITY u(t,i)
 WHERE to_tsvector('public.ledger_ts'::regconfig,u.t) @@ q.q`, query, texts)
 	if err != nil {
