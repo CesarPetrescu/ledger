@@ -140,6 +140,42 @@ fun focusLabels(entry: JSONObject, today: LocalDate = LocalDate.now(), now: Offs
     }
 }
 
+/** An entry screen's actions: at most one filled [primary], a few outlined [secondary] ones, and the rest under ⋯. */
+data class EntryActions(val primary: String?, val secondary: List<String>, val overflow: List<String>)
+
+val entryActionNames = mapOf("done" to "Mark done", "handled" to "Handled", "open_link" to "Open link", "reopen" to "Reopen", "snooze" to "Snooze",
+    "read" to "Mark read", "unread" to "Mark unread", "star" to "Star", "unstar" to "Unstar", "calendar" to "Add to calendar",
+    "labels" to "Edit labels", "project" to "Open project", "delete" to "Delete entry")
+
+fun entryActions(entry: JSONObject): EntryActions {
+    val meta = entry.optJSONObject("meta")
+    val resolved = entry.optJSONObject("resolved_by") != null
+    val openTodo = entry.text("kind") == "todo" && !resolved
+    val asking = asksYou(entry)
+    val link = meta?.text("link")?.isNotBlank() == true
+    val labels = meta != null && meta.text("title").isNotBlank() && meta.text("origin") == "model"
+    // Labels the AI doubted earn a button; otherwise correcting them is occasional.
+    val doubted = labels && meta.strings("unsure").isNotEmpty()
+    val shown = buildList {
+        if (openTodo) add("done")
+        if (asking) add("handled")
+        if (link) add("open_link")
+        if (resolved) add("reopen")
+        if (openTodo || asking) add("snooze")
+        if (link) add(if (owner(entry).optBoolean("read")) "unread" else "read")
+        if (doubted) add("labels")
+    }
+    // What settles the entry leads: done, then handled, then reading the link.
+    val primary = shown.firstOrNull { it == "done" || it == "handled" || it == "open_link" }
+    return EntryActions(primary, shown - setOfNotNull(primary), buildList {
+        if (link) add(if (owner(entry).optBoolean("starred")) "unstar" else "star")
+        if (openTodo && meta?.text("due")?.isNotBlank() == true) add("calendar")
+        if (labels && !doubted) add("labels")
+        add("project")
+        add("delete")
+    })
+}
+
 /** Offers notifications once, until turned on or dismissed. */
 @Composable
 private fun NotificationPrompt(model: LedgerModel) {
@@ -369,8 +405,26 @@ private fun EntrySheet(model: LedgerModel, entry: JSONObject, repeats: List<JSON
     val context = LocalContext.current
     val meta = entry.optJSONObject("meta")
     val id = entry.text("id")
-    val openTodo = entry.text("kind") == "todo" && entry.optJSONObject("resolved_by") == null
     var deleting by remember { mutableStateOf(false) }
+    var labeling by remember { mutableStateOf(false) }
+    val read = owner(entry).optBoolean("read")
+    val starred = owner(entry).optBoolean("starred")
+    val run: (String) -> Unit = { action ->
+        when (action) {
+            "done" -> resolve(model, entry, after = close)
+            "handled" -> ownerAction(model, entry, "Marked handled", "handled" to true, after = close)
+            // Only a link that actually opened counts as read.
+            "open_link" -> if (openBrowser(context, meta?.text("link").orEmpty(), model) && !read) ownerAction(model, entry, "Marked read", "read" to true)
+            "reopen" -> model.undoable("Todo reopened") { it.request("POST", "/entries/${segment(id)}/reopen") }
+            "snooze" -> ownerAction(model, entry, "Snoozed until tomorrow", "snooze_days" to 1, after = close)
+            "read", "unread" -> ownerAction(model, entry, if (read) "Marked unread" else "Marked read", "read" to !read, after = if (read) ({}) else close)
+            "star", "unstar" -> ownerAction(model, entry, if (starred) "Unstarred" else "Starred", "starred" to !starred)
+            "calendar" -> addToCalendar(model, entry)
+            "labels" -> labeling = true
+            "project" -> { close(); model.go(projectRoute(entry.text("slug"))) }
+            "delete" -> deleting = true
+        }
+    }
     // imePadding keeps the reply box and its Send button above the keyboard on small phones.
     Column(Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).navigationBarsPadding().padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("${entry.text("project_name")} · ${label(entry.text("kind"))} · ${writerName(entry.text("source"))} · ${displayTime(entry.text("created_at"))}",
@@ -378,24 +432,16 @@ private fun EntrySheet(model: LedgerModel, entry: JSONObject, repeats: List<JSON
         Text(entryTitle(entry), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
         val labels = focusLabels(entry)
         if (labels.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) { labels.forEach { (t, tone) -> Tag(t, tone) } }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (openTodo) Button(onClick = { resolve(model, entry, after = close) }, enabled = !model.busy) { Text("Mark done") }
-            entry.optJSONObject("resolved_by")?.let { OutlinedButton(onClick = { model.undoable("Todo reopened") { it.request("POST", "/entries/${segment(id)}/reopen") } }, enabled = !model.busy) { Text("Reopen") } }
-            if (asksYou(entry)) Button(onClick = { ownerAction(model, entry, "Marked handled", "handled" to true, after = close) }, enabled = !model.busy) { Text("Handled") }
-            if (openTodo || asksYou(entry)) OutlinedButton(onClick = { ownerAction(model, entry, "Snoozed until tomorrow", "snooze_days" to 1, after = close) }, enabled = !model.busy) { Text("Snooze") }
-            if (meta?.text("link")?.isNotBlank() == true) {
-                val read = owner(entry).optBoolean("read")
-                val starred = owner(entry).optBoolean("starred")
-                // Only a link that actually opened counts as read.
-                OutlinedButton(onClick = { if (openBrowser(context, meta.text("link"), model) && !read) ownerAction(model, entry, "Marked read", "read" to true) }) { Text("Open link") }
-                OutlinedButton(onClick = { ownerAction(model, entry, if (read) "Marked unread" else "Marked read", "read" to !read, after = if (read) ({}) else close) }, enabled = !model.busy) { Text(if (read) "Mark unread" else "Mark read") }
-                OutlinedButton(onClick = { ownerAction(model, entry, if (starred) "Unstarred" else "Starred", "starred" to !starred) }, enabled = !model.busy) { Text(if (starred) "Unstar" else "Star") }
+        // One filled button for what settles the entry; the rest are outlined or under ⋯.
+        val actions = entryActions(entry)
+        Row(verticalAlignment = Alignment.Top) {
+            FlowRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                actions.primary?.let { action -> Button(onClick = { run(action) }, enabled = !model.busy) { Text(entryActionNames.getValue(action)) } }
+                actions.secondary.forEach { action -> OutlinedButton(onClick = { run(action) }, enabled = !model.busy) { Text(entryActionNames.getValue(action)) } }
             }
-            if (openTodo && meta?.text("due")?.isNotBlank() == true) OutlinedButton(onClick = { addToCalendar(model, entry) }, enabled = !model.busy) { Text("Add to calendar") }
-            if (meta != null && meta.text("title").isNotBlank() && meta.text("origin") == "model") LabelEditor(model, entry, close)
-            TextButton(onClick = { close(); model.go(projectRoute(entry.text("slug"))) }) { Text("Open project") }
-            Overflow("More actions for this entry", listOf(MenuAction("Delete entry", danger = true) { deleting = true }), enabled = !model.busy)
+            Overflow("More actions for this entry", actions.overflow.map { action -> MenuAction(entryActionNames.getValue(action), danger = action == "delete") { run(action) } }, enabled = !model.busy)
         }
+        if (labeling) LabelEditor(model, entry, close) { labeling = false }
         if (deleting) ConfirmDialog("Delete entry", "Move this entry to Trash? You can undo it or restore it from Trash for 30 days.", { deleting = false }, danger = true) {
             model.undoable("Entry moved to Trash", after = { afterDelete(); close() }) { it.request("DELETE", "/entries/${segment(id)}") }
         }
@@ -449,7 +495,7 @@ private fun EntrySheet(model: LedgerModel, entry: JSONObject, repeats: List<JSON
 private fun addToCalendar(model: LedgerModel, entry: JSONObject) = model.act("Added to calendar") { api ->
     val due = LocalDate.parse(entry.optJSONObject("meta")?.text("due"))
     val calendar = api.request("GET", "/calendar/calendars").rows("calendars").firstOrNull { it.optBoolean("selected") }
-        ?: throw IllegalStateException("Choose a calendar first: More › Calendar settings.")
+        ?: throw IllegalStateException("Choose a calendar first: Settings › Access › Calendars.")
     api.request("POST", "/calendar/events", json("calendar_id" to calendar.text("id"), "title" to entryTitle(entry).take(200),
         "start" to due.toString(), "end" to due.plusDays(1).toString(), "all_day" to true, "location" to "",
         "description" to "Ledger todo in ${entry.text("project_name")}".take(4000)))
@@ -579,7 +625,8 @@ private fun RelatedEntries(model: LedgerModel, id: String, close: () -> Unit) {
 @Composable
 private fun SectionHeader(text: String, action: (@Composable () -> Unit)? = null) {
     Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 20.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(text, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        // A heading, not a link: blue is kept for what can be tapped, such as "All todos" beside it.
+        Text(text, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
         action?.invoke()
     }
 }
@@ -602,33 +649,32 @@ fun InboxScreen(model: LedgerModel) {
         val projects = data.rows("projects")
         val blocked = projects.filter { it.text("status_state") == "blocked" }
         val digests = projects.filter { it.text("digest").isNotBlank() }
-        PullToRefreshBox(isRefreshing = false, onRefresh = model::refresh, modifier = Modifier.fillMaxSize()) {
-            LazyColumn(Modifier.fillMaxSize().testTag("page"), contentPadding = PaddingValues(bottom = 24.dp)) {
-                item {
-                    Column(Modifier.padding(start = 20.dp, end = 8.dp, top = 8.dp)) {
-                        Text("Questions your agents are waiting on you to answer, the most urgent todos, and each project's week.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        LegendButton()
-                    }
-                    AiStatus(data.optJSONObject("metadata"))
-                    NotificationPrompt(model)
+        LaunchedEffect(data) { model.knowProjects(projects) }
+        LazyColumn(Modifier.fillMaxSize().testTag("page"), contentPadding = PaddingValues(bottom = 24.dp)) {
+            item {
+                Column(Modifier.padding(start = 20.dp, end = 8.dp, top = 8.dp)) {
+                    Text("Questions your agents are waiting on you to answer, the most urgent todos, and each project's week.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    LegendButton()
                 }
-                item { SectionHeader("Needs you · ${asks.size}") }
-                if (asks.isEmpty()) item { Box(Modifier.padding(horizontal = 20.dp)) { Empty("Nothing is waiting on you.") } }
-                items(asks, key = { "a" + it.text("id") }) { e -> EntryItem(model, e, "inbox", headline = e.optJSONObject("meta")?.text("ask")) { entry, _ -> openEntry(model, entry) } }
-                item {
-                    val total = data.optInt("todos_total")
-                    SectionHeader("Todos · ${if (todos.size < total) "${todos.size} of $total" else "$total"}") { if (total > 0) TextButton(onClick = { model.go("todos") }) { Text("All todos") } }
-                }
-                if (todos.isEmpty()) item { Box(Modifier.padding(horizontal = 20.dp)) { Empty("No open todos. Nice.") } }
-                items(todos, key = { "t" + it.text("id") }) { e -> EntryItem(model, e, "inbox") { entry, _ -> openEntry(model, entry) } }
-                if (blocked.isNotEmpty()) {
-                    item { SectionHeader("Blocked · ${blocked.size}") }
-                    items(blocked, key = { "b" + it.text("slug") }) { p -> ProjectLine(model, p, p.text("status_detail").ifBlank { p.text("status_title") }) }
-                }
-                if (digests.isNotEmpty()) {
-                    item { SectionHeader("This week") }
-                    items(digests, key = { "d" + it.text("slug") }) { p -> ProjectLine(model, p, p.text("digest")) }
-                }
+                AiStatus(data.optJSONObject("metadata"))
+                NotificationPrompt(model)
+            }
+            item { SectionHeader("Needs you · ${asks.size}") }
+            if (asks.isEmpty()) item { Box(Modifier.padding(horizontal = 20.dp)) { Empty("Nothing is waiting on you.") } }
+            items(asks, key = { "a" + it.text("id") }) { e -> EntryItem(model, e, "inbox", headline = e.optJSONObject("meta")?.text("ask")) { entry, _ -> openEntry(model, entry) } }
+            item {
+                val total = data.optInt("todos_total")
+                SectionHeader("Todos · ${if (todos.size < total) "${todos.size} of $total" else "$total"}") { if (total > 0) TextButton(onClick = { model.go("todos") }) { Text("All todos") } }
+            }
+            if (todos.isEmpty()) item { Box(Modifier.padding(horizontal = 20.dp)) { Empty("No open todos. Nice.") } }
+            items(todos, key = { "t" + it.text("id") }) { e -> EntryItem(model, e, "inbox") { entry, _ -> openEntry(model, entry) } }
+            if (blocked.isNotEmpty()) {
+                item { SectionHeader("Blocked · ${blocked.size}") }
+                items(blocked, key = { "b" + it.text("slug") }) { p -> ProjectLine(model, p, p.text("status_detail").ifBlank { p.text("status_title") }) }
+            }
+            if (digests.isNotEmpty()) {
+                item { SectionHeader("This week") }
+                items(digests, key = { "d" + it.text("slug") }) { p -> ProjectLine(model, p, p.text("digest")) }
             }
         }
     }
@@ -657,32 +703,32 @@ private fun HealthTag(state: String) {
 @Composable
 fun ProjectsHome(model: LedgerModel) = Load(model, "table-projects", { it.request("GET", "/table/projects") }) { data ->
     val progress = data.optJSONObject("metadata")
-    PullToRefreshBox(isRefreshing = false, onRefresh = model::refresh, modifier = Modifier.fillMaxSize()) {
-        LazyColumn(Modifier.fillMaxSize().testTag("page"), contentPadding = PaddingValues(bottom = 88.dp)) {
-            if (aiStatusText(progress) != null) item {
-                AiStatus(progress)
-            }
-            item { Row(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) { Button(onClick = { model.go("project-edit/") }, enabled = !model.busy) { Text("New project") } } }
-            if (data.rows("projects").isEmpty()) item { Box(Modifier.padding(20.dp)) { Empty("No projects yet.") } }
-            items(data.rows("projects"), key = { it.text("slug") }) { p ->
-                Column(Modifier.fillMaxWidth().clickable { model.go(projectRoute(p.text("slug"))) }.padding(horizontal = 20.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(p.text("name"), Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        HealthTag(p.text("status_state"))
-                    }
-                    val facts = buildList {
-                        add(label(p.text("tier")))
-                        if (p.optInt("open_todos") > 0) add(plural(p.optInt("open_todos"), "open todo"))
-                        if (p.optInt("needs_you") > 0) add(plural(p.optInt("needs_you"), "needs you", "need you"))
-                        add(if (p.optInt("week_entries") > 0) "${p.optInt("week_entries")} this week" else "quiet")
-                        if (p.text("deadline").isNotBlank()) add("due ${p.text("deadline")}")
-                    }
-                    Text(facts.joinToString(" · "), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                    val summary = p.text("digest").ifBlank { p.text("status_title").ifBlank { p.text("status_body") } }
-                    if (summary.isNotBlank()) Text(summary, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
+    LaunchedEffect(data) { model.knowProjects(data.rows("projects")) }
+    LazyColumn(Modifier.fillMaxSize().testTag("page"), contentPadding = PaddingValues(bottom = 88.dp)) {
+        if (aiStatusText(progress) != null) item {
+            AiStatus(progress)
+        }
+        item { Row(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) { Button(onClick = { model.go("project-edit/") }, enabled = !model.busy) { Text("New project") } } }
+        if (data.rows("projects").isEmpty()) item { Box(Modifier.padding(20.dp)) { Empty("No projects yet.") } }
+        items(data.rows("projects"), key = { it.text("slug") }) { p ->
+            Column(Modifier.fillMaxWidth().clickable { model.go(projectRoute(p.text("slug"))) }.padding(horizontal = 20.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(p.text("name"), Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    HealthTag(p.text("status_state"))
                 }
-                HorizontalDivider()
+                val facts = buildList {
+                    add(label(p.text("tier")))
+                    if (p.optInt("open_todos") > 0) add(plural(p.optInt("open_todos"), "open todo"))
+                    if (p.optInt("needs_you") > 0) add(plural(p.optInt("needs_you"), "needs you", "need you"))
+                    add(if (p.optInt("week_entries") > 0) "${p.optInt("week_entries")} this week" else "quiet")
+                    if (p.text("deadline").isNotBlank()) add("due ${p.text("deadline")}")
+                }
+                // Facts are metadata, not links: the whole row opens the project.
+                Text(facts.joinToString(" · "), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                val summary = p.text("digest").ifBlank { p.text("status_title").ifBlank { p.text("status_body") } }
+                if (summary.isNotBlank()) Text(summary, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
             }
+            HorizontalDivider()
         }
     }
 }
@@ -700,25 +746,26 @@ fun ProjectScreen(model: LedgerModel, slug: String, initialTab: String = "activi
     val query = tableQuery(tab, project = slug, q = q, status = todoState, hideRoutine = !showRoutine && q.isBlank())
     val pager = rememberPager(model, query)
     Load(model, "project-summary:$slug", { api -> api.request("GET", "/table/projects").rows("projects").firstOrNull { it.text("slug") == slug } ?: throw ApiError(404, "Project not found.") }) { p ->
+        // The top bar names the project; the header says how it is doing and offers one main action.
+        LaunchedEffect(p) { model.knowProjects(listOf(p)) }
         Column {
             Column(Modifier.padding(start = 20.dp, end = 8.dp, top = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(p.text("name"), Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    HealthTag(p.text("status_state"))
-                }
+                HealthTag(p.text("status_state"))
                 // Tap the summary to read it all, including what the project needs from you.
                 var expanded by rememberSaveable { mutableStateOf(false) }
                 val summary = p.text("digest").ifBlank { p.text("status_title") }
                 if (summary.isNotBlank()) Text(summary, Modifier.clickable { expanded = !expanded }, style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = if (expanded) Int.MAX_VALUE else 2, overflow = TextOverflow.Ellipsis)
                 if (expanded && p.text("needs_me").isNotBlank()) Text("Needs you: ${p.text("needs_me")}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    FilledTonalButton(onClick = { model.go("entry/$slug") }, enabled = !model.busy, contentPadding = PaddingValues(horizontal = 14.dp)) { Text("Add entry") }
-                    TextButton(onClick = { model.go("project-edit/$slug") }, enabled = !model.busy) { Text("Edit") }
-                    TextButton(onClick = { model.go("project-files/$slug") }) { Text("Files") }
-                    TextButton(onClick = { model.go("project-repos/$slug") }) { Text("Repos") }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Button(onClick = { model.go("entry/$slug") }, enabled = !model.busy) { Text("Add entry") }
+                    Spacer(Modifier.weight(1f))
                     var deleting by remember { mutableStateOf(false) }
-                    Overflow("More actions for ${p.text("name")}", listOf(MenuAction("Delete project", danger = true) { deleting = true }), enabled = !model.busy)
+                    Overflow("More actions for ${p.text("name")}", listOf(
+                        MenuAction("Edit project") { model.go("project-edit/$slug") },
+                        MenuAction("Files") { model.go("project-files/$slug") },
+                        MenuAction("Repos") { model.go("project-repos/$slug") },
+                        MenuAction("Delete project", danger = true) { deleting = true }), enabled = !model.busy)
                     if (deleting) DeleteProjectDialog(model, slug) { deleting = false }
                 }
             }
@@ -852,12 +899,12 @@ fun MoreScreen(model: LedgerModel) {
             Triple("Search", "Find projects, decisions, and notes", "search"),
             Triple("Recent actions", "Undo what you marked, snoozed, or deleted", "history"),
             Triple("Trash", "Restore deleted projects and entries", "trash"),
-            Triple("Agents", "What each agent did lately, and how to connect one", "agents"),
+            Triple("Agents", "What each agent did lately", "agents"),
             Triple("Help", "How Ledger works and what the labels mean", "help"),
-            Triple("Approve a device", "Enter the code shown by the Ledger CLI", "device"),
-            Triple("Settings", "Version, updates, sign out", "settings"),
+            Triple("Settings", "Access, appearance, notifications, and sign out", "settings"),
         ).forEach { (title, subtitle, route) ->
-            item { ListItem(headlineContent = { Text(title) }, supportingContent = { Text(subtitle) }, modifier = Modifier.clickable { model.go(route) }); HorizontalDivider() }
+            item { ListItem(headlineContent = { Text(title) }, supportingContent = { Text(subtitle) }, modifier = Modifier.clickable { model.go(route) },
+                trailingContent = { Glyph("chevron", null, tint = MaterialTheme.colorScheme.onSurfaceVariant) }); HorizontalDivider() }
         }
     }
 }

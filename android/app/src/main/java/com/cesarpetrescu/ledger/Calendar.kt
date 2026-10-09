@@ -253,7 +253,7 @@ private fun EventForm(model: LedgerModel, id: String, event: JSONObject, calenda
     val recurring = event.optBoolean("recurring")
     Page {
         item { Text(if (id.isBlank()) "New event" else "Event details", style = MaterialTheme.typography.headlineSmall) }
-        if (recurring) item { Text("This event belongs to a recurring series. Manage the series in your calendar provider.", color = MaterialTheme.colorScheme.primary) }
+        if (recurring) item { Text("This event belongs to a recurring series. Manage the series in your calendar provider.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         item { Field("Title", title, { title = it }, max = 200) }
         if (id.isBlank()) item { Choice("Calendar", calendar, calendars.filter { it.optBoolean("selected") }.map { it.text("id") to it.text("name") }) { calendar = it } }
         else item { Text(event.text("calendar_name")) }

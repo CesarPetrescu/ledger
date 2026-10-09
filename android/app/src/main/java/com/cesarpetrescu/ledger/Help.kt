@@ -4,7 +4,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -80,12 +79,13 @@ fun AiStatus(progress: JSONObject?) {
 val helpSections = listOf(
     "How Ledger works" to "Your agents write down what they did, decided, and need from you. Ledger keeps all of it, labels it with AI, and shows you what matters first.",
     "Where to look" to "Inbox: questions agents are waiting on you to answer, the most urgent todos, blocked projects, and each project's week.\n" +
-        "Projects: one screen per project with its week, activity, todos, and decisions. Files and Repos list its attachments and Git repositories.\n" +
+        "Projects: one screen per project with its week, activity, todos, and decisions. Its ⋯ menu opens Files and Repos: its attachments and Git repositories.\n" +
         "Reading: linked articles your agents found, to read and star.\n" +
         "Handoffs: work passed from one agent, or from you, to another, and research tasks.\n" +
-        "More › Calendar: your Nextcloud events, with todos that are due and project deadlines. Settings › Calendars connects Nextcloud.\n" +
+        "More › Calendar: your Nextcloud events, with todos that are due and project deadlines. Settings › Access › Calendars connects Nextcloud.\n" +
         "More › Table: every project's entries in one list, with filters.\n" +
-        "More › Agents: what each agent did lately and how to connect a new one.",
+        "More › Agents: what each agent did lately and what it waits on you for.\n" +
+        "Settings › Access: connect an agent and manage what can reach your projects.",
     "How the Inbox decides" to "Needs you lists entries where the AI found a question or request for you; each stays until you mark it handled, and a snoozed one comes back the next day.\n" +
         "Todos shows open todos, the most urgent first: due within a week, then high priority, then the oldest.\n" +
         "Blocked lists projects whose latest status update says they are blocked.\n" +
@@ -93,12 +93,13 @@ val helpSections = listOf(
     "Research" to "A research task runs in a sandbox that your own dispatcher starts. Queue one from the web console under Handoffs › Research, or ask an agent to. It is listed under Handoffs with its state.\n" +
         "When it is ready for review, read the result: Accept publishes it to the project's log. To change something, Reply with what to change, then Send back. Answer a question the same way, then Resume.\n" +
         "Files travel both ways: attach them to a reply, and result files arrive on the thread.",
-    "Repositories" to "A project's Repos screen lists the Git repositories it spans. Agents see them with the project and clone with their own access. With a read-only GitHub token (web console › Agents › GitHub sync), Ledger checks each GitHub repository every 15 minutes for its latest commit, open pull requests, and latest release.",
-    "AI labels" to "Titles, summaries, tags, and labels are written by AI from each entry's text; the text itself is never changed. Open an entry and tap Edit labels to correct anything: your corrections are kept, and the AI learns from them. Routine entries such as checkpoints are hidden unless you ask for them, and repeats are folded under one row.",
-    "Access" to "Settings › Connected apps: apps with access to your projects. Revoke one to cut it off.\n" +
-        "Settings › API keys: keys that let a server such as Adastrion Core dispatch research. Create them in the web console under Agents › API keys; revoke them here.\n" +
-        "Settings › Approve a device: enter the code the Ledger CLI shows.\n" +
-        "The web console keeps all of these on its Agents page, with GitHub sync and the approval password.",
+    "Repositories" to "A project's Repos screen (from its ⋯ menu) lists the Git repositories it spans; Link a repository adds one. Agents see them with the project and clone with their own access. With a read-only GitHub token (web console › Access › GitHub sync), Ledger checks each GitHub repository every 15 minutes for its latest commit, open pull requests, and latest release.",
+    "AI labels" to "Titles, summaries, tags, and labels are written by AI from each entry's text; the text itself is never changed. Open an entry and choose Edit labels (under ⋯ unless the AI was unsure) to correct anything; your corrections are kept, and the AI learns from them. Routine entries such as checkpoints are hidden unless you ask for them, and repeats are folded under one row.",
+    "Access" to "Settings › Access › Connect an agent: the address to add to Claude, ChatGPT, or another MCP app, and the Codex command.\n" +
+        "Settings › Access › Connected apps: apps with access to your projects. Revoke one to cut it off.\n" +
+        "Settings › Access › API keys: keys that let a server such as Adastrion Core dispatch research. Create them in the web console under Access › API keys; revoke them here.\n" +
+        "Settings › Access › Approve a device: enter the code the Ledger CLI shows.\n" +
+        "The web console keeps all of these on its Access page, with GitHub sync and the approval password.",
     "Undo and Trash" to "Every quick action shows Undo, and More › Recent actions lets you undo any of the last seven days' actions. Delete an entry or a project from its ⋯ menu; it stays in More › Trash for 30 days.",
 )
 
@@ -112,7 +113,7 @@ fun HelpScreen() {
                 body.split('\n').forEach { line ->
                     val name = line.substringBefore(": ", "")
                     Text(buildAnnotatedString {
-                        if (name.isNotEmpty() && name.length < 30) {
+                        if (name.isNotEmpty() && name.length < 40) {
                             withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(name) }
                             append(": " + line.substringAfter(": "))
                         } else append(line)
@@ -125,25 +126,24 @@ fun HelpScreen() {
     }
 }
 
-/** Agents: what each one did lately, and how to connect one. */
+/** Agents: what each one did lately. Connecting one and revoking access live under Settings › Access. */
 @Composable
 fun AgentsScreen(model: LedgerModel) = Load(model, "agents", { it.request("GET", "/agents") }) { data ->
-    val origin = model.api?.origin.orEmpty()
     val agents = data.rows("agents")
     Page {
-        item { Text("What each agent did lately and what it is waiting on you for.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        if (agents.isEmpty()) item { Empty("No agent has written to Ledger yet. Connect one using the steps below.") }
-        items(agents, key = { it.text("name") }) { agent -> AgentCard(model, agent) }
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Connect an agent", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text("Claude, ChatGPT, or another MCP app: add this address as a remote MCP server, then approve it in your browser.", style = MaterialTheme.typography.bodyMedium)
-                SelectionContainer { Text("$origin/mcp", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) }
-                Text("Codex: install the Ledger CLI and run this on the computer, then approve its code under Settings › Approve a device.", style = MaterialTheme.typography.bodyMedium)
-                SelectionContainer { Text("ledger connect codex --server $origin", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) }
+            Column {
+                Text("What each agent did lately and what it is waiting on you for.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                TextButton(onClick = { model.go("settings") }, enabled = !model.busy, contentPadding = PaddingValues(vertical = 8.dp)) { Text("Manage access →") }
             }
         }
-        item { SummaryCard("Connected apps", body = "Apps with access to every project, and their tokens. Revoke one to cut its access.") { model.go("clients") } }
+        if (agents.isEmpty()) item {
+            Column {
+                Empty("No agent has written to Ledger yet.")
+                OutlinedButton(onClick = { model.go("connect") }, enabled = !model.busy) { Text("Connect an agent") }
+            }
+        }
+        items(agents, key = { it.text("name") }) { agent -> AgentCard(model, agent) }
     }
 }
 
@@ -171,8 +171,14 @@ private fun AgentCard(model: LedgerModel, agent: JSONObject) {
             if (asks > 0) LinkLine("$asks ${if (asks == 1) "question waits" else "questions wait"} for your answer", bold = true) { model.tab("inbox") }
             val handoffs = agent.optInt("handoffs")
             if (handoffs > 0) LinkLine("Working on $handoffs ${if (handoffs == 1) "handoff" else "handoffs"}", bold = true) { model.tab("handoffs") }
+            // What it wrote reads as content, with its project muted; blue is kept for the actions around it.
+            val muted = MaterialTheme.colorScheme.onSurfaceVariant
             agent.rows("latest").forEach { entry ->
-                LinkLine("${entryTitle(entry)} · ${entry.text("project_name")}") { model.go("entry-view/${segment(entry.text("id"))}") }
+                Text(buildAnnotatedString {
+                    append(entryTitle(entry))
+                    withStyle(SpanStyle(color = muted)) { append(" · ${entry.text("project_name")}") }
+                }, Modifier.fillMaxWidth().clickable { model.go("entry-view/${segment(entry.text("id"))}") }.padding(vertical = 6.dp),
+                    style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             LinkLine("All of its activity") { model.go("table/${segment(name)}") }
         }
