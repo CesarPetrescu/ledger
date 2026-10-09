@@ -49,20 +49,18 @@ fun LabelNotes(meta: JSONObject) {
     if (edited.isNotEmpty()) Text("Edited by you: ${edited.joinToString { label(it) }}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
-/** Lets the owner correct the AI's labels; corrections survive re-extraction and teach the labeller. */
+/** A dialog that lets the owner correct the AI's labels; corrections survive re-extraction and teach the labeller. */
 @Composable
-fun LabelEditor(model: LedgerModel, entry: JSONObject, close: () -> Unit) {
+fun LabelEditor(model: LedgerModel, entry: JSONObject, close: () -> Unit, dismiss: () -> Unit) {
     val meta = entry.optJSONObject("meta") ?: return
     val specs = labelSpecs.filter { it.kinds == null || entry.text("kind") in it.kinds }
     val current = specs.associate { it.field to if (it.field == "tags") meta.strings("tags").joinToString(", ") else meta.text(it.field) }
     val edited = meta.strings("edited")
     val unsure = meta.strings("unsure")
-    var open by remember { mutableStateOf(false) }
+    // Each opening starts from the labels as they are now.
     var values by remember { mutableStateOf(current) }
-    OutlinedButton(onClick = { values = current; open = true }, enabled = !model.busy) { Text("Edit labels") }
-    if (!open) return
     val path = "/entries/${segment(entry.text("id"))}/labels"
-    AlertDialog(onDismissRequest = { open = false }, title = { Text("Edit labels") }, text = {
+    AlertDialog(onDismissRequest = dismiss, title = { Text("Edit labels") }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             specs.forEach { spec ->
                 val value = values[spec.field].orEmpty()
@@ -75,16 +73,16 @@ fun LabelEditor(model: LedgerModel, entry: JSONObject, close: () -> Unit) {
     }, confirmButton = {
         TextButton(enabled = !model.busy && values["title"].orEmpty().isNotBlank(), onClick = {
             val body = labelPatch(current, values, unsure = unsure)
-            open = false
+            dismiss()
             if (body.getJSONObject("set").length() > 0) model.act("Labels saved. Similar entries will be labelled this way.", after = close) { it.request("POST", path, body) }
         }) { Text("Save") }
     }, dismissButton = {
         Row {
             if (edited.isNotEmpty()) TextButton(enabled = !model.busy, onClick = {
-                open = false
+                dismiss()
                 model.act("Back to the AI's labels.", after = close) { it.request("POST", path, labelPatch(current, emptyMap(), edited)) }
             }) { Text("Reset to AI") }
-            TextButton(onClick = { open = false }) { Text("Cancel") }
+            TextButton(onClick = dismiss) { Text("Cancel") }
         }
     })
 }

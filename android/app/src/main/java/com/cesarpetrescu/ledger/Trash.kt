@@ -37,15 +37,12 @@ fun TrashScreen(model: LedgerModel) = Load(model, "trash", { it.request("GET", "
             val id = item.text("id")
             val days = runCatching { ChronoUnit.DAYS.between(OffsetDateTime.now(), OffsetDateTime.parse(item.text("purge_at"))).coerceAtLeast(0) }.getOrDefault(0L)
             val what = if (item.text("kind") == "project") "Project · ${plural(item.optInt("entry_count"), "entry", "entries")}" else "Entry in ${item.text("project_slug")}"
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SummaryCard(item.text("label"), what, "Deleted ${ago(item.text("deleted_at"))} · removed for good in ${plural(days.toInt(), "day")}")
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { model.act("Restored") { it.request("POST", "/trash/${segment(id)}/restore") } }, enabled = !model.busy) { Text("Restore") }
-                    ConfirmButton("Delete forever", "Remove \"${item.text("label")}\" permanently? This cannot be undone.", !model.busy, danger = true) {
-                        model.act("Deleted forever") { it.request("DELETE", "/trash/${segment(id)}") }
-                    }
+            SummaryCard(item.text("label"), what, "Deleted ${ago(item.text("deleted_at"))} · removed for good in ${plural(days.toInt(), "day")}", actions = {
+                Button(onClick = { model.act("Restored") { it.request("POST", "/trash/${segment(id)}/restore") } }, enabled = !model.busy) { Text("Restore") }
+                ConfirmButton("Delete forever", "Remove \"${item.text("label")}\" permanently? This cannot be undone.", !model.busy, danger = true) {
+                    model.act("Deleted forever") { it.request("DELETE", "/trash/${segment(id)}") }
                 }
-            }
+            })
         }
     }
 }

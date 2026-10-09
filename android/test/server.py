@@ -22,6 +22,7 @@ NEWS = dict(id='60', slug='atlas', project_name='Atlas', kind='note', body='Titl
             owner=dict(OWNER), meta=dict(title='Fixture model ships', tags=[], refs=[], origin='model', why='Faster tests.', source='Example', link='https://example.com/news'))
 ACTIONS = []
 REPLIES = []
+REPOS = []
 DECISION = dict(id='80', slug='atlas', project_name='Atlas', kind='decision', body='Use SQLite for the fixture cache.', source='codex', created_at='2026-09-06T06:00:00Z',
                 owner=dict(OWNER), meta=dict(title='Use SQLite for the fixture cache', tags=['storage'], refs=[], origin='model', details=dict(chosen='SQLite')))
 # Dated today, so the calendar's opening day shows it whatever day the test runs.
@@ -109,6 +110,17 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(201, entry)
         if path.endswith('/files'):
             return self.send_json(200, {'files': []})
+        if path == '/projects/atlas/repos':
+            if method == 'POST':
+                url = body['url']
+                REPOS.append(dict(id=str(len(REPOS) + 1), repo=url.removeprefix('https://github.com/'), url=url, provider='github', role=body.get('role', ''),
+                                  branch=body.get('branch', ''), path='', note='', added_by='ledger-admin'))
+                return self.send_json(201, REPOS[-1])
+            return self.send_json(200, {'repos': REPOS})
+        match = re.fullmatch(r'/repos/(\d+)', path)
+        if match and method == 'DELETE':
+            REPOS[:] = [r for r in REPOS if r['id'] != match.group(1)]
+            return self.send_json(204)
         if path == '/search':
             if not 1 <= body.get('limit', 10) <= 30:
                 return self.send_json(400, {'error': 'limit must be between 1 and 30'})

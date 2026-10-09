@@ -110,6 +110,54 @@ class TableTest {
         assertEquals(listOf("project", "atlas", "activity", "Ship v2/3 & more"), route.split('/').map { java.net.URLDecoder.decode(it, Charsets.UTF_8.name()) })
     }
 
+    @Test fun aProjectAndItsScreensAreTitledWithTheProjectsName() {
+        val names = mapOf("atlas" to "Atlas Platform")
+        assertEquals("Atlas Platform", screenTitle(projectRoute("atlas", "todos"), names))
+        assertEquals("Atlas Platform · Repos", screenTitle("project-repos/atlas", names))
+        assertEquals("Atlas Platform · Files", screenTitle("project-files/atlas", names))
+        assertEquals("Atlas Platform · Edit", screenTitle("project-edit/atlas", names))
+        assertEquals("Atlas Platform · New entry", screenTitle("entry/atlas", names))
+        // Before any list has named it, the bar says what it is rather than a section name.
+        assertEquals("Project", screenTitle("project/other/activity/", names))
+        assertEquals("Projects", screenTitle("project-edit/", names))
+        assertEquals("Projects", screenTitle("projects", names))
+        assertEquals("Connect an agent", screenTitle("connect"))
+        assertEquals("Calendars", screenTitle("calendar-settings"))
+        assertEquals("Settings", screenTitle("settings"))
+    }
+
+    private fun actions(json: String) = entryActions(JSONObject(json))
+
+    @Test fun anEntryScreenHasOneFilledActionAndTucksTheRestAway() {
+        val todo = actions("""{"id":"1","kind":"todo","source":"codex","meta":{"title":"Ship","origin":"model","due":"2026-10-01"}}""")
+        assertEquals("done", todo.primary)
+        assertEquals(listOf("snooze"), todo.secondary)
+        assertEquals(listOf("calendar", "labels", "project", "delete"), todo.overflow)
+        // A todo that also asks you: Mark done leads, Handled steps back to an outlined button.
+        val asking = actions("""{"id":"2","kind":"todo","source":"codex","meta":{"title":"Ship","ask":"Which day?"}}""")
+        assertEquals("done", asking.primary)
+        assertEquals(listOf("handled", "snooze"), asking.secondary)
+        val ask = actions("""{"id":"3","kind":"note","source":"codex","meta":{"title":"Pricing","ask":"Confirm it"}}""")
+        assertEquals("handled", ask.primary)
+        // Reading: open the link; marking read stays at hand; starring moves under the menu.
+        val news = actions("""{"id":"4","kind":"note","source":"codex","owner":{"read":true,"starred":true},"meta":{"title":"News","link":"https://example.com"}}""")
+        assertEquals("open_link", news.primary)
+        assertEquals(listOf("unread"), news.secondary)
+        assertEquals(listOf("unstar", "project", "delete"), news.overflow)
+        // Nothing left to settle: no filled button at all.
+        val done = actions("""{"id":"5","kind":"todo","source":"codex","resolved_by":{"entry_id":"6"},"meta":{"title":"Ship","origin":"model","unsure":["size"]}}""")
+        assertEquals(null, done.primary)
+        // Labels the AI doubted get a visible button instead of a menu item.
+        assertEquals(listOf("reopen", "labels"), done.secondary)
+        assertEquals(listOf("project", "delete"), done.overflow)
+        listOf(todo, asking, ask, news, done).forEach { a ->
+            (listOfNotNull(a.primary) + a.secondary + a.overflow).let { all ->
+                assertEquals(all.distinct(), all)
+                all.forEach { assertEquals(true, it in entryActionNames) }
+            }
+        }
+    }
+
     @Test fun readingAndRoutineFiltersFollowTheView() {
         assertEquals("reading=unread", tableQuery("reading"))
         assertEquals("reading=starred", tableQuery("reading", reading = "starred", hideRoutine = true))
