@@ -412,6 +412,8 @@ export function EntriesView({ view, initialProject = '', initialQuery = '', init
     hide_routine: initialQuery ? '' : '1',
   })
   const [loadingMore, setLoadingMore] = useState(false)
+  // Phones fold the dropdowns and the routine toggle behind a Filters button; desktop always shows them.
+  const [filtersOpen, setFiltersOpen] = useState(false)
   const effective: EntryFilter = {
     ...filter,
     project: fixedProject ?? filter.project ?? '',
@@ -426,6 +428,17 @@ export function EntriesView({ view, initialProject = '', initialQuery = '', init
   const projects = useResource(() => api.listProjects(), 'table-projects', 'project')
   const toast = useToast()
   const set = (field: keyof EntryFilter, value: string) => setFilter((current) => ({ ...current, [field]: value }))
+  const routineToggle = view === 'activity' || view === 'decisions'
+  // Folded filters set away from their defaults; the search box stays in view, so it is not counted.
+  const activeFilters = [
+    !fixedProject && filter.project,
+    view === 'todos' && filter.status !== 'open',
+    view === 'reading' && effective.reading !== 'unread',
+    view === 'activity' && filter.kind,
+    filter.source,
+    filter.tag,
+    routineToggle && !filter.hide_routine,
+  ].filter(Boolean).length
 
   // Todos read best per project, most important first. Fold while the list
   // is still newest first so each head is the newest copy, then sort heads.
@@ -461,19 +474,22 @@ export function EntriesView({ view, initialProject = '', initialQuery = '', init
     : 'No entries match.'
 
   return (
-    <div className="entries-view">
+    <div className="entries-view" data-filters={filtersOpen ? 'open' : undefined}>
       <div className="filters table-filters">
         <label><span className="visually-hidden">Search text</span><input type="search" maxLength={1000} placeholder="Search titles and text" value={filter.q ?? ''} onChange={(event) => set('q', event.target.value)} /></label>
-        {!fixedProject && <label><span className="visually-hidden">Filter by project</span><select value={filter.project ?? ''} onChange={(event) => set('project', event.target.value)}><option value="">Any project</option>{(projects.data ?? []).map((item) => <option key={item.slug} value={item.slug}>{projectLabel(item, projects.data ?? [])}</option>)}</select></label>}
-        {view === 'todos' && <label><span className="visually-hidden">Filter by state</span><select value={filter.status ?? ''} onChange={(event) => set('status', event.target.value)}><option value="open">Open</option><option value="done">Done</option><option value="">Open and done</option></select></label>}
-        {view === 'reading' && <label><span className="visually-hidden">Filter reading</span><select value={effective.reading} onChange={(event) => set('reading', event.target.value)}><option value="unread">Unread</option><option value="starred">Starred</option><option value="all">All</option></select></label>}
-        {view === 'activity' && <label><span className="visually-hidden">Filter by kind</span><select value={filter.kind ?? ''} onChange={(event) => set('kind', event.target.value)}><option value="">Any kind</option>{ENTRY_KINDS.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>}
-        <label><span className="visually-hidden">Filter by agent</span><select value={filter.source ?? ''} onChange={(event) => set('source', event.target.value)}><option value="">Any agent</option>{[...new Set([...(filter.source ? [filter.source] : []), ...(table.data?.sources ?? [])])].map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
-        <label><span className="visually-hidden">Filter by tag</span><select value={filter.tag ?? ''} onChange={(event) => set('tag', event.target.value)}><option value="">Any tag</option>{[...new Set([...(filter.tag ? [filter.tag] : []), ...(table.data?.tags ?? [])])].map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+        <button type="button" className="btn filter-toggle" aria-expanded={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}>
+          <Icon name="filter" /> Filters {activeFilters > 0 && <span className="count">{activeFilters}{' '}<span className="visually-hidden">active</span></span>}
+        </button>
+        {!fixedProject && <label className="filter-extra"><span className="visually-hidden">Filter by project</span><select value={filter.project ?? ''} onChange={(event) => set('project', event.target.value)}><option value="">Any project</option>{(projects.data ?? []).map((item) => <option key={item.slug} value={item.slug}>{projectLabel(item, projects.data ?? [])}</option>)}</select></label>}
+        {view === 'todos' && <label className="filter-extra"><span className="visually-hidden">Filter by state</span><select value={filter.status ?? ''} onChange={(event) => set('status', event.target.value)}><option value="open">Open</option><option value="done">Done</option><option value="">Open and done</option></select></label>}
+        {view === 'reading' && <label className="filter-extra"><span className="visually-hidden">Filter reading</span><select value={effective.reading} onChange={(event) => set('reading', event.target.value)}><option value="unread">Unread</option><option value="starred">Starred</option><option value="all">All</option></select></label>}
+        {view === 'activity' && <label className="filter-extra"><span className="visually-hidden">Filter by kind</span><select value={filter.kind ?? ''} onChange={(event) => set('kind', event.target.value)}><option value="">Any kind</option>{ENTRY_KINDS.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>}
+        <label className="filter-extra"><span className="visually-hidden">Filter by agent</span><select value={filter.source ?? ''} onChange={(event) => set('source', event.target.value)}><option value="">Any agent</option>{[...new Set([...(filter.source ? [filter.source] : []), ...(table.data?.sources ?? [])])].map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+        <label className="filter-extra"><span className="visually-hidden">Filter by tag</span><select value={filter.tag ?? ''} onChange={(event) => set('tag', event.target.value)}><option value="">Any tag</option>{[...new Set([...(filter.tag ? [filter.tag] : []), ...(table.data?.tags ?? [])])].map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
       </div>
       {view === 'reading' && effective.reading === 'unread' && count > 0 && <MarkAllRead filter={effective} onChanged={refreshAll} />}
-      {(view === 'activity' || view === 'decisions') && (
-        <label className="check"><input type="checkbox" checked={!filter.hide_routine} onChange={(event) => set('hide_routine', event.target.checked ? '' : '1')} /> Show routine entries</label>
+      {routineToggle && (
+        <label className="check filter-extra"><input type="checkbox" checked={!filter.hide_routine} onChange={(event) => set('hide_routine', event.target.checked ? '' : '1')} /> Show routine entries</label>
       )}
       {/* A project page adds to its own project, whether or not the project list loaded. */}
       {view !== 'reading' && (fixedProject || (projects.data?.length ?? 0) > 0) && (

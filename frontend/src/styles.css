@@ -944,11 +944,17 @@ label > textarea {
 .handoff-filter-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
 /* Table */
-.view-tabs { display: flex; gap: 4px; margin: -8px 0 22px; border-bottom: 1px solid var(--border); overflow-x: auto; }
+/* Wraps instead of scrolling sideways, so a phone shows every tab. */
+.view-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: -8px 0 22px; border-bottom: 1px solid var(--border); }
 .view-tabs a { padding: 10px 14px; border-bottom: 2px solid transparent; color: var(--text-muted); font-weight: 650; white-space: nowrap; }
 .view-tabs a:hover { color: var(--text); }
 .view-tabs a[aria-current='page'] { border-bottom-color: var(--accent); color: var(--text); }
+/* History tabs (Recent actions, Trash) sit apart at the end of the row. */
+.view-tabs a[data-history] { margin-left: auto; }
 .table-filters { display: grid; grid-template-columns: minmax(0, 2fr) repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
+.filter-toggle { display: none; }
+.filter-toggle[aria-expanded='true'] { border-color: var(--accent); color: var(--accent); }
+.filter-toggle .count { min-width: 20px; margin: 0; padding: 1px 6px; border-radius: 999px; background: var(--surface-accent); color: var(--accent); font-size: 0.72rem; font-weight: 700; text-align: center; }
 .table-add-toggle { margin-bottom: 22px; }
 .table-add-toggle > summary { display: inline-flex; align-items: center; gap: 6px; color: var(--accent); font-weight: 650; cursor: pointer; }
 .table-add-toggle[open] > summary { margin-bottom: 10px; }
@@ -999,8 +1005,6 @@ label > textarea {
 .facts dt { color: var(--text-faint); font-size: 0.72rem; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; }
 .facts dd { margin: 0; overflow-wrap: anywhere; }
 .check { display: inline-flex; flex-direction: row; align-items: center; gap: 8px; margin: -6px 0 16px; font-weight: 500; }
-.page-links { display: flex; gap: 16px; font-size: 0.82rem; }
-.page-links a[aria-current='page'] { color: var(--text); font-weight: 700; }
 .detail-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .section-link { margin-left: auto; font-size: 0.74rem; letter-spacing: 0; text-transform: none; }
 .project-lines { margin: 0; padding: 0; list-style: none; }
@@ -1339,11 +1343,15 @@ label > textarea {
   .detail-tabs { gap: 18px; }
   .table-add[data-fixed] { grid-template-columns: 1fr; }
 
-  .table-filters,
   .table-add { grid-template-columns: 1fr 1fr; }
-  .table-filters label:first-child,
   .table-add-body,
   .table-add .btn { grid-column: 1 / -1; }
+  /* Search shares the first row with a Filters button; the dropdowns and the routine toggle fold away until it opens them, two to a row. */
+  .table-filters { display: flex; flex-flow: row wrap; }
+  .table-filters > * { flex: 1 1 calc(50% - 5px); min-width: 0; }
+  .table-filters > label:first-child { flex-basis: 50%; }
+  .table-filters > .filter-toggle { display: inline-flex; flex: none; }
+  .entries-view:not([data-filters='open']) .filter-extra { display: none; }
   .entry-row { flex-direction: column; gap: 8px; }
   .entry-row-actions { justify-content: flex-start; max-width: none; }
   .facts div { grid-template-columns: 1fr; gap: 2px; }

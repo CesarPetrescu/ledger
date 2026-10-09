@@ -335,6 +335,60 @@ describe('table', () => {
     expect(await within(await screen.findByRole('complementary', { name: 'Entry' })).findByText('Why it matters')).toBeInTheDocument()
   })
 
+  it('puts Recent actions and Trash in the same tab row as the lists', async () => {
+    mockApi({ ...base, 'GET /admin/api/entries': { body: { entries: [], sources: [], tags: [] } }, 'GET /admin/api/trash': { body: { items: [] } } })
+    renderApp('/admin/table')
+    const tabs = await screen.findByRole('navigation', { name: 'Table views' })
+    expect(within(tabs).getAllByRole('link').map((link) => link.textContent)).toEqual(['Activity', 'Todos', 'Decisions', 'Reading', 'Recent actions', 'Trash'])
+    expect(screen.queryByRole('navigation', { name: 'History' })).not.toBeInTheDocument()
+    await userEvent.setup().click(within(tabs).getByRole('link', { name: 'Trash' }))
+    expect(await screen.findByText('Trash is empty.')).toBeInTheDocument()
+    expect(window.location.search).toBe('?view=trash')
+    expect(within(tabs).getByRole('link', { name: 'Trash', current: 'page' })).toBeInTheDocument()
+    expect(within(tabs).getByRole('link', { name: 'Activity' })).not.toHaveAttribute('aria-current')
+  })
+
+  it('folds the dropdowns behind a Filters button that counts the active ones', async () => {
+    mockApi({ ...base, 'GET /admin/api/entries': { body: { entries: [], sources: ['codex'], tags: ['export'] } } })
+    renderApp('/admin/table?view=activity&tag=export&source=codex')
+    // The search box stays out; the tag and agent from the address count.
+    const toggle = await screen.findByRole('button', { name: 'Filters 2 active' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('checkbox', { name: /show routine entries/i }))
+    expect(toggle).toHaveAccessibleName('Filters 3 active')
+    await user.type(screen.getByRole('searchbox', { name: /search text/i }), 'checkpoint')
+    expect(toggle).toHaveAccessibleName('Filters 3 active')
+    await user.selectOptions(screen.getByRole('combobox', { name: /filter by tag/i }), '')
+    await user.selectOptions(screen.getByRole('combobox', { name: /filter by agent/i }), '')
+    await user.click(screen.getByRole('checkbox', { name: /show routine entries/i }))
+    expect(toggle).toHaveAccessibleName('Filters')
+    // On a phone the stylesheet hides every .filter-extra until the view is marked open.
+    const view = document.querySelector('.entries-view')!
+    expect(view).not.toHaveAttribute('data-filters')
+    for (const name of [/filter by project/i, /filter by kind/i, /filter by agent/i, /filter by tag/i]) expect(screen.getByRole('combobox', { name }).closest('label')).toHaveClass('filter-extra')
+    expect(screen.getByRole('checkbox', { name: /show routine entries/i }).closest('label')).toHaveClass('filter-extra')
+    expect(screen.getByRole('searchbox', { name: /search text/i }).closest('label')).not.toHaveClass('filter-extra')
+    await user.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(view).toHaveAttribute('data-filters', 'open')
+    await user.click(toggle)
+    expect(view).not.toHaveAttribute('data-filters')
+  })
+
+  it('counts a todo state or reading list other than the default as a filter', async () => {
+    mockApi({ ...base, 'GET /admin/api/entries': { body: { entries: [], sources: [], tags: [] } } })
+    const first = renderApp('/admin/table?view=todos')
+    const toggle = await screen.findByRole('button', { name: 'Filters' })
+    await userEvent.setup().selectOptions(screen.getByRole('combobox', { name: /filter by state/i }), 'done')
+    expect(toggle).toHaveAccessibleName('Filters 1 active')
+    first.unmount()
+    renderApp('/admin/table?view=reading')
+    const reading = await screen.findByRole('button', { name: 'Filters' })
+    await userEvent.setup().selectOptions(screen.getByRole('combobox', { name: /filter reading/i }), 'starred')
+    expect(reading).toHaveAccessibleName('Filters 1 active')
+  })
+
   it('shows an empty todo state', async () => {
     mockApi({ ...base, 'GET /admin/api/entries': { body: { entries: [], sources: [], tags: [] } } })
     renderApp('/admin/table?view=todos')
