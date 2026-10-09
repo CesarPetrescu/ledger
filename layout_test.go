@@ -137,8 +137,8 @@ func TestBuildAndAcceptanceTargets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(dockerfile), "FROM golang:1.27.1-alpine AS build") {
-		t.Fatal("Docker builder is not pinned to current patched Go 1.27.1")
+	if !strings.Contains(string(dockerfile), "FROM golang:1.27.2-alpine AS build") {
+		t.Fatal("Docker builder is not pinned to current patched Go 1.27.2")
 	}
 	mod, err := os.ReadFile("go.mod")
 	if err != nil {
@@ -163,8 +163,8 @@ func TestCIToolchainMatchesDockerBuilder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(workflow), "go-version: 1.27.1") {
-		t.Fatal("CI is not pinned to current patched Go 1.27.1")
+	if !strings.Contains(string(workflow), "go-version: 1.27.2") {
+		t.Fatal("CI is not pinned to current patched Go 1.27.2")
 	}
 }
 

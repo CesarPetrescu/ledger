@@ -43,6 +43,31 @@ describe('overflow menu', () => {
     expect(focused).toBe(screen.getByRole('button', { name: 'More actions for this entry' }))
   })
 
+  it('moves between items with the arrow keys, Home, and End, and keeps those keys from the page behind', async () => {
+    const pageKeys = vi.fn()
+    const onWindowKey = (event: KeyboardEvent) => { if (!event.defaultPrevented) pageKeys(event.key) }
+    window.addEventListener('keydown', onWindowKey)
+    try {
+      render(<OverflowMenu label="More actions" items={[{ label: 'Copy link', onSelect: vi.fn() }, { label: 'Archived', onSelect: vi.fn(), disabled: true }, { label: 'Delete', onSelect: vi.fn(), danger: true }]} />)
+      const user = userEvent.setup()
+      await user.click(screen.getByRole('button', { name: 'More actions' }))
+      expect(screen.getByRole('menuitem', { name: 'Copy link' })).toHaveFocus()
+      await user.keyboard('{ArrowDown}')
+      expect(screen.getByRole('menuitem', { name: 'Delete' })).toHaveFocus()
+      await user.keyboard('{ArrowDown}')
+      expect(screen.getByRole('menuitem', { name: 'Copy link' })).toHaveFocus()
+      await user.keyboard('{ArrowUp}')
+      expect(screen.getByRole('menuitem', { name: 'Delete' })).toHaveFocus()
+      await user.keyboard('{Home}')
+      expect(screen.getByRole('menuitem', { name: 'Copy link' })).toHaveFocus()
+      await user.keyboard('{End}')
+      expect(screen.getByRole('menuitem', { name: 'Delete' })).toHaveFocus()
+      expect(pageKeys).not.toHaveBeenCalled()
+    } finally {
+      window.removeEventListener('keydown', onWindowKey)
+    }
+  })
+
   it('names every research state the same way', () => {
     expect(researchStatusLabel('review')).toBe('Ready for review')
     expect(researchStatusLabel('question')).toBe('Question for you')
