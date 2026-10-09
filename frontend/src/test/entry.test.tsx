@@ -120,9 +120,9 @@ describe('entry page', () => {
     expect(window.location.pathname).toBe('/admin/projects/atlas')
   })
 
-  it('renders the full text as Markdown, without raw HTML, and shows the title and summary as plain text', async () => {
+  it('renders the full text as Markdown, showing raw HTML as literal text, and shows the title and summary as plain text', async () => {
     const formatted: TableEntry = {
-      ...todo, id: '80', body: 'Use **Qwen3 reranker** for search.\nIt beats `bge` on recall.\n\n- [docs](https://example.com/rerank)\n\n<img src=x onerror=alert(1)><script>alert(1)</script>',
+      ...todo, id: '80', body: 'Use **Qwen3 reranker** for search.\nIt beats `bge` on recall.\nReturn Vec<u8> and wrap it in a <details> block.\n\n- [docs](https://example.com/rerank)\n\n<img src=x onerror=alert(1)><script>alert(1)</script>',
       meta: { ...todo.meta!, title: 'Use **Qwen3 reranker**', gist: 'Beats `bge` on recall.', priority: 'normal' },
     }
     mockApi({
@@ -139,7 +139,9 @@ describe('entry page', () => {
     expect(within(body as HTMLElement).getByText('bge').tagName).toBe('CODE')
     expect(within(body as HTMLElement).getByRole('link', { name: 'docs' })).toHaveAttribute('rel', 'noopener noreferrer')
     expect(body).not.toHaveTextContent('**')
-    expect(body.querySelector('script, img')).toBeNull()
+    // Tags and generics outside backticks are words in the body, never markup.
+    expect(body).toHaveTextContent('Return Vec<u8> and wrap it in a <details> block.')
+    expect(body.querySelector('script, img, details')).toBeNull()
   })
 
   it('shows one emphasis at most: High, else Important, else Low', async () => {

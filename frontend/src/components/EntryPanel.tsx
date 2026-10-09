@@ -57,8 +57,6 @@ export function EntrySplit({ children }: { children: ReactNode }) {
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || isTyping(event.target)) return
       if (document.querySelector('dialog[open]')) return
-      // An open ⋯ menu owns its keys: Escape closes the menu, not the entry.
-      if (event.target instanceof Element && event.target.closest('[role="menu"]')) return
       if (event.key === 'Escape') {
         event.preventDefault()
         close()

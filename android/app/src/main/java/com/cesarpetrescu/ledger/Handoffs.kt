@@ -114,7 +114,7 @@ private fun MessageCard(model: LedgerModel, message: JSONObject, markdown: Boole
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         val to = if (message.text("target").isNotBlank()) " → ${message.text("target")}" else ""
         // A research thread is notes around one brief: who wrote each, not its delivery and work states.
-        if (research != null) MarkdownCard(writerName(message.text("source")), displayTime(message.text("created_at")) + to, message.text("body"), markdown)
+        if (research != null) MarkdownCard(researchNoteTitle(message), displayTime(message.text("created_at")) + to, message.text("body"), markdown)
         else MarkdownCard("${label(message.text("work_state"))} · ${label(message.text("delivery_state"))}",
             "${displayTime(message.text("created_at"))} · ${message.text("source")}$to", message.text("body"), markdown)
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -189,7 +189,8 @@ fun MessageEditor(model: LedgerModel, id: String, reply: Boolean = false) {
     val markdown = rememberMarkdownPreview()
     var body by rememberSaveable { mutableStateOf("") }
     var target by rememberSaveable { mutableStateOf("") }
-    var draft by rememberSaveable { mutableStateOf(true) }
+    // A research run never reads drafts, so a reply publishes unless the owner keeps it back to attach files.
+    var draft by rememberSaveable { mutableStateOf(!reply) }
     Page {
         item { Text(if (reply) "Reply" else "Add a message", style = MaterialTheme.typography.headlineSmall) }
         item { Field(if (reply) "Feedback or answer" else "Message", body, { body = it }, multiline = true, max = 100000) }

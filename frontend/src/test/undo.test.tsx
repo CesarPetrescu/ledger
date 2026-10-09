@@ -39,8 +39,14 @@ describe('undo, trash, and delete', () => {
     const user = userEvent.setup()
     await user.click(await screen.findByRole('button', { name: 'Add CSV export' }))
     const menu = await screen.findByRole('button', { name: 'More actions for this entry' })
-    // Escape closes the menu and leaves the entry open beside the list.
+    // Escape closes the menu and leaves the entry open beside the list, also with focus back on the ⋯ button.
     await user.click(menu)
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    expect(screen.getByRole('complementary', { name: 'Entry' })).toBeInTheDocument()
+    await user.click(menu)
+    await user.tab({ shift: true })
+    expect(menu).toHaveFocus()
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
     expect(screen.getByRole('complementary', { name: 'Entry' })).toBeInTheDocument()

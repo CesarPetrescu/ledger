@@ -156,6 +156,9 @@ fun researchActions(work: String, phase: String, brief: Boolean): List<Pair<Stri
     else -> emptyList()
 }
 
+/** A research note's card title: who wrote it, and Draft while it is unpublished, since the run reads no drafts. */
+fun researchNoteTitle(message: JSONObject) = writerName(message.text("source")) + if (message.text("work_state") == "draft") " · Draft" else ""
+
 /** The research status card: a title and what to do next. */
 fun researchHeadline(work: String, phase: String, attempt: Int, failures: Int, maxAttempts: Int, progress: String, lastError: String): Pair<String, String> = when {
     work == "draft" -> "Research draft" to "Queue it when the brief is ready."

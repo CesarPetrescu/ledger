@@ -25,6 +25,15 @@ describe('overflow menu', () => {
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })
 
+  it('closes when keyboard focus leaves it, so it never covers what has focus', async () => {
+    render(<div><OverflowMenu label="More actions for Atlas" items={[{ label: 'Delete project', onSelect: vi.fn(), danger: true }]} /><button type="button">next</button></div>)
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'More actions for Atlas' }))
+    await user.tab()
+    expect(screen.getByRole('button', { name: 'next' })).toHaveFocus()
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+  })
+
   it('hands focus back to its button before running an item, so a dialog the item opens returns focus there', async () => {
     let focused: Element | null = null
     render(<OverflowMenu label="More actions for this entry" items={[{ label: 'Delete entry', onSelect: () => { focused = document.activeElement }, danger: true }]} />)

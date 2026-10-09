@@ -136,11 +136,12 @@ describe('project browser', () => {
       ...projectBase,
       'GET /admin/api/projects': { body: { projects: [atlas] } },
       'GET /admin/api/projects/atlas': { body: atlasDetail },
-      'GET /admin/api/table/projects': { body: { ...noSummaries, projects: [{ ...atlasSummary, digest: '', status_title: '', status_body: 'Deployed the new build', status_at: '2026-09-03T12:00:00Z' }] } },
+      'GET /admin/api/table/projects': { body: { ...noSummaries, projects: [{ ...atlasSummary, digest: '', status_title: '', status_body: 'Deployed the **new** build', status_at: '2026-09-03T12:00:00Z' }] } },
     })
     renderApp('/admin/projects/atlas')
     const status = await screen.findByRole('region', { name: 'Project status' })
     expect(within(status).getByText('Latest status')).toBeInTheDocument()
+    // Shown as plain words, as in the projects list.
     expect(within(status).getByText('Deployed the new build')).toBeInTheDocument()
   })
 

@@ -8,8 +8,9 @@ export interface OverflowItem {
   disabled?: boolean
 }
 
-/** A "⋯" button holding secondary actions, such as Delete, so they stay out of the main row. Escape or a
- * click outside closes it; the menu's first item takes focus when it opens. Choosing an item hands focus back to
+/** A "⋯" button holding secondary actions, such as Delete, so they stay out of the main row. Escape, a click
+ * outside, or focus moving elsewhere closes it, and Escape stops there instead of also closing the panel around it;
+ * the menu's first item takes focus when it opens. Choosing an item hands focus back to
  * the button first, so a confirmation dialog it opens returns focus there when it closes. */
 export function OverflowMenu({ label, items }: { label: string; items: OverflowItem[] }) {
   const [open, setOpen] = useState(false)
@@ -21,7 +22,7 @@ export function OverflowMenu({ label, items }: { label: string; items: OverflowI
     root.current?.querySelector<HTMLButtonElement>('[role="menuitem"]:not([disabled])')?.focus()
     const outside = (event: MouseEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false) }
     const key = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { setOpen(false); button.current?.focus() }
+      if (event.key === 'Escape') { event.preventDefault(); setOpen(false); button.current?.focus() }
     }
     document.addEventListener('mousedown', outside)
     document.addEventListener('keydown', key)
@@ -29,7 +30,8 @@ export function OverflowMenu({ label, items }: { label: string; items: OverflowI
   }, [open])
 
   return (
-    <div className="overflow-menu" ref={root}>
+    // Only focus landing outside closes it: a click that focuses nothing (Safari buttons) is left to the mousedown check.
+    <div className="overflow-menu" ref={root} onBlur={(event) => { if (event.relatedTarget instanceof Node && !root.current?.contains(event.relatedTarget)) setOpen(false) }}>
       <button ref={button} type="button" className="icon-button" aria-label={label} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((current) => !current)}>
         <Icon name="dots" />
       </button>

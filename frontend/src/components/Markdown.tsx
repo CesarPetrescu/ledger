@@ -2,16 +2,16 @@ import { useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
-// Handoff and entry text is written by agents: Markdown is rendered without
-// any raw HTML (skipHtml), links open in a new tab without referrer, unsafe URL
-// schemes are dropped by react-markdown, and remote images are shown as links
-// so opening a message never loads a tracker.
+// Handoff and entry text is written by agents: raw HTML is never rendered (no
+// rehype-raw, so a tag such as <details> or Vec<u8> shows as the literal text it
+// is), links open in a new tab without referrer, unsafe URL schemes are dropped
+// by react-markdown, and remote images are shown as links so opening a message
+// never loads a tracker.
 export function MarkdownText({ text }: { text: string }) {
   return (
     <div className="markdown">
       <Markdown
         remarkPlugins={[remarkGfm]}
-        skipHtml
         components={{
           a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>,
           img: ({ src, alt }) => (typeof src === 'string' && src ? <a href={src} target="_blank" rel="noopener noreferrer">{alt || 'Image'} (image link)</a> : <span>{alt}</span>),

@@ -59,6 +59,11 @@ class ContractTest {
         assertEquals("2 ready · 1 in progress", handoffProgress(general))
     }
 
+    @Test fun anUnpublishedResearchReplySaysDraft() {
+        assertEquals("You · Draft", researchNoteTitle(org.json.JSONObject("""{"source":"ledger-admin","work_state":"draft"}""")))
+        assertEquals("codex", researchNoteTitle(org.json.JSONObject("""{"source":"codex","work_state":"blocked"}""")))
+    }
+
     @Test fun countsArePluralizedCorrectly() {
         assertEquals("1 open todo", plural(1, "open todo"))
         assertEquals("3 open todos", plural(3, "open todo"))

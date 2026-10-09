@@ -268,6 +268,8 @@ class OwnerFlowTest {
             fillField("Answer claude-code", "The fixture pricing is right.")
             tap("Send")
             awaitText("Nothing is waiting on you.")
+            // The meta line and the labels say why the todo is here; no "Why:" line repeats them.
+            ui.onNodeWithText("Why:", substring = true).assertDoesNotExist()
             // Correct a label; the row then shows it and no longer asks for a check.
             tap("Write the fixture todo")
             awaitText("☑ Draft the fixture")

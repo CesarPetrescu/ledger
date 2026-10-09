@@ -7,6 +7,7 @@ import { useUndo } from '../hooks/useUndo'
 import { EmptyState, ErrorState, Icon, Loading, ResearchStatusBadge, StaleNotice, TierBadge, Timestamp } from '../components/ui'
 import { EntriesView, HealthBadge, LIVE, ProjectSummaryTable } from '../components/entries'
 import { EntrySplit, writerName } from '../components/EntryPanel'
+import { plainText } from '../components/Markdown'
 import { useResource } from '../hooks/useResource'
 import { Link, navigate } from '../router'
 
@@ -397,12 +398,12 @@ function ProjectStatus({ slug, summary }: { slug: string; summary: ProjectSummar
           <div><strong>{summary.week_agents.length}</strong><span>{summary.week_agents.length === 0 ? (summary.last_entry_at ? <>quiet; last entry <Timestamp iso={summary.last_entry_at} /></> : 'agents active') : summary.week_agents.map(writerName).join(', ')}</span></div>
         </li>
       </ul>
-      {blocked && <p className="project-status-blocked"><HealthBadge state={summary.status_state} /> {summary.status_detail || summary.status_title}</p>}
+      {blocked && <p className="project-status-blocked"><HealthBadge state={summary.status_state} /> {plainText(summary.status_detail || summary.status_title)}</p>}
       {latest ? (
         <div className="project-week">
           <p className="eyebrow">{summary.digest ? 'This week' : 'Latest status'}</p>
           {/* Until the AI summarises the week, the latest status stands in. */}
-          <p ref={digest} className={expanded ? 'digest' : 'digest clamp'}>{latest}</p>
+          <p ref={digest} className={expanded ? 'digest' : 'digest clamp'}>{plainText(latest)}</p>
           {(clipped || expanded) && <button type="button" className="link-button" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>{expanded ? 'Show less' : 'Read the whole week'}</button>}
         </div>
       ) : <p className="muted">No status yet. A weekly summary appears once agents have written here.</p>}

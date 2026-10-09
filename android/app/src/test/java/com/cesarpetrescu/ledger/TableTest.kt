@@ -172,20 +172,6 @@ class TableTest {
         assertEquals(listOf("Check", "billing"), focusLabels(JSONObject().put("kind", "note").put("meta", meta)).map { it.first })
     }
 
-    @Test fun whyHereSaysOnlyWhatTheRowDoesNotAlreadySay() {
-        val now = java.time.OffsetDateTime.parse("2026-09-20T12:00:00Z")
-        fun entry(kind: String, meta: JSONObject, created: String = "2026-09-20T10:00:00Z", handled: Boolean = false) = JSONObject()
-            .put("kind", kind).put("source", "codex").put("created_at", created).put("meta", meta).put("owner", JSONObject().put("handled", handled))
-        // The ask is the row's headline and the meta line names the agent and when; a due date is the Due or Overdue label.
-        assertEquals("", whyHere(entry("note", JSONObject().put("ask", "Confirm it")), now))
-        assertEquals("", whyHere(entry("todo", JSONObject().put("ask", "Confirm it").put("priority", "high")), now))
-        assertEquals("", whyHere(entry("todo", JSONObject().put("due", "2026-09-19").put("priority", "high")), now))
-        assertEquals("", whyHere(entry("todo", JSONObject().put("due", "2026-09-25")), now))
-        assertEquals("The AI rated it high priority.", whyHere(entry("todo", JSONObject().put("priority", "high")), now))
-        assertEquals("It has been open for 20 days.", whyHere(entry("todo", JSONObject(), created = "2026-08-31T12:00:00Z"), now))
-        assertEquals("", whyHere(entry("decision", JSONObject()), now))
-    }
-
     @Test fun aSummaryThatOnlyRepeatsTheBodyIsDetected() {
         assertEquals(true, sameText("Use the Qwen3 reranker for search.", "  use the Qwen3\nreranker for search "))
         assertEquals(false, sameText("Use the Qwen3 reranker.", "Use **Qwen3 reranker** for search, it beat BGE."))

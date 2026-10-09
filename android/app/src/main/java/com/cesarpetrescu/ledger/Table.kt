@@ -140,19 +140,6 @@ fun focusLabels(entry: JSONObject, today: LocalDate = LocalDate.now(), now: Offs
     }
 }
 
-/** Why an entry needs the owner, in plain words; empty when nothing waits on them or the row already says why:
- *  an ask is its headline and its Asks you label, a due date its Due or Overdue label. */
-fun whyHere(entry: JSONObject, now: OffsetDateTime = OffsetDateTime.now()): String {
-    val meta = entry.optJSONObject("meta")
-    val source = entry.text("source")
-    if (asksYou(entry) || entry.text("kind") != "todo" || entry.optJSONObject("resolved_by") != null) return ""
-    if (runCatching { LocalDate.parse(meta?.text("due")) }.isSuccess) return ""
-    if (meta?.text("priority") == "high") return "The AI rated it high priority."
-    val days = runCatching { Duration.between(OffsetDateTime.parse(entry.text("created_at")), now).toDays() }.getOrDefault(0)
-    if (days > STALE_DAYS) return "It has been open for $days days."
-    return "An open todo from $source, added ${ago(entry.text("created_at"), now)} ago."
-}
-
 /** Offers notifications once, until turned on or dismissed. */
 @Composable
 private fun NotificationPrompt(model: LedgerModel) {
@@ -355,7 +342,6 @@ private fun EntryRowContent(entry: JSONObject, view: String, repeats: List<JSONO
         }
         val summary = if (headline != null) entryTitle(entry) else entrySummary(entry, reading)
         if (summary.isNotBlank()) Text(summary, style = MaterialTheme.typography.bodyMedium, color = muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        if (view == "inbox") whyHere(entry).takeIf { it.isNotBlank() }?.let { Text("Why: $it", style = MaterialTheme.typography.bodySmall, color = muted, maxLines = 2, overflow = TextOverflow.Ellipsis) }
         val labels = focusLabels(entry)
         if (labels.isNotEmpty() || repeats.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             labels.forEach { (text, tone) -> Tag(text, tone) }
@@ -413,7 +399,6 @@ private fun EntrySheet(model: LedgerModel, entry: JSONObject, repeats: List<JSON
         if (deleting) ConfirmDialog("Delete entry", "Move this entry to Trash? You can undo it or restore it from Trash for 30 days.", { deleting = false }) {
             model.undoable("Entry moved to Trash", after = { afterDelete(); close() }) { it.request("DELETE", "/entries/${segment(id)}") }
         }
-        whyHere(entry).takeIf { it.isNotBlank() }?.let { Text("Why it needs you: $it", style = MaterialTheme.typography.bodyMedium) }
         entry.text("reply_to").takeIf { it.isNotBlank() }?.let { root ->
             TextButton(onClick = { open(root) }, contentPadding = PaddingValues(0.dp)) { Text("A reply to an earlier entry · open it", style = MaterialTheme.typography.bodySmall) }
         }
