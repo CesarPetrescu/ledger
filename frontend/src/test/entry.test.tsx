@@ -75,8 +75,17 @@ describe('entry page', () => {
     // Who asked and when is already in the line above; no "waiting on your answer" repeat.
     expect(question).not.toHaveTextContent(/waiting on your answer/)
     const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: 'Send answer' }))
-    expect(screen.getByRole('alert')).toHaveTextContent('Write a reply first.')
+    // jsdom has no layout, so no scrollIntoView: record what asks to be scrolled into view.
+    const scrolled: Element[] = []
+    Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this) }
+    try {
+      await user.click(screen.getByRole('button', { name: 'Send answer' }))
+      expect(screen.getByRole('alert')).toHaveTextContent('Write a reply first.')
+      // On a phone the error under the box would sit behind the tab bar; it scrolls into view instead.
+      expect(scrolled).toContain(screen.getByRole('alert'))
+    } finally {
+      delete (Element.prototype as Partial<Element>).scrollIntoView
+    }
     await user.type(screen.getByLabelText('Answer claude-code'), '10% is right')
     await user.click(screen.getByRole('button', { name: 'Send answer' }))
     expect(await screen.findByText('Reply saved; marked handled.')).toBeInTheDocument()

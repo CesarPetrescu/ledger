@@ -19,9 +19,19 @@ export function OverflowMenu({ label, items, text }: { label: string; items: Ove
 
   // The list opens leftward from its button; a button near the left edge (a phone row's actions start there) would
   // push it off screen, so it opens rightward instead. Measured before paint, on the list each opening mounts afresh.
+  // A list opened low on the page scrolls into view; on phones the page's scroll padding keeps it above the tab bar.
+  // At the foot of the page there is nothing left to scroll, so a list that would still end under the tab bar or the
+  // window's bottom edge opens upward instead, when there is room above its button.
   useLayoutEffect(() => {
     const list = root.current?.querySelector<HTMLElement>('.overflow-menu-list')
-    if (list && list.getBoundingClientRect().left < 8) list.dataset.align = 'start'
+    if (!list) return
+    if (list.getBoundingClientRect().left < 8) list.dataset.align = 'start'
+    // Not every environment scrolls (tests run without layout).
+    list.scrollIntoView?.({ block: 'nearest' })
+    const floor = window.innerHeight - (parseFloat(getComputedStyle(document.documentElement).scrollPaddingBottom) || 0)
+    const { bottom, height } = list.getBoundingClientRect()
+    const above = button.current?.getBoundingClientRect().top ?? 0
+    if (bottom > floor && above - height - 4 >= 0) list.dataset.side = 'top'
   }, [open])
 
   useEffect(() => {

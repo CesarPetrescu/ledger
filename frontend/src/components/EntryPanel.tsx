@@ -250,6 +250,9 @@ export function ReplyBox({ entry, asking, autoFocus = false }: { entry: TableEnt
   const [body, setBody] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  // The error shows under the box; at the foot of a phone screen it would sit behind the tab bar unless scrolled up.
+  const errorRef = useRef<HTMLParagraphElement>(null)
+  useEffect(() => { if (error) errorRef.current?.scrollIntoView?.({ block: 'nearest' }) }, [error])
   const toast = useToast()
   const undo = useUndo()
   const agent = entry.source === OWNER_SOURCE ? '' : entry.source
@@ -289,7 +292,7 @@ export function ReplyBox({ entry, asking, autoFocus = false }: { entry: TableEnt
         </p>
         <button type="submit" className="btn btn-small btn-primary" disabled={busy}>{busy ? 'Sending…' : asking ? 'Send answer' : 'Reply'}</button>
       </div>
-      {error && <p className="field-error" role="alert">{error}</p>}
+      {error && <p ref={errorRef} className="field-error" role="alert">{error}</p>}
     </form>
   )
 }
