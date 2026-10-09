@@ -1073,7 +1073,7 @@ label > textarea {
 /* The inbox pane is 300px wide on laptops, less its scrollbar, so the two create buttons are compact enough to share the title's row. */
 .handoffs .page-head { align-items: center; column-gap: 10px; }
 .handoff-head-actions { display: flex; gap: 6px; }
-.handoff-head-actions .btn { padding: 0 8px; gap: 4px; }
+.handoff-head-actions .btn { min-height: var(--control); padding: 0 8px; gap: 4px; }
 .handoff-list { border-top: 1px solid var(--border); }
 .handoff-list li { border-bottom: 1px solid var(--border); }
 .handoff-list a { display: grid; gap: 5px; padding: 16px 10px 16px 13px; border-left: 3px solid transparent; color: var(--text); }
@@ -1086,7 +1086,7 @@ label > textarea {
 .handoff-counts [data-status='blocked'] { color: var(--danger); }
 .handoff-counts [data-status='ready'] { color: var(--accent); }
 .handoff-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin: 0; }
-.handoff-summary div { padding-bottom: 18px; border-bottom: 1px solid var(--border); }
+.handoff-summary > div { padding-bottom: 18px; border-bottom: 1px solid var(--border); }
 .handoff-summary > div:only-child { grid-column: 1 / -1; }
 .handoff-summary dt { margin-bottom: 6px; color: var(--text-faint); font-size: 0.68rem; font-weight: 650; letter-spacing: 0.07em; text-transform: uppercase; }
 .handoff-summary dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -1415,7 +1415,6 @@ label > textarea {
 
 @media (pointer: coarse) {
   .primary-nav a { min-height: 48px; }
-  .handoff-head-actions .btn { min-height: var(--control); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1454,6 +1453,9 @@ label > textarea {
 .entry-detail-head { display: grid; gap: 8px; }
 .entry-detail-head h2 { margin: 0; font-size: 1.3rem; letter-spacing: -0.02em; line-height: 1.3; outline: none; }
 .entry-page .entry-detail-head h2 { font-size: 1.55rem; }
+.entry-detail-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.entry-detail-top .icon-button { width: 34px; min-height: 34px; }
+@media (pointer: coarse) { .entry-detail-top .icon-button { width: var(--control); min-height: var(--control); } }
 .entry-detail-context { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; color: var(--text-soft); font-size: 0.8rem; }
 .entry-detail-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0; }
 .entry-detail-head .lede { margin: 0; color: var(--text-body); }
@@ -1465,7 +1467,6 @@ label > textarea {
 .entry-question-text { margin: 0; color: var(--text); font-size: 1rem; font-weight: 600; line-height: 1.45; }
 
 .entry-detail-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 12px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-.entry-detail-actions-end { margin-left: auto; }
 .snooze-select select { height: 32px; padding: 0 28px 0 10px; font-size: 0.82rem; }
 
 .reply-box { display: grid; gap: 8px; }
@@ -1587,6 +1588,11 @@ label > textarea {
   .cal-cell .cal-item { font-size: 0; padding: 0; height: 6px; }
   .cal-weekdays span { padding: 6px 2px; text-align: center; font-size: 0.64rem; }
   .cal-cell { min-height: 58px; padding: 2px; }
+  /* Agenda is the phone default: the title gets its own line instead of sharing one with the label and project. */
+  .cal-agenda-items { padding-left: 0; border-left: 0; }
+  .cal-agenda-items .cal-item { flex-wrap: wrap; column-gap: 8px; }
+  .cal-agenda-items .cal-item-time { min-width: 0; }
+  .cal-agenda-items .cal-item-title { flex-basis: 100%; white-space: normal; }
 }
 
 /* ---- Scrollbars: thin, themed, out of the way ---- */

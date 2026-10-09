@@ -50,13 +50,26 @@ class ContractTest {
 
     @Test fun handoffListShowsResearchStateInsteadOfMessageCounts() {
         val research = org.json.JSONObject("""{"kind":"research","research_status":"review","ready_count":0,"in_progress_count":0,"done_count":0}""")
-        assertEquals("Research · Ready for review", handoffProgress(research))
+        // The state is a coloured label, amber when it waits on the owner; the empty message counts are left out.
+        assertEquals("", handoffProgress(research))
+        assertEquals(listOf("Research" to Tone.Neutral, "Ready for review" to Tone.Warn), researchTags(research))
+        assertEquals("Question for you" to Tone.Warn, researchTags(org.json.JSONObject("""{"kind":"research","research_status":"question"}"""))[1])
+        assertEquals("Queued" to Tone.Accent, researchTags(org.json.JSONObject("""{"kind":"research","research_status":"queued"}"""))[1])
         // A server without research_status still marks the task as research.
-        assertEquals("Research", handoffProgress(research.put("research_status", org.json.JSONObject.NULL)))
+        assertEquals(listOf("Research" to Tone.Neutral), researchTags(research.put("research_status", org.json.JSONObject.NULL)))
         assertEquals(listOf("Draft", "Queued", "Running", "Ready for review", "Question for you", "Stopped", "Accepted"),
             listOf("draft", "queued", "running", "review", "question", "stopped", "accepted").map(::researchStatusLabel))
         val general = org.json.JSONObject("""{"kind":"general","draft_count":0,"ready_count":2,"in_progress_count":1,"blocked_count":0,"done_count":0}""")
         assertEquals("2 ready · 1 in progress", handoffProgress(general))
+        assertEquals(emptyList<Pair<String, Tone>>(), researchTags(general))
+    }
+
+    @Test fun replyStepsBackWhileAcceptOrQueueLeads() {
+        assertEquals(true, researchLeads("blocked", "review"))
+        assertEquals(true, researchLeads("draft", ""))
+        // Answering a question, Reply is the next step and stays filled.
+        assertEquals(false, researchLeads("blocked", "question"))
+        assertEquals(false, researchLeads("in_progress", ""))
     }
 
     @Test fun anUnpublishedResearchReplySaysDraft() {

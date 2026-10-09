@@ -120,6 +120,20 @@ describe('entry page', () => {
     expect(window.location.pathname).toBe('/admin/projects/atlas')
   })
 
+  it('puts the ⋯ menu on the top line and leaves out an action row with nothing in it', async () => {
+    const decision: TableEntry = { ...noteEntry, owner, id: '90', kind: 'decision', source: 'codex', created_at: now, project_name: 'Atlas', meta: { title: 'Rerank the top 50', tags: [], refs: [], origin: 'model' } }
+    mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/entries/90': { body: { ...decision, repeats: [], repeats_total: 0 } },
+      'GET /admin/api/entries/90/history': { body: { history: [] } },
+      'GET /admin/api/entries/90/related': { body: { related: [] } },
+    })
+    renderApp('/admin/entries/90')
+    const menu = await screen.findByRole('button', { name: 'More actions for this entry' })
+    expect(menu.closest('.entry-detail-head')).not.toBeNull()
+    expect(document.querySelector('.entry-detail-actions')).toBeNull()
+  })
+
   it('renders the full text as Markdown, showing raw HTML as literal text, and shows the title and summary as plain text', async () => {
     const formatted: TableEntry = {
       ...todo, id: '80', body: 'Use **Qwen3 reranker** for search.\nIt beats `bge` on recall.\nReturn Vec<u8> and wrap it in a <details> block.\n\n- [docs](https://example.com/rerank)\n\n<img src=x onerror=alert(1)><script>alert(1)</script>',

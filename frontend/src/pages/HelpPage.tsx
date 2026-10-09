@@ -71,7 +71,7 @@ export function HelpPage() {
         <h2 id="help-undo" className="section-title">Undo and Trash</h2>
         <ul className="help-points">
           <li>Every quick action (mark done, reopen, read, star, handled, snooze, delete) shows an Undo button, and you can undo any of the last seven days' actions from <Link to="/table?view=recent">Recent actions</Link>.</li>
-          <li>Deleting an entry or a project moves it to <Link to="/table?view=trash">Trash</Link>, where it can be restored for 30 days. Entries can't be edited; add a correction as a new entry.</li>
+          <li>Delete an entry or a project from its ⋯ menu; it moves to <Link to="/table?view=trash">Trash</Link>, where it can be restored for 30 days. Entries can't be edited; add a correction as a new entry.</li>
         </ul>
       </section>
     </article>

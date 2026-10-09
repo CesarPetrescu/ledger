@@ -182,9 +182,26 @@ fun researchStatusLabel(status: String) = when (status) {
     else -> ""
 }
 
-/** A handoff list row's state: a research task's status, or how many messages are in each work state. */
+/** A research list row's labels: Research, then its state, coloured like the web badge (amber when it waits on the owner). */
+fun researchTags(handoff: JSONObject): List<Pair<String, Tone>> {
+    if (handoff.text("kind") != "research") return emptyList()
+    val status = handoff.text("research_status")
+    val tone = when (status) {
+        "review", "question" -> Tone.Warn
+        "queued", "running" -> Tone.Accent
+        "accepted" -> Tone.Good
+        else -> Tone.Neutral
+    }
+    return listOf("Research" to Tone.Neutral) + listOf(researchStatusLabel(status) to tone).filter { it.first.isNotBlank() }
+}
+
+/** The research card's filled buttons, Accept and Queue; while one shows ([researchLeads]), Reply is outlined so only one button leads. */
+fun isResearchPrimary(action: String) = action == "complete" || action == "publish"
+fun researchLeads(work: String, phase: String) = researchActions(work, phase, brief = true).any { isResearchPrimary(it.first) }
+
+/** A general handoff list row's state: how many messages are in each work state. A research task shows [researchTags] instead. */
 fun handoffProgress(handoff: JSONObject): String =
-    if (handoff.text("kind") == "research") listOf("Research", researchStatusLabel(handoff.text("research_status"))).filter { it.isNotBlank() }.joinToString(" · ")
+    if (handoff.text("kind") == "research") ""
     else listOf("draft_count" to "draft", "ready_count" to "ready", "in_progress_count" to "in progress", "blocked_count" to "blocked", "done_count" to "done")
         .filter { handoff.optInt(it.first) > 0 }.joinToString(" · ") { (key, name) -> "${handoff.optInt(key)} $name" }
 

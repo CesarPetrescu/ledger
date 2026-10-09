@@ -16,4 +16,6 @@ it('covers the calendar, research, repos, and where access settings live', async
   const access = screen.getByRole('region', { name: 'Repos and access' })
   for (const topic of ['Repos', 'GitHub sync', 'API keys']) expect(within(access).getByText(topic)).toBeInTheDocument()
   expect(within(access).getByRole('link', { name: 'Agents' })).toHaveAttribute('href', '/admin/agents')
+  // Delete moved behind the ⋯ menu; Help says where it went.
+  expect(screen.getByText(/Delete an entry or a project from its ⋯ menu/)).toBeInTheDocument()
 })

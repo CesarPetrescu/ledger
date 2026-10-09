@@ -99,7 +99,7 @@ val helpSections = listOf(
         "Settings › API keys: keys that let a server such as Adastrion Core dispatch research. Create them in the web console under Agents › API keys; revoke them here.\n" +
         "Settings › Approve a device: enter the code the Ledger CLI shows.\n" +
         "The web console keeps all of these on its Agents page, with GitHub sync and the approval password.",
-    "Undo and Trash" to "Every quick action shows Undo, and More › Recent actions lets you undo any of the last seven days' actions. Deleted entries and projects stay in More › Trash for 30 days.",
+    "Undo and Trash" to "Every quick action shows Undo, and More › Recent actions lets you undo any of the last seven days' actions. Delete an entry or a project from its ⋯ menu; it stays in More › Trash for 30 days.",
 )
 
 /** How Ledger works and how it decides what to show. */

@@ -349,7 +349,8 @@ function DeleteProject({ project }: { project: Project }) {
             : 'Counting what this project contains…'}
         </p>
         <label>
-          Type <code>{project.slug}</code> to confirm
+          {/* One span: the label is a flex column, so loose text and the code would stack on three lines. */}
+          <span>Type <code>{project.slug}</code> to confirm</span>
           <input value={typed} onChange={(event) => setTyped(event.target.value)} autoComplete="off" spellCheck={false} />
         </label>
       </ConfirmDialog>

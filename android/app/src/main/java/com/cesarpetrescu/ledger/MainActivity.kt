@@ -304,11 +304,12 @@ fun Choice(label: String, value: String, options: List<Pair<String, String>>, ch
 }
 
 @Composable
-fun SummaryCard(title: String, subtitle: String = "", body: String = "", onClick: (() -> Unit)? = null) {
+fun SummaryCard(title: String, subtitle: String = "", body: String = "", tags: List<Pair<String, Tone>> = emptyList(), onClick: (() -> Unit)? = null) {
     val contents: @Composable ColumnScope.() -> Unit = {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             if (subtitle.isNotBlank()) Text(subtitle, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+            if (tags.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) { tags.forEach { (text, tone) -> Tag(text, tone) } }
             if (body.isNotBlank()) SelectionContainer { Text(body, style = MaterialTheme.typography.bodyMedium) }
         }
     }

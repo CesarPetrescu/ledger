@@ -53,7 +53,7 @@ fun Handoffs(model: LedgerModel) {
                 if (data.rows("handoffs").isEmpty()) item { Empty("No handoffs match this view.") }
                 items(data.rows("handoffs")) { h ->
                     SummaryCard(h.text("title"), h.text("project_name").ifBlank { "General" } + " · " + displayTime(h.text("updated_at")),
-                        listOf(handoffProgress(h), h.text("description")).filter { it.isNotBlank() }.joinToString("\n")) { model.go("handoff/${h.text("id")}") }
+                        listOf(handoffProgress(h), h.text("description")).filter { it.isNotBlank() }.joinToString("\n"), researchTags(h)) { model.go("handoff/${h.text("id")}") }
                 }
                 item { Row {
                     if (before.isNotBlank()) TextButton(onClick = { before = "" }) { Text("Latest") }
@@ -77,11 +77,11 @@ fun HandoffDetail(model: LedgerModel, id: String) {
                 val (title, hint) = researchHeadline(research.text("state"), research.text("phase"), research.optInt("attempt"), research.optInt("failures"), research.optInt("max_attempts"), research.text("progress"), research.text("last_error"))
                 MarkdownCard("Research task", title, hint, false)
                 // The task's buttons live here: the brief is the oldest message and a long thread pages it out.
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.padding(top = 12.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     researchActions(research.text("state"), research.text("phase"), true).forEach { (action, name) ->
                         val run: () -> Unit = { model.act("$name applied") { it.request("POST", "/handoff-messages/${segment(research.text("message_id"))}/actions", json("action" to action)) } }
                         // Accept and Queue lead; Send back and the other moves are secondary.
-                        if (action == "complete" || action == "publish") Button(onClick = run, enabled = !model.busy) { Text(name) }
+                        if (isResearchPrimary(action)) Button(onClick = run, enabled = !model.busy) { Text(name) }
                         else OutlinedButton(onClick = run, enabled = !model.busy) { Text(name) }
                     }
                 }
@@ -90,9 +90,11 @@ fun HandoffDetail(model: LedgerModel, id: String) {
                 val export = rememberDownload(model, "/handoffs/${segment(id)}/export", "handoff-$id.md", "text/markdown")
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     // A research thread takes the owner's feedback or answer; the run reads it on Send back or Resume.
-                    Button(onClick = { model.go(if (research != null) "message-new/$id/reply" else "message-new/$id") }, enabled = !model.busy) {
-                        Text(if (research != null) "Reply" else "Add message")
-                    }
+                    val write = { model.go(if (research != null) "message-new/$id/reply" else "message-new/$id") }
+                    val label = if (research != null) "Reply" else "Add message"
+                    // Under Accept or Queue, Reply steps back so one button leads; answering a question, Reply is the next step.
+                    if (research != null && researchLeads(research.text("state"), research.text("phase"))) OutlinedButton(onClick = write, enabled = !model.busy) { Text(label) }
+                    else Button(onClick = write, enabled = !model.busy) { Text(label) }
                     Overflow("More actions for this handoff", listOf(MenuAction("Edit details") { model.go("handoff-edit/$id") }, MenuAction("Export", run = export)), enabled = !model.busy)
                 }
             }
@@ -179,7 +181,8 @@ private fun HandoffForm(model: LedgerModel, id: String, h: JSONObject) {
 fun DraftSwitch(draft: Boolean, change: (Boolean) -> Unit) {
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
         Switch(checked = draft, onCheckedChange = change, enabled = LocalEditingEnabled.current)
-        Text(if (draft) "Save as draft · attach files before publishing" else "Publish immediately")
+        // A fixed label with checked = draft; "Publish immediately" switched off read as publishing turned off.
+        Text("Save as draft · attach files before publishing")
     }
 }
 

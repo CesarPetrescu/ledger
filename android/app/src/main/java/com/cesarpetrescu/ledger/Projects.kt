@@ -102,7 +102,7 @@ fun SearchScreen(model: LedgerModel) {
                     // An entry hit opens the entry itself; a project hit opens the project.
                     val entryId = hit.text("entry_id")
                     SummaryCard(hit.text("project_name").ifBlank { hit.text("ref") }, label(hit.text("kind")), hit.text("snippet"),
-                        when {
+                        onClick = when {
                             entryId.isNotBlank() -> ({ model.go("entry-view/${segment(entryId)}") })
                             hit.text("project_slug").isNotBlank() -> ({ model.go(projectRoute(hit.text("project_slug"))) })
                             else -> null
