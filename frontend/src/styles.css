@@ -1070,7 +1070,7 @@ label > textarea {
 .summary-table .needs-me { margin: 4px 0 0; max-width: 42ch; color: var(--warning); }
 .summary-table code { white-space: nowrap; }
 .summary-table td:nth-child(4) { min-width: 9rem; }
-/* The inbox pane is 300px wide on laptops, less its scrollbar, so the two create buttons are compact enough to share the title's row. */
+/* The create buttons share the title's row on desktops (a 330px pane) and phones from 390px; where the pane is narrower they wrap under the title. */
 .handoffs .page-head { align-items: center; column-gap: 10px; }
 .handoff-head-actions { display: flex; gap: 6px; }
 .handoff-head-actions .btn { min-height: var(--control); padding: 0 8px; gap: 4px; }
@@ -1388,7 +1388,8 @@ label > textarea {
   .result-meta { gap: 3px 10px; margin-top: 1px; font-size: 0.67rem; }
   .result-meta > * + *::before { margin-right: 10px; }
   .entry-head .score { flex-basis: 100%; margin-left: 0; }
-  .dialog-actions { display: grid; }
+  /* One full-width column: justify-content: flex-end would keep a content-sized track at the right. */
+  .dialog-actions { display: grid; grid-template-columns: minmax(0, 1fr); }
   .calendar-connect { width: 100%; margin: 0; padding: 28px 20px; border-width: 0 0 1px; }
   .calendar-connect form { grid-template-columns: 1fr; }
   .calendar-auth-wait { align-items: stretch; flex-direction: column; }
@@ -1574,6 +1575,7 @@ label > textarea {
 .cal-week-day .cal-item-title { white-space: normal; }
 
 .calendar-agenda section[data-today='true'] > h2 { color: var(--accent); }
+.calendar-agenda section[data-overdue='true'] > h2 { color: var(--danger); }
 .cal-agenda-items { display: grid; gap: 4px; padding: 10px 0 10px 14px; border-left: 1px solid var(--border); }
 .cal-agenda-items .cal-item { padding: 8px 10px; font-size: 0.86rem; }
 .cal-agenda-items .cal-item-time { min-width: 8.5rem; }

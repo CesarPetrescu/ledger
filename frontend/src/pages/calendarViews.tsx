@@ -133,11 +133,19 @@ export function WeekColumns({ anchor, items, today }: { anchor: string; items: C
   )
 }
 
-export function Agenda({ items, today }: { items: CalendarItem[]; today: string }) {
+/** Days with something on them; `overdue` (open todos due before the first day) leads, oldest first, each labeled with its due day. */
+export function Agenda({ items, overdue = [], today }: { items: CalendarItem[]; overdue?: CalendarItem[]; today: string }) {
   const grouped = [...byDay(items).entries()].sort(([a], [b]) => a.localeCompare(b))
-  if (grouped.length === 0) return <p className="muted">Nothing in these 30 days.</p>
+  if (grouped.length === 0 && overdue.length === 0) return <p className="muted">Nothing in these 30 days.</p>
   return (
     <div className="calendar-agenda">
+      {overdue.length > 0 && (
+        <section data-overdue="true">
+          <h2>Overdue</h2>
+          <div className="cal-agenda-items">{[...overdue].sort((a, b) => a.date.localeCompare(b.date) || a.sort.localeCompare(b.sort)).map((item) => <Chip key={item.key} item={{ ...item, time: `Due ${shortDay.format(localDate(item.date))}` }} />)}</div>
+        </section>
+      )}
+      {grouped.length === 0 && <p className="muted">Nothing in these 30 days.</p>}
       {grouped.map(([day, list]) => (
         <section key={day} data-today={day === today ? 'true' : undefined}>
           <h2><time dateTime={day}>{longDay.format(localDate(day))}</time></h2>
