@@ -1,5 +1,6 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
 import { api, ENTRY_KINDS, type Project, type SearchHit, type SearchRequest } from '../api'
+import { plainText } from '../components/Markdown'
 import { ErrorState, Icon, Loading, Timestamp } from '../components/ui'
 import { useResource } from '../hooks/useResource'
 import { Link, navigate, useLocation } from '../router'
@@ -31,11 +32,17 @@ function highlighted(text: string, query: string): ReactNode {
   )
 }
 
+/** A snippet's lines as plain words: blank lines and code fences go, Markdown marks are stripped. */
+function snippetLines(snippet: string): string[] {
+  return snippet.split('\n').filter((line) => !/^\s*(```|~~~)/.test(line)).map(plainText).filter((line) => line !== '')
+}
+
 // The score is only a relevance estimate when the reranker produced it.
 function ResultItem({ hit, query, scored }: { hit: SearchHit; query: string; scored: boolean }) {
-  const [headline = hit.snippet, ...detail] = hit.snippet.split('\n')
+  const lines = snippetLines(hit.snippet)
+  const [headline = hit.snippet, ...detail] = lines
   const title = hit.kind === 'project' ? hit.project_name || hit.project_slug : headline
-  const excerpt = hit.kind === 'project' ? hit.snippet : detail.join(' ')
+  const excerpt = hit.kind === 'project' ? lines.join(' ') : detail.join(' ')
   return (
     <li className="search-result" data-kind={hit.kind}>
       <p className="result-kind">{hit.kind}</p>

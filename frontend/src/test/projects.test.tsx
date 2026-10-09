@@ -285,7 +285,7 @@ describe('project browser', () => {
   })
 
   it('edits an existing project in place', async () => {
-    const savedAtlas = Object.fromEntries(Object.entries({ ...atlas, goal: 'Ship v2' }).filter(([key]) => key !== 'last_entry_at'))
+    const savedAtlas = Object.fromEntries(Object.entries({ ...atlas, goal: 'Ship v2', deadline: '2026-11-15' }).filter(([key]) => key !== 'last_entry_at'))
     const { calls } = mockApi({
       ...projectBase,
       'GET /admin/api/projects': { body: { projects: [atlas] } },
@@ -304,12 +304,17 @@ describe('project browser', () => {
     expect(await screen.findByRole('status')).toHaveTextContent(/project saved/i)
     const meta = screen.getByRole('list', { name: /project details/i })
     expect(within(meta).getByText('Goal').nextElementSibling).toHaveTextContent('Ship v2')
+    // A date deadline reads as a short date, as in the header; the edit form keeps the ISO day.
+    expect(within(meta).getByText('Deadline').nextElementSibling).toHaveTextContent(deadlineLabel('2026-11-15'))
+    expect(meta).not.toHaveTextContent('2026-11-15')
     const body = calls.find((call) => call.method === 'PUT')?.body
     expect(body).toMatchObject({ goal: 'Ship v2', name: 'Atlas' })
     expect(body).not.toHaveProperty('slug')
     expect(body).not.toHaveProperty('updated_at')
     expect(body).not.toHaveProperty('last_entry_at')
     expect(within(screen.getByRole('list', { name: /projects/i })).getByRole('link', { name: /atlas/i }).querySelector('time')).toHaveAttribute('datetime', atlas.last_entry_at)
+    await user.click(screen.getByRole('button', { name: /edit project/i }))
+    expect(within(screen.getByRole('form', { name: /edit project/i })).getByLabelText(/^deadline/i)).toHaveValue('2026-11-15')
   })
 
   it('opens a project whose slug is new instead of the create form', async () => {

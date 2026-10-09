@@ -1,7 +1,7 @@
 import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it } from 'vitest'
-import { anonymousSession, futureSessionExpiry, mockApi, renderApp } from './helpers'
+import { anonymousSession, authenticatedSession, futureSessionExpiry, mockApi, renderApp } from './helpers'
 
 it('requires login, code review, and an explicit decision before connecting', async () => {
   const { calls } = mockApi({
@@ -26,4 +26,13 @@ it('requires login, code review, and an explicit decision before connecting', as
   const decision = calls.filter(call => call.path.endsWith('/oauth/device'))[1]!
   expect(decision.body).toEqual({ user_code: 'ABCD2345', action: 'approve' })
   expect(new Headers(decision.init.headers).get('X-CSRF-Token')).toBe('approval-csrf')
+})
+
+it('links back to Access, which phones keep out of the bottom nav', async () => {
+  mockApi({ 'GET /admin/api/session': authenticatedSession })
+  renderApp('/admin/connect')
+  const heading = await screen.findByRole('heading', { level: 1, name: 'Connect a machine' })
+  const back = heading.closest('header')?.previousElementSibling
+  expect(back).toHaveAttribute('href', '/admin/access')
+  expect(back).toHaveTextContent('Access')
 })

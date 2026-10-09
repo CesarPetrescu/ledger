@@ -13,7 +13,7 @@ import {
   type ResearchStatus,
 } from '../api'
 import { useToast } from '../components/Toast'
-import { EmptyState, ErrorState, Icon, Loading, ResearchStatusBadge, StaleNotice, Timestamp } from '../components/ui'
+import { EmptyState, ErrorState, FilterToggle, Icon, Loading, ResearchStatusBadge, StaleNotice, Timestamp } from '../components/ui'
 import { useResource } from '../hooks/useResource'
 import { Link, navigate } from '../router'
 
@@ -513,6 +513,9 @@ export function HandoffsPage({ id, creating = false, initialProject = '' }: { id
   const [archive, setArchive] = useState('active')
   const [project, setProject] = useState('')
   const [target, setTarget] = useState('')
+  // Phones fold the four filters behind a Filters button, as the entry lists do; desktop always shows them.
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const activeFilters = [status, archive !== 'active', project, target.trim()].filter(Boolean).length
   const [loadingMore, setLoadingMore] = useState(false)
   const list = useResource(() => api.listHandoffs({ q: query, status, archive, project, target }), `handoffs:${query}:${status}:${archive}:${project}:${target}`, 'handoff handoff_message handoff_file')
   const projects = useResource(() => api.listProjects(), 'handoff-projects', 'project')
@@ -539,14 +542,17 @@ export function HandoffsPage({ id, creating = false, initialProject = '' }: { id
         <header className="page-head"><h1>Handoffs</h1><div className="handoff-head-actions"><Link to="/handoffs/new?kind=research" className="btn"><Icon name="plus" /> Research</Link><Link to="/handoffs/new" className="btn btn-primary"><Icon name="plus" /> New</Link></div>
           <p className="muted small">Work passed from one agent, or from you, to another. Each handoff is a thread: an agent claims a message, reports progress, and marks it done.</p>
         </header>
-        <div className="filters">
-          <label className="visually-hidden" htmlFor="handoff-search">Search handoffs</label>
-          <input id="handoff-search" type="search" placeholder="Search title, scope, messages" value={query} onChange={(event) => setQuery(event.target.value)} />
-          <div className="handoff-filter-row">
+        <div className="filters handoff-filters" data-filters={filtersOpen ? 'open' : undefined}>
+          <div className="handoff-search-row">
+            <label className="visually-hidden" htmlFor="handoff-search">Search handoffs</label>
+            <input id="handoff-search" type="search" placeholder="Search title, scope, messages" value={query} onChange={(event) => setQuery(event.target.value)} />
+            <FilterToggle open={filtersOpen} active={activeFilters} onToggle={() => setFiltersOpen((open) => !open)} />
+          </div>
+          <div className="handoff-filter-row filter-extra">
             <label><span className="visually-hidden">Work status</span><select value={status} onChange={(event) => setStatus(event.target.value)}>{WORK_STATES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
             <label><span className="visually-hidden">Archive</span><select value={archive} onChange={(event) => setArchive(event.target.value)}><option value="active">Active only</option><option value="archived">Archived only</option><option value="all">Active and archived</option></select></label>
           </div>
-          <div className="handoff-filter-row">
+          <div className="handoff-filter-row filter-extra">
             <label><span className="visually-hidden">Filter by project</span><select value={project} onChange={(event) => setProject(event.target.value)}><option value="">Any project</option>{(projects.data ?? []).map((item) => <option key={item.slug} value={item.slug}>{item.name}</option>)}</select></label>
             <label><span className="visually-hidden">Filter by target</span><input value={target} maxLength={100} onChange={(event) => setTarget(event.target.value)} placeholder="Any target" /></label>
           </div>

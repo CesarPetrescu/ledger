@@ -172,13 +172,17 @@ private fun AgentCard(model: LedgerModel, agent: JSONObject) {
             val handoffs = agent.optInt("handoffs")
             if (handoffs > 0) LinkLine("Working on $handoffs ${if (handoffs == 1) "handoff" else "handoffs"}", bold = true) { model.tab("handoffs") }
             // What it wrote reads as content, with its project muted; blue is kept for the actions around it.
+            // Each row opens its entry, so a chevron says so, as on the Settings cards.
             val muted = MaterialTheme.colorScheme.onSurfaceVariant
             agent.rows("latest").forEach { entry ->
-                Text(buildAnnotatedString {
-                    append(entryTitle(entry))
-                    withStyle(SpanStyle(color = muted)) { append(" · ${entry.text("project_name")}") }
-                }, Modifier.fillMaxWidth().clickable { model.go("entry-view/${segment(entry.text("id"))}") }.padding(vertical = 6.dp),
-                    style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Row(Modifier.fillMaxWidth().clickable { model.go("entry-view/${segment(entry.text("id"))}") }.padding(vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Text(buildAnnotatedString {
+                        append(entryTitle(entry))
+                        withStyle(SpanStyle(color = muted)) { append(" · ${entry.text("project_name")}") }
+                    }, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Glyph("chevron", null, tint = muted)
+                }
             }
             LinkLine("All of its activity") { model.go("table/${segment(name)}") }
         }

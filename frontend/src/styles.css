@@ -823,7 +823,10 @@ label > textarea {
 .table td { padding: 13px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
 .table tr:last-child td { border-bottom: 0; }
 .table th.num,
-.table td.num { text-align: right; }
+.table td.num,
+.table td.actions { text-align: right; }
+/* Row actions end at the table's right edge, so the Revoke buttons of stacked tables line up. */
+.table td.actions { white-space: nowrap; }
 .table td:first-child a { color: var(--text); font-weight: 650; }
 .table tbody tr:hover { background: var(--row-hover); }
 .clients { border-top: 1px solid var(--border); }
@@ -960,9 +963,11 @@ label > textarea {
 .detail-tabs a:hover { color: var(--text); }
 .detail-tabs a[aria-current='page'] { border-bottom-color: var(--accent); color: var(--accent); }
 @container project-tabs (max-width: 600px) {
-  .detail-tabs { gap: 0; border-bottom: 0; }
-  /* At most four to a row, so the seven split four and three rather than leaving one alone. */
-  .detail-tabs a { flex: 1 1 22%; padding: 10px 6px; box-shadow: 0 1px 0 var(--border); text-align: center; }
+  /* Four equal columns, so the seven split four and three and the second row lines up under the first. */
+  .detail-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; border-bottom: 0; }
+  .detail-tabs a { padding: 10px 4px; box-shadow: 0 1px 0 var(--border); text-align: center; }
+  /* Fills the empty eighth cell, so the second row's baseline runs the full width. */
+  .detail-tabs::after { content: ''; box-shadow: 0 1px 0 var(--border); }
 }
 .project-related > .section-title { margin-bottom: 14px; }
 .project-related > ul { border-top: 1px solid var(--border); }
@@ -978,6 +983,8 @@ label > textarea {
 .repo-form { margin: 0 0 18px; }
 
 /* Handoffs */
+.handoff-search-row { display: flex; gap: 8px; }
+.handoff-search-row > input { flex: 1; min-width: 0; }
 .handoff-filter-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
 /* Table */
@@ -991,7 +998,6 @@ label > textarea {
 .table-filters { display: grid; grid-template-columns: minmax(0, 2fr) repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
 .filter-toggle { display: none; }
 .filter-toggle[aria-expanded='true'] { border-color: var(--accent); color: var(--accent); }
-.filter-toggle .count { min-width: 20px; margin: 0; padding: 1px 6px; border-radius: 999px; background: var(--surface-accent); color: var(--accent); font-size: 0.72rem; font-weight: 700; text-align: center; }
 .table-add-toggle { margin-bottom: 22px; }
 .table-add-toggle > summary { display: inline-flex; align-items: center; gap: 6px; color: var(--accent); font-weight: 650; cursor: pointer; }
 .table-add-toggle[open] > summary { margin-bottom: 10px; }
@@ -1162,7 +1168,9 @@ label > textarea {
 .search-scope[aria-pressed='true'] { border-bottom-color: var(--accent); color: var(--text); }
 .search-filter-toggle { margin-left: auto; }
 .search-filter-toggle[aria-expanded='true'] { color: var(--accent); }
-.search-filter-toggle .count { min-width: 18px; margin: 0; padding: 0 5px; border-radius: 9px; background: var(--accent); color: var(--on-accent); font-size: 0.7rem; font-weight: 700; line-height: 18px; text-align: center; }
+/* The same count pill as the entry lists' Filters button. */
+.search-filter-toggle .count,
+.filter-toggle .count { min-width: 20px; margin: 0; padding: 1px 6px; border-radius: 999px; background: var(--surface-accent); color: var(--accent); font-size: 0.72rem; font-weight: 700; text-align: center; }
 .search-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 240px)); gap: 14px; padding-top: 16px; }
 .search-intro { max-width: 60ch; margin-top: 24px; color: var(--text-muted); }
 .search-results { margin-top: 24px; }
@@ -1330,7 +1338,8 @@ label > textarea {
   .table tr { display: block; padding: 12px 0; border-bottom: 1px solid var(--border); }
   .table td { display: grid; grid-template-columns: minmax(7.5rem, 0.42fr) minmax(0, 1fr); gap: 14px; padding: 6px 2px; border: 0; text-align: left; }
   .table td::before { content: attr(data-label); color: var(--text-faint); font-size: 0.67rem; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; }
-  .table td.num { text-align: left; }
+  .table td.num,
+  .table td.actions { text-align: left; }
   .detail-title { flex-basis: 100%; }
   .detail-actions { flex-basis: 100%; }
   .detail-actions .btn { flex: 1; }
@@ -1343,8 +1352,10 @@ label > textarea {
   .table-filters { display: flex; flex-flow: row wrap; }
   .table-filters > * { flex: 1 1 calc(50% - 5px); min-width: 0; }
   .table-filters > label:first-child { flex-basis: 50%; }
-  .table-filters > .filter-toggle { display: inline-flex; flex: none; }
-  .entries-view:not([data-filters='open']) .filter-extra { display: none; }
+  .table-filters > .filter-toggle,
+  .handoff-search-row > .filter-toggle { display: inline-flex; flex: none; }
+  .entries-view:not([data-filters='open']) .filter-extra,
+  .handoff-filters:not([data-filters='open']) .filter-extra { display: none; }
   .entry-row { flex-direction: column; gap: 8px; }
   .entry-row-actions { justify-content: flex-start; max-width: none; }
   .facts div { grid-template-columns: 1fr; gap: 2px; }
@@ -1377,12 +1388,13 @@ label > textarea {
   .message-actions .btn-quiet { flex-basis: 100%; margin-right: 0; }
 
   .search-query-row .btn { width: var(--control); padding: 0; }
-  .search-submit-label,
-  .search-filter-label { display: none; }
+  .search-submit-label { display: none; }
+  /* Snug enough that the three scopes and the labelled Filters toggle share one row at 390px. */
+  .search-scopes { gap: 0; }
   .search-scope,
-  .search-filter-toggle { padding: 10px 9px; }
-  /* Icon-only on phones: keep a full touch target. */
-  .search-filter-toggle { min-width: var(--control); justify-content: center; }
+  .search-filter-toggle { padding: 10px 7px; }
+  /* Labelled, like the entry lists' Filters button, with a full touch target. */
+  .search-filter-toggle { min-height: var(--control); }
   .search-filters { grid-template-columns: 1fr; }
   .search-summary { margin-bottom: 14px; font-size: 0.76rem; }
   .result-group + .result-group { margin-top: 16px; }

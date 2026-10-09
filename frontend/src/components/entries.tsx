@@ -9,7 +9,7 @@ import { plainText } from './Markdown'
 import { OverflowMenu } from './OverflowMenu'
 import { Link } from '../router'
 import { useToast } from './Toast'
-import { EmptyState, ErrorState, Icon, KindBadge, Loading, StaleNotice, Timestamp } from './ui'
+import { EmptyState, ErrorState, FilterToggle, Icon, KindBadge, Loading, StaleNotice, Timestamp } from './ui'
 
 // Entry lists shared by the Inbox, the Table, project pages, and entry pages.
 
@@ -477,9 +477,7 @@ export function EntriesView({ view, initialProject = '', initialQuery = '', init
     <div className="entries-view" data-filters={filtersOpen ? 'open' : undefined}>
       <div className="filters table-filters">
         <label><span className="visually-hidden">Search text</span><input type="search" maxLength={1000} placeholder="Search titles and text" value={filter.q ?? ''} onChange={(event) => set('q', event.target.value)} /></label>
-        <button type="button" className="btn filter-toggle" aria-expanded={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}>
-          <Icon name="filter" /> Filters {activeFilters > 0 && <span className="count">{activeFilters}{' '}<span className="visually-hidden">active</span></span>}
-        </button>
+        <FilterToggle open={filtersOpen} active={activeFilters} onToggle={() => setFiltersOpen((open) => !open)} />
         {!fixedProject && <label className="filter-extra"><span className="visually-hidden">Filter by project</span><select value={filter.project ?? ''} onChange={(event) => set('project', event.target.value)}><option value="">Any project</option>{(projects.data ?? []).map((item) => <option key={item.slug} value={item.slug}>{projectLabel(item, projects.data ?? [])}</option>)}</select></label>}
         {view === 'todos' && <label className="filter-extra"><span className="visually-hidden">Filter by state</span><select value={filter.status ?? ''} onChange={(event) => set('status', event.target.value)}><option value="open">Open</option><option value="done">Done</option><option value="">Open and done</option></select></label>}
         {view === 'reading' && <label className="filter-extra"><span className="visually-hidden">Filter reading</span><select value={effective.reading} onChange={(event) => set('reading', event.target.value)}><option value="unread">Unread</option><option value="starred">Starred</option><option value="all">All</option></select></label>}

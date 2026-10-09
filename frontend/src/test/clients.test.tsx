@@ -26,6 +26,7 @@ describe('access', () => {
     const table = await within(section).findByRole('table', { name: 'API keys' })
     expect(table).toHaveTextContent('ledger_AbCdEfG…')
     expect(table).toHaveTextContent('Dispatch research')
+    expect(within(table).getByRole('button', { name: 'Revoke' }).closest('td')).toHaveClass('actions')
     expect(table.textContent).not.toContain('secret-value')
     await user.click(within(section).getByRole('button', { name: 'Done' }))
     expect(within(section).queryByText('ledger_AbCdEfGsecret-value')).not.toBeInTheDocument()
@@ -69,6 +70,8 @@ describe('access', () => {
     // The counters the old overview page showed live here now.
     const counts = await screen.findByRole('list', { name: 'Counts' })
     expect(counts).toHaveTextContent('Active access tokens3')
+    // Only what concerns access: no project or entry totals, no ever-growing admin session count.
+    expect(within(counts).getAllByRole('listitem').map((item) => item.firstChild?.textContent)).toEqual(['OAuth clients', 'Active access tokens'])
     const table = await screen.findByRole('table', { name: /oauth clients/i })
     const rows = within(table).getAllByRole('row').slice(1)
     expect(rows).toHaveLength(2)
@@ -83,6 +86,8 @@ describe('access', () => {
     expect(table.textContent).not.toMatch(/hash|secret|refresh_token/i)
     const firstRowCells = within(rows[0]!).getAllByRole('cell')
     expect(firstRowCells.map((cell) => cell.getAttribute('data-label'))).toEqual(['Name', 'Type', 'Client ID', 'Redirect URIs', 'Created', 'Last used', 'Access tokens', 'Refresh tokens', 'Actions'])
+    // The action column is right-aligned, like the API keys table's, so the Revoke buttons line up.
+    expect(firstRowCells.at(-1)).toHaveClass('actions')
   })
 
   it('requires explicit confirmation before revoking and reports the result', async () => {

@@ -67,6 +67,26 @@ describe('search', () => {
     expect(results).not.toHaveTextContent('%')
   })
 
+  it('shows Markdown snippets as plain words, skipping blank lines and code fences', async () => {
+    const hit = searchResponse.hits[0]!
+    mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/projects': { body: { projects: [atlas] } },
+      'POST /admin/api/search': { body: { hits: [
+        { ...hit, snippet: 'Use **Qwen3 reranker** for the top 50\n- Latency budget: `180 ms`' },
+        { ...hit, ref: 'entry:42', entry_id: '42', kind: 'status', snippet: '```\n\ngo test ./...\n```\nAll green' },
+      ], degraded: ['vector'] } },
+    })
+    renderApp('/admin/search?q=reranker')
+    const results = await screen.findByRole('region', { name: /results/i })
+    const [first, second] = within(results).getAllByRole('listitem')
+    expect(within(first!).getByRole('link')).toHaveTextContent(/^Use Qwen3 reranker for the top 50$/)
+    expect(first).toHaveTextContent('Latency budget: 180 ms')
+    expect(within(second!).getByRole('link')).toHaveTextContent(/^go test \.\/\.\.\.$/)
+    expect(second).toHaveTextContent('All green')
+    expect(results.textContent).not.toMatch(/\*\*|`|^- /)
+  })
+
   it('explains a ranking-only outage', async () => {
     mockApi({
       'GET /admin/api/session': authenticatedSession,
@@ -163,10 +183,10 @@ describe('search', () => {
     ])
   })
 
-  it('keeps the icon-only Filters toggle a full touch target on phones', () => {
-    // jsdom applies no media queries, so read the phone rule itself: the label hides at 620px.
+  it('gives the Filters toggle the entry lists\' treatment on phones: labelled, with the same count pill', () => {
+    // jsdom applies no media queries, so read the rules themselves.
     const styles = Object.values(import.meta.glob<string>('../styles.css', { query: '?raw', import: 'default', eager: true }))[0] ?? ''
-    const phone = styles.slice(styles.indexOf('.search-filter-label { display: none; }'))
-    expect(phone).toMatch(/\.search-filter-toggle \{[^}]*min-width: var\(--control\)/)
+    expect(styles).not.toMatch(/\.search-filter-label[^{]*\{ display: none; \}/)
+    expect(styles).toMatch(/\.search-filter-toggle \.count,\s*\.filter-toggle \.count \{/)
   })
 })

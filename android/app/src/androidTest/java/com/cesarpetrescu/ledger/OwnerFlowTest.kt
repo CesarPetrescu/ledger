@@ -219,6 +219,8 @@ class OwnerFlowTest {
             awaitText("Atlas · Repos")
             awaitText("No repositories linked yet.")
             ui.onNodeWithText("Repository URL").assertDoesNotExist()
+            // The empty state reads before the button it motivates.
+            assertTrue(ui.onNodeWithText("No repositories linked yet.").fetchSemanticsNode().boundsInRoot.top < ui.onNodeWithText("Link a repository").fetchSemanticsNode().boundsInRoot.top)
             tap("Link a repository")
             fillField("Repository URL", "https://github.com/acme/atlas")
             scrollTo("Link repository")
@@ -281,6 +283,9 @@ class OwnerFlowTest {
             // Inbox: answer an ask from its sheet (its history shows where it came from), then complete a todo.
             tap("Confirm the fixture pricing")
             ui.waitUntilAtLeastOneExists(hasText("claude-code wrote it through Fixture Agent", substring = true), 15_000)
+            // The question sits above the box that answers it.
+            val question = ui.onNodeWithText("Confirm the fixture pricing").fetchSemanticsNode().boundsInRoot.top
+            assertTrue(question < ui.onNodeWithText("Answer claude-code").fetchSemanticsNode().boundsInRoot.top)
             fillField("Answer claude-code", "The fixture pricing is right.")
             tap("Send")
             awaitText("Nothing is waiting on you.")
@@ -339,9 +344,12 @@ class OwnerFlowTest {
             awaitText("Working on 1 handoff")
             ui.onNodeWithText("Connect an agent").assertDoesNotExist()
             tap("Manage access →")
-            // Settings opens at its Access heading, not at Appearance.
+            // Settings opens at its Access heading, not at Appearance, with no cut-off end of Notifications above it.
             awaitText("Connect an agent")
             ui.onNodeWithText("Access").assertIsDisplayed()
+            ui.onAllNodesWithText("nothing goes through Google", substring = true).let { notes ->
+                if (notes.fetchSemanticsNodes().isNotEmpty()) notes.onFirst().assertIsNotDisplayed()
+            }
             ui.onNodeWithText("Connect an agent").assertIsDisplayed()
             tap("Connect an agent")
             awaitText("ledger connect codex --server https://localhost:8443")

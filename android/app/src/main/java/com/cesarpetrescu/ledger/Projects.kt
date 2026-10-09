@@ -127,6 +127,8 @@ fun ProjectRepos(model: LedgerModel, slug: String) {
         Page {
             item { Text("Where this project's code lives; link every repository it spans. Agents see them with the project and clone with their own Git access.",
                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            // The state comes before the action it motivates.
+            if (repos.isEmpty()) item { Empty("No repositories linked yet.") }
             // Above the list, so the button is in sight without scrolling past every repo and the form opens where it was tapped.
             if (!linking) item {
                 // With nothing linked yet, linking is the screen's one job; otherwise it is tonal, apart from each card's red Unlink.
@@ -148,7 +150,6 @@ fun ProjectRepos(model: LedgerModel, slug: String) {
                     }
                 }
             }
-            if (repos.isEmpty()) item { Empty("No repositories linked yet.") }
             items(repos, key = { it.text("id") }) { repo ->
                 val (subtitle, body) = repoSummary(repo)
                 SummaryCard(repo.text("repo"), subtitle, body, actions = {

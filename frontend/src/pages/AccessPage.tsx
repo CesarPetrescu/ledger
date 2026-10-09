@@ -99,7 +99,7 @@ function ApiKeys() {
               <td data-label="Can">Dispatch research</td>
               <td data-label="Created"><Timestamp iso={key.created_at} /></td>
               <td data-label="Last used">{key.last_used_at ? <Timestamp iso={key.last_used_at} /> : <span className="muted">never</span>}</td>
-              <td data-label="Actions">{key.revoked_at ? <span className="muted small">Revoked <Timestamp iso={key.revoked_at} /></span> : <button type="button" className="btn btn-danger-quiet" onClick={() => setTarget(key)}>Revoke</button>}</td>
+              <td data-label="Actions" className="actions">{key.revoked_at ? <span className="muted small">Revoked <Timestamp iso={key.revoked_at} /></span> : <button type="button" className="btn btn-danger-quiet" onClick={() => setTarget(key)}>Revoke</button>}</td>
             </tr>
           ))}
         </tbody>
@@ -240,7 +240,7 @@ function ConnectGuide() {
 function ConnectedApps() {
   const [offset, setOffset] = useState(0)
   const page = useResource(() => api.listClients(offset), `clients:${offset}`, 'oauth_client oauth_token')
-  const overview = useResource(api.getOverview, 'overview', 'project entry oauth_client oauth_token admin_session')
+  const overview = useResource(api.getOverview, 'overview', 'oauth_client oauth_token')
   const [target, setTarget] = useState<Client | null>(null)
   const [busy, setBusy] = useState(false)
   const toast = useToast()
@@ -267,11 +267,8 @@ function ConnectedApps() {
       <p className="muted small">Apps that connected through OAuth. A client ID only identifies an app; access tokens allow requests, and refresh tokens let an app renew access without asking you again.</p>
       {overview.data && (
         <ul className="counts" aria-label="Counts">
-          <li><span>Projects</span><strong>{overview.data.counts.projects}</strong></li>
-          <li><span>Entries</span><strong>{overview.data.counts.entries}</strong></li>
           <li><span>OAuth clients</span><strong>{overview.data.counts.oauth_clients}</strong></li>
           <li><span>Active access tokens</span><strong>{overview.data.counts.active_access_tokens}</strong></li>
-          <li><span>Admin sessions</span><strong>{overview.data.counts.active_admin_sessions}</strong></li>
         </ul>
       )}
       {!overview.loading && !overview.data && <StaleNotice message="Couldn't load the counts." onRetry={overview.reload} />}
@@ -330,7 +327,7 @@ function ConnectedApps() {
                 </td>
                 <td data-label="Access tokens" className="num">{client.active_access_tokens}</td>
                 <td data-label="Refresh tokens" className="num">{client.active_refresh_tokens}</td>
-                <td data-label="Actions">
+                <td data-label="Actions" className="actions">
                   <button type="button" className="btn btn-danger-quiet" onClick={() => setTarget(client)}>
                     Revoke tokens
                   </button>

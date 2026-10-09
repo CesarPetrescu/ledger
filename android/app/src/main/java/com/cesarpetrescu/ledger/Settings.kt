@@ -19,6 +19,7 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -43,7 +44,11 @@ fun openBrowser(context: Context, address: String, model: LedgerModel): Boolean 
 fun Settings(model: LedgerModel, atAccess: Boolean = false) {
     val context = LocalContext.current
     // The Access heading is the fourth item: after the version card, Appearance, and Notifications.
-    Page(rememberLazyListState(initialFirstVisibleItemIndex = if (atAccess) 3 else 0)) {
+    // The first visible item sits below the page's 20 dp top padding, so the item before it would show
+    // its last 4 dp (20 dp padding less the 16 dp gap) as a cut-off sliver. Starting that much into the
+    // heading, inside its own 8 dp top padding, puts Notifications fully above the top edge.
+    val sliver = with(LocalDensity.current) { 20.dp.roundToPx() - 16.dp.roundToPx() }
+    Page(rememberLazyListState(if (atAccess) 3 else 0, if (atAccess) sliver else 0)) {
         item { SummaryCard("Ledger ${BuildConfig.VERSION_NAME}", "Owner console", model.api?.origin ?: "") }
         item { ThemeChoice(model) }
         item { NotificationsChoice(model) }

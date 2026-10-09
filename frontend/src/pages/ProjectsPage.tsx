@@ -547,7 +547,7 @@ function ProjectDetail({ slug, view, summary, onRetrySummary, onSaved }: { slug:
                 {META_FIELDS.map((field) => (
                   <li key={field.key}>
                     <span className="meta-label">{field.label}</span>
-                    <span className="meta-value">{String(project[field.key] ?? '') || <span className="muted">—</span>}</span>
+                    <span className="meta-value">{(field.key === 'deadline' ? deadlineLabel(project.deadline) : String(project[field.key] ?? '')) || <span className="muted">—</span>}</span>
                   </li>
                 ))}
               </ul>

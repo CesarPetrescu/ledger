@@ -448,7 +448,13 @@ private fun EntrySheet(model: LedgerModel, entry: JSONObject, repeats: List<JSON
         entry.text("reply_to").takeIf { it.isNotBlank() }?.let { root ->
             TextButton(onClick = { open(root) }, contentPadding = PaddingValues(0.dp)) { Text("A reply to an earlier entry · open it", style = MaterialTheme.typography.bodySmall) }
         }
-        ReplyBox(model, entry, asking = asksYou(entry), sent = close)
+        val asking = asksYou(entry)
+        // The question comes before the box that answers it.
+        if (asking) Column {
+            Text("Asks you", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            SelectionContainer { Text(meta?.text("ask").orEmpty(), style = MaterialTheme.typography.bodyMedium) }
+        }
+        ReplyBox(model, entry, asking = asking, sent = close)
         meta?.let { LabelNotes(it) }
         entry.text("duplicate_of").takeIf { it.isNotBlank() }?.let { root ->
             TextButton(onClick = { open(root) }, contentPadding = PaddingValues(0.dp)) { Text("This repeats an earlier entry · open it", style = MaterialTheme.typography.bodySmall) }
@@ -460,7 +466,7 @@ private fun EntrySheet(model: LedgerModel, entry: JSONObject, repeats: List<JSON
         }
         val details = meta?.optJSONObject("details") ?: JSONObject()
         if (meta != null) listOf(
-            "Asks you" to meta.text("ask"), "Summary" to meta.text("gist").takeUnless { sameText(it, entry.text("body")) }.orEmpty(), "Next step" to meta.text("next_step"), "Blocked by" to meta.text("blocker"),
+            "Asks you" to meta.text("ask").takeUnless { asking }.orEmpty(), "Summary" to meta.text("gist").takeUnless { sameText(it, entry.text("body")) }.orEmpty(), "Next step" to meta.text("next_step"), "Blocked by" to meta.text("blocker"),
             (if (entry.text("kind") == "decision") "Why" else "Why it matters") to meta.text("why"),
             "Chose" to details.text("chosen"), "Turned down" to details.text("rejected"),
             "Checklist" to details.rows("checklist").joinToString("\n") { (if (it.optBoolean("done")) "☑ " else "☐ ") + it.text("text") },

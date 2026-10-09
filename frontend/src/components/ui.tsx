@@ -154,6 +154,15 @@ export function StaleNotice({ message, onRetry }: { message: string; onRetry: ()
   )
 }
 
+/** The phone-only button that unfolds a list's filters, with how many are set away from their defaults. */
+export function FilterToggle({ open, active, onToggle }: { open: boolean; active: number; onToggle: () => void }) {
+  return (
+    <button type="button" className="btn filter-toggle" aria-expanded={open} onClick={onToggle}>
+      <Icon name="filter" /> Filters {active > 0 && <span className="count">{active}{' '}<span className="visually-hidden">active</span></span>}
+    </button>
+  )
+}
+
 /** Ledger's logo: the same image as the favicon and app icon. */
 export function BrandMark({ size = 34 }: { size?: number }) {
   return <img className="brand-mark" src={`${import.meta.env.BASE_URL}icon-192.png`} alt="" width={size} height={size} />
