@@ -89,7 +89,7 @@ curl -fsS -X POST -H "Authorization: Bearer $RUN_TOKEN" -H "Content-Type: text/c
 
 ## Dispatcher API: `/api/v1` (API keys)
 
-This is the simplest way for a server, such as Adastrion Core, to run research. It's plain JSON over HTTPS, with no OAuth. In the console, create a key under **Agents › API keys**. Ledger shows the key once and stores only its hash. A key can only dispatch research. Send it as `Authorization: Bearer <key>`.
+This is the simplest way for a server, such as Adastrion Core, to run research. It's plain JSON over HTTPS, with no OAuth. In the console, create a key under **Access › API keys**. Ledger shows the key once and stores only its hash. A key can only dispatch research. Send it as `Authorization: Bearer <key>`.
 
 A dispatcher loop:
 

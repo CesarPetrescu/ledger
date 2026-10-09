@@ -1049,7 +1049,7 @@ label > textarea {
 .connect-guide dl { display: grid; gap: 10px; margin: 0; }
 .connect-guide dt { font-size: 0.9rem; font-weight: 650; }
 .connect-guide dd { margin: 2px 0 0; color: var(--text-body); font-size: 0.9rem; }
-.connected-apps { display: grid; gap: 12px; }
+.connected-apps { display: grid; gap: 12px; margin: 0 0 32px; }
 @media (max-width: 620px) {
   .label-legend div,
   .help-list div { grid-template-columns: 1fr; gap: 2px; }
