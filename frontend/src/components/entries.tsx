@@ -4,7 +4,7 @@ import { useResource } from '../hooks/useResource'
 import { useUndo } from '../hooks/useUndo'
 import { refreshAll } from '../live'
 import { ConfirmDialog } from './ConfirmDialog'
-import { useEntrySelection, writerName } from './EntryPanel'
+import { ReplyBox, Snooze, useEntrySelection, writerName } from './EntryPanel'
 import { plainText } from './Markdown'
 import { OverflowMenu } from './OverflowMenu'
 import { Link } from '../router'
@@ -316,8 +316,11 @@ export function EntryRow({ entry, repeats = [], view, headline, hideProject = fa
   const summary = plainText((reading ? entry.meta?.why || entry.meta?.gist : entry.meta?.gist) ?? '')
   const asking = Boolean(entry.meta?.ask && !entry.owner.handled && entry.source !== OWNER_SOURCE)
   const selected = selection.selected === entry.id
+  // The Inbox answers and snoozes in place, like the app; other lists leave that to the entry panel.
+  const inbox = view === 'inbox'
+  const [answering, setAnswering] = useState(false)
   return (
-    <li className="entry-row" data-entry-id={entry.id} aria-current={selected ? 'true' : undefined} data-done={entry.resolved_by ? 'true' : undefined} data-read={reading && entry.owner.read ? 'true' : undefined}>
+    <li className="entry-row" data-entry-id={entry.id} aria-current={selected ? 'true' : undefined} data-done={entry.resolved_by ? 'true' : undefined} data-read={reading && entry.owner.read ? 'true' : undefined} data-answering={answering ? 'true' : undefined}>
       <div className="entry-row-main">
         <div className="entry-row-head">
           <button type="button" className="entry-row-title" aria-haspopup="dialog" onClick={() => selection.open(entry.id)}>
@@ -340,8 +343,10 @@ export function EntryRow({ entry, repeats = [], view, headline, hideProject = fa
         </div>
       </div>
       <div className="entry-row-actions">
+        {inbox && asking && <button type="button" className="btn btn-small answer-toggle" aria-expanded={answering} onClick={() => setAnswering((open) => !open)}>Answer</button>}
         {entry.kind === 'todo' && <TodoState entry={entry} onChanged={onChanged} />}
         {asking && <button type="button" className="btn btn-small" disabled={owner.busy} onClick={() => void owner.act(entry.id, { handled: true }, 'Marked handled.')}>Handled</button>}
+        {inbox && (asking || (entry.kind === 'todo' && !entry.resolved_by)) && <Snooze entry={entry} owner={owner} />}
         {reading && (
           <>
             <button type="button" className="btn btn-small" disabled={owner.busy} onClick={() => void owner.act(entry.id, { read: !entry.owner.read }, entry.owner.read ? 'Marked unread.' : 'Marked read.')}>
@@ -354,6 +359,7 @@ export function EntryRow({ entry, repeats = [], view, headline, hideProject = fa
           </>
         )}
       </div>
+      {answering && asking && <ReplyBox entry={entry} asking autoFocus />}
     </li>
   )
 }
