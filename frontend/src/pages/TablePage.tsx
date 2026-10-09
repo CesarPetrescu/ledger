@@ -104,13 +104,16 @@ function TrashView() {
   )
 }
 
-const VIEWS: { id: ListView; label: string }[] = [
+type View = ListView | 'recent' | 'trash'
+const VIEWS: { id: View; label: string }[] = [
   { id: 'activity', label: 'Activity' },
   { id: 'todos', label: 'Todos' },
   { id: 'decisions', label: 'Decisions' },
   { id: 'reading', label: 'Reading' },
+  // History: what you did and what you deleted, set apart at the end of the row.
+  { id: 'recent', label: 'Recent actions' },
+  { id: 'trash', label: 'Trash' },
 ]
-type View = ListView | 'recent' | 'trash'
 
 /** Every project's entries in one filterable list; the Inbox and projects have their own pages. */
 export function TablePage() {
@@ -121,7 +124,7 @@ export function TablePage() {
   useEffect(() => {
     if (moved) navigate(moved, { replace: true })
   }, [moved])
-  const view: View = VIEWS.some((item) => item.id === requested) || requested === 'recent' || requested === 'trash' ? (requested as View) : 'activity'
+  const view: View = VIEWS.find((item) => item.id === requested)?.id ?? 'activity'
   const project = query.get('project') ?? ''
   const search = query.get('q') ?? ''
   const tag = query.get('tag') ?? ''
@@ -137,14 +140,10 @@ export function TablePage() {
         <LegendButton />
         <p className="muted">Every project's entries in one list. Narrow it by project, agent, tag, or text, open any row, or download it as a spreadsheet.</p>
         <AiStatus />
-        <nav className="page-links" aria-label="History">
-          <Link to="/table?view=recent" aria-current={view === 'recent' ? 'page' : undefined}>Recent actions</Link>
-          <Link to="/table?view=trash" aria-current={view === 'trash' ? 'page' : undefined}>Trash</Link>
-        </nav>
       </header>
       <nav className="view-tabs" aria-label="Table views">
         {VIEWS.map((item) => (
-          <Link key={item.id} to={`/table?view=${item.id}`} aria-current={view === item.id ? 'page' : undefined}>
+          <Link key={item.id} to={`/table?view=${item.id}`} aria-current={view === item.id ? 'page' : undefined} data-history={item.id === 'recent' ? 'true' : undefined}>
             {item.label}
           </Link>
         ))}
