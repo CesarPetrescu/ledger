@@ -110,11 +110,49 @@ class TableTest {
         assertEquals(listOf("project", "atlas", "activity", "Ship v2/3 & more"), route.split('/').map { java.net.URLDecoder.decode(it, Charsets.UTF_8.name()) })
     }
 
+    @Test fun projectTabsFollowTheWebAndOldFilesAndReposRoutesOpenTheirTabs() {
+        assertEquals(listOf("activity", "todos", "decisions", "details", "handoffs", "files", "repos"), projectTabs.map { it.first })
+        assertEquals(Triple("atlas", "activity", "Ship v2/3 & more"), projectScreenArgs(projectRoute("atlas", "activity", "Ship v2/3 & more")))
+        assertEquals(Triple("atlas", "details", ""), projectScreenArgs(projectRoute("atlas", "details")))
+        assertEquals(Triple("atlas", "files", ""), projectScreenArgs("project-files/atlas"))
+        assertEquals(Triple("atlas", "repos", ""), projectScreenArgs("project-repos/atlas"))
+        // A missing or unknown tab opens Activity.
+        assertEquals(Triple("atlas", "activity", ""), projectScreenArgs("project/atlas"))
+        assertEquals(Triple("atlas", "activity", ""), projectScreenArgs("project/atlas/bogus/"))
+    }
+
+    @Test fun projectStatTilesMatchTheWeb() {
+        val now = java.time.OffsetDateTime.parse("2026-09-10T12:00:00Z")
+        val busy = JSONObject().put("needs_you", 1).put("open_todos", 3).put("week_entries", 1).put("week_agents", org.json.JSONArray(listOf("codex", OWNER_SOURCE)))
+        assertEquals(listOf(ProjectStat(1, "question waits for you", "inbox"), ProjectStat(3, "open todos", "todos"),
+            ProjectStat(1, "entry this week", "activity"), ProjectStat(2, "codex, You", "")), projectStats(busy, now))
+        val quiet = JSONObject().put("needs_you", 0).put("open_todos", 1).put("week_entries", 0).put("week_agents", org.json.JSONArray()).put("last_entry_at", "2026-09-07T12:00:00Z")
+        assertEquals(listOf(ProjectStat(0, "questions wait for you", "inbox"), ProjectStat(1, "open todo", "todos"),
+            ProjectStat(0, "entries this week", "activity"), ProjectStat(0, "quiet; last entry 3d ago", "")), projectStats(quiet, now))
+        assertEquals(ProjectStat(0, "agents this week", ""), projectStats(JSONObject(), now).last())
+    }
+
+    @Test fun projectDetailsListTheWebsFieldsWithTheLatestStatus() {
+        val project = JSONObject().put("tier", "maintain").put("hours_wk", 6).put("goal", "Ship v2").put("deadline", "2026-11-15").put("type", "app")
+            .put("description", "").put("needs_me", "Pricing calls").put("automate", "").put("stack", "Go")
+        val summary = JSONObject().put("status_title", "").put("status_body", "Deployed the beta").put("status_source", "codex")
+        val details = projectDetails(project, summary)
+        assertEquals(listOf("Tier", "Hours per week", "Goal", "Deadline", "Type", "Description", "Needs me", "Automate", "Stack", "Latest status"), details.map { it.first })
+        // The locale names the month, as in projectFacts.
+        val due = LocalDate.parse("2026-11-15").format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy"))
+        assertEquals(listOf("Maintain", "6", "Ship v2", due, "app", "", "Pricing calls", "", "Go", "Deployed the beta\ncodex"), details.map { it.second })
+        // A free-text deadline stays as written; the AI's status title wins over the body; no status reads as empty.
+        assertEquals("after the beta", projectDetails(project.put("deadline", "after the beta"), summary).first { it.first == "Deadline" }.second)
+        assertEquals("Beta is out\nYou", projectDetails(project, summary.put("status_title", "Beta is out").put("status_source", OWNER_SOURCE)).last().second)
+        assertEquals("", projectDetails(project, JSONObject()).last().second)
+    }
+
     @Test fun aProjectAndItsScreensAreTitledWithTheProjectsName() {
         val names = mapOf("atlas" to "Atlas Platform")
         assertEquals("Atlas Platform", screenTitle(projectRoute("atlas", "todos"), names))
-        assertEquals("Atlas Platform · Repos", screenTitle("project-repos/atlas", names))
-        assertEquals("Atlas Platform · Files", screenTitle("project-files/atlas", names))
+        // Files and Repos are tabs of the project screen, which the bar names.
+        assertEquals("Atlas Platform", screenTitle("project-repos/atlas", names))
+        assertEquals("Atlas Platform", screenTitle("project-files/atlas", names))
         assertEquals("Atlas Platform · Edit", screenTitle("project-edit/atlas", names))
         assertEquals("Atlas Platform · New entry", screenTitle("entry/atlas", names))
         // Before any list has named it, the bar says what it is rather than a section name.

@@ -27,7 +27,6 @@ fun Handoffs(model: LedgerModel) {
     var project by rememberSaveable { mutableStateOf("") }
     var filters by rememberSaveable { mutableStateOf(false) }
     var filter by rememberSaveable { mutableStateOf("archive=active") }
-    var before by rememberSaveable { mutableStateOf("") }
     Column {
         Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -43,23 +42,31 @@ fun Handoffs(model: LedgerModel) {
                 Field("Target (optional)", target, { target = it }, max = 100)
                 Button(onClick = {
                     filter = "archive=$archive&q=${segment(query)}&status=$status&project=${segment(project)}&target=${segment(target)}"
-                    before = ""; filters = false
+                    filters = false
                 }) { Text("Apply filters") }
                 }
             }
         }
-        Load(model, "handoffs:$filter:$before", { it.request("GET", "/handoffs?$filter&before=${segment(before)}") }) { data ->
-            Page {
-                if (data.rows("handoffs").isEmpty()) item { Empty("No handoffs match this view.") }
-                items(data.rows("handoffs")) { h ->
-                    SummaryCard(h.text("title"), h.text("project_name").ifBlank { "General" } + " · " + displayTime(h.text("updated_at")),
-                        listOf(handoffProgress(h), h.text("description")).filter { it.isNotBlank() }.joinToString("\n"), researchTags(h)) { model.go("handoff/${h.text("id")}") }
-                }
-                item { Row {
-                    if (before.isNotBlank()) TextButton(onClick = { before = "" }) { Text("Latest") }
-                    if (data.text("next_before").isNotBlank()) TextButton(onClick = { before = data.text("next_before") }) { Text("Older handoffs") }
-                } }
+        HandoffList(model, filter)
+    }
+}
+
+/** A page of handoffs matching [filter], each opening its thread; research ones carry their state. A new filter starts from the latest. */
+@Composable
+fun HandoffList(model: LedgerModel, filter: String, empty: String = "No handoffs match this view.", showProject: Boolean = true) {
+    var before by rememberSaveable(filter) { mutableStateOf("") }
+    Load(model, "handoffs:$filter:$before", { it.request("GET", "/handoffs?$filter&before=${segment(before)}") }) { data ->
+        Page {
+            if (data.rows("handoffs").isEmpty()) item { Empty(empty) }
+            items(data.rows("handoffs")) { h ->
+                val updated = displayTime(h.text("updated_at"))
+                SummaryCard(h.text("title"), if (showProject) h.text("project_name").ifBlank { "General" } + " · " + updated else updated,
+                    listOf(handoffProgress(h), h.text("description")).filter { it.isNotBlank() }.joinToString("\n"), researchTags(h)) { model.go("handoff/${h.text("id")}") }
             }
+            item { Row {
+                if (before.isNotBlank()) TextButton(onClick = { before = "" }) { Text("Latest") }
+                if (data.text("next_before").isNotBlank()) TextButton(onClick = { before = data.text("next_before") }) { Text("Older handoffs") }
+            } }
         }
     }
 }

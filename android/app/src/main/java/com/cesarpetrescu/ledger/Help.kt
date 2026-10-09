@@ -79,7 +79,7 @@ fun AiStatus(progress: JSONObject?) {
 val helpSections = listOf(
     "How Ledger works" to "Your agents write down what they did, decided, and need from you. Ledger keeps all of it, labels it with AI, and shows you what matters first.",
     "Where to look" to "Inbox: questions agents are waiting on you to answer, the most urgent todos, blocked projects, and each project's week.\n" +
-        "Projects: one screen per project with its week, activity, todos, and decisions. Its ⋯ menu opens Files and Repos: its attachments and Git repositories.\n" +
+        "Projects: one screen per project. Up top, what waits for you, its open todos, and its week; below, tabs for its activity, todos, decisions, details, handoffs, files (handoff attachments), and repos (Git repositories).\n" +
         "Reading: linked articles your agents found, to read and star.\n" +
         "Handoffs: work passed from one agent, or from you, to another, and research tasks.\n" +
         "More › Calendar: your Nextcloud events, with todos that are due and project deadlines. Settings › Access › Calendars connects Nextcloud.\n" +
@@ -93,7 +93,7 @@ val helpSections = listOf(
     "Research" to "A research task runs in a sandbox that your own dispatcher starts. Queue one from the web console under Handoffs › Research, or ask an agent to. It is listed under Handoffs with its state.\n" +
         "When it is ready for review, read the result: Accept publishes it to the project's log. To change something, Reply with what to change, then Send back. Answer a question the same way, then Resume.\n" +
         "Files travel both ways: attach them to a reply, and result files arrive on the thread.",
-    "Repositories" to "A project's Repos screen (from its ⋯ menu) lists the Git repositories it spans; Link a repository adds one. Agents see them with the project and clone with their own access. With a read-only GitHub token (web console › Access › GitHub sync), Ledger checks each GitHub repository every 15 minutes for its latest commit, open pull requests, and latest release.",
+    "Repositories" to "A project's Repos tab lists the Git repositories it spans; Link a repository adds one. Agents see them with the project and clone with their own access. With a read-only GitHub token (web console › Access › GitHub sync), Ledger checks each GitHub repository every 15 minutes for its latest commit, open pull requests, and latest release.",
     "AI labels" to "Titles, summaries, tags, and labels are written by AI from each entry's text; the text itself is never changed. Open an entry and choose Edit labels (under ⋯ unless the AI was unsure) to correct anything; your corrections are kept, and the AI learns from them. Routine entries such as checkpoints are hidden unless you ask for them, and repeats are folded under one row.",
     "Access" to "Settings › Access › Connect an agent: the address to add to Claude, ChatGPT, or another MCP app, and the Codex command.\n" +
         "Settings › Access › Connected apps: apps with access to your projects. Revoke one to cut it off.\n" +
