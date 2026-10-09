@@ -214,7 +214,7 @@ fun LedgerApp(model: LedgerModel = viewModel(), opened: MutableState<Pair<String
                             "handoff" -> HandoffDetail(model, route.substringAfter('/'))
                             "handoff-new" -> HandoffEditor(model)
                             "handoff-edit" -> HandoffEditor(model, route.substringAfter('/'))
-                            "message-new" -> MessageEditor(model, route.substringAfter('/'))
+                            "message-new" -> route.split('/').let { MessageEditor(model, it.getOrElse(1) { "" }, reply = it.getOrNull(2) == "reply") }
                             "calendar" -> CalendarScreen(model)
                             "event" -> EventEditor(model, route.substringAfter('/'))
                             "event-new" -> EventEditor(model)
@@ -323,9 +323,31 @@ fun Empty(text: String) { Text(text, Modifier.padding(vertical = 24.dp), color =
 fun ConfirmButton(label: String, explanation: String, enabled: Boolean = true, action: () -> Unit) {
     var confirm by remember { mutableStateOf(false) }
     OutlinedButton(onClick = { confirm = true }, enabled = enabled) { Text(label) }
-    if (confirm) AlertDialog(onDismissRequest = { confirm = false }, title = { Text(label) }, text = { Text(explanation) },
-        confirmButton = { TextButton(onClick = { confirm = false; action() }) { Text(label) } },
-        dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancel") } })
+    if (confirm) ConfirmDialog(label, explanation, { confirm = false }, action)
+}
+
+/** Asks before [action]; [label] names the dialog and its confirm button. */
+@Composable
+fun ConfirmDialog(label: String, explanation: String, dismiss: () -> Unit, action: () -> Unit) =
+    AlertDialog(onDismissRequest = dismiss, title = { Text(label) }, text = { Text(explanation) },
+        confirmButton = { TextButton(onClick = { dismiss(); action() }) { Text(label) } },
+        dismissButton = { TextButton(onClick = dismiss) { Text("Cancel") } })
+
+class MenuAction(val label: String, val danger: Boolean = false, val run: () -> Unit)
+
+/** Secondary and destructive actions behind a ⋯ button, so a row keeps only what is used most. */
+@Composable
+fun Overflow(description: String, actions: List<MenuAction>, enabled: Boolean = true) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }, enabled = enabled) { Glyph("more", description) }
+        DropdownMenu(open, onDismissRequest = { open = false }) {
+            actions.forEach { action ->
+                DropdownMenuItem(text = { Text(action.label, color = if (action.danger) MaterialTheme.colorScheme.error else Color.Unspecified) },
+                    onClick = { open = false; action.run() })
+            }
+        }
+    }
 }
 
 fun displayTime(value: String): String = runCatching {

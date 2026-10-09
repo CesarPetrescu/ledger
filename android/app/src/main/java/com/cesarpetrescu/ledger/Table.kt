@@ -123,10 +123,13 @@ fun focusLabels(entry: JSONObject, today: LocalDate = LocalDate.now(), now: Offs
     return buildList {
         if (meta == null) return@buildList
         if (asksYou(entry)) add("Asks you" to Tone.Warn)
-        if (meta.text("importance") == "important") add("Important" to Tone.Accent)
+        // One emphasis label at most: a todo's high priority, else importance, else low priority.
+        when {
+            todo && meta.text("priority") == "high" -> add("High" to Tone.Danger)
+            meta.text("importance") == "important" -> add("Important" to Tone.Accent)
+            todo && meta.text("priority") == "low" -> add("Low" to Tone.Neutral)
+        }
         stateLabels[meta.text("state")]?.let { add(it to when (meta.text("state")) { "blocked" -> Tone.Danger; "done" -> Tone.Good; else -> Tone.Accent }) }
-        if (todo && meta.text("priority") == "high") add("High" to Tone.Danger)
-        if (todo && meta.text("priority") == "low") add("Low" to Tone.Neutral)
         if (meta.text("size").isNotBlank()) add(meta.text("size") to Tone.Neutral)
         val due = runCatching { LocalDate.parse(meta.text("due")) }.getOrNull()
         if (due != null && open) add((if (due < today) "Overdue " else "Due ") + due.format(DateTimeFormatter.ofPattern("d MMM")) to if (due < today) Tone.Danger else Tone.Neutral)
@@ -137,14 +140,13 @@ fun focusLabels(entry: JSONObject, today: LocalDate = LocalDate.now(), now: Offs
     }
 }
 
-/** Why an entry needs the owner, in plain words from its labels; empty when nothing waits on them. */
-fun whyHere(entry: JSONObject, today: LocalDate = LocalDate.now(), now: OffsetDateTime = OffsetDateTime.now()): String {
+/** Why an entry needs the owner, in plain words; empty when nothing waits on them or the row already says why:
+ *  an ask is its headline and its Asks you label, a due date its Due or Overdue label. */
+fun whyHere(entry: JSONObject, now: OffsetDateTime = OffsetDateTime.now()): String {
     val meta = entry.optJSONObject("meta")
     val source = entry.text("source")
-    if (asksYou(entry)) return "$source asked ${ago(entry.text("created_at"), now)} ago and is waiting on your answer."
-    if (entry.text("kind") != "todo" || entry.optJSONObject("resolved_by") != null) return ""
-    val due = runCatching { LocalDate.parse(meta?.text("due")) }.getOrNull()
-    if (due != null) return if (due < today) "It was due ${due.format(DateTimeFormatter.ofPattern("d MMM"))} and is still open." else "It's due ${due.format(DateTimeFormatter.ofPattern("d MMM"))}."
+    if (asksYou(entry) || entry.text("kind") != "todo" || entry.optJSONObject("resolved_by") != null) return ""
+    if (runCatching { LocalDate.parse(meta?.text("due")) }.isSuccess) return ""
     if (meta?.text("priority") == "high") return "The AI rated it high priority."
     val days = runCatching { Duration.between(OffsetDateTime.parse(entry.text("created_at")), now).toDays() }.getOrDefault(0)
     if (days > STALE_DAYS) return "It has been open for $days days."
@@ -168,6 +170,12 @@ private fun NotificationPrompt(model: LedgerModel) {
             }
         }
     }
+}
+
+/** Whether a summary only repeats the text it sums up, spacing, case, and a final period aside. */
+fun sameText(a: String, b: String): Boolean {
+    val plain = { text: String -> text.trim().trimEnd('.').replace(Regex("\\s+"), " ") }
+    return plain(a).equals(plain(b), ignoreCase = true)
 }
 
 /** Route that opens a project on a tab, optionally with a search. */
@@ -376,6 +384,7 @@ private fun EntrySheet(model: LedgerModel, entry: JSONObject, repeats: List<JSON
     val meta = entry.optJSONObject("meta")
     val id = entry.text("id")
     val openTodo = entry.text("kind") == "todo" && entry.optJSONObject("resolved_by") == null
+    var deleting by remember { mutableStateOf(false) }
     // imePadding keeps the reply box and its Send button above the keyboard on small phones.
     Column(Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).navigationBarsPadding().padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("${entry.text("project_name")} · ${label(entry.text("kind"))} · ${writerName(entry.text("source"))} · ${displayTime(entry.text("created_at"))}",
@@ -399,9 +408,10 @@ private fun EntrySheet(model: LedgerModel, entry: JSONObject, repeats: List<JSON
             if (openTodo && meta?.text("due")?.isNotBlank() == true) OutlinedButton(onClick = { addToCalendar(model, entry) }, enabled = !model.busy) { Text("Add to calendar") }
             if (meta != null && meta.text("title").isNotBlank() && meta.text("origin") == "model") LabelEditor(model, entry, close)
             TextButton(onClick = { close(); model.go(projectRoute(entry.text("slug"))) }) { Text("Open project") }
-            ConfirmButton("Delete", "Move this entry to Trash? You can undo it or restore it from Trash for 30 days.", !model.busy) {
-                model.undoable("Entry moved to Trash", after = { afterDelete(); close() }) { it.request("DELETE", "/entries/${segment(id)}") }
-            }
+            Overflow("More actions for this entry", listOf(MenuAction("Delete entry", danger = true) { deleting = true }), enabled = !model.busy)
+        }
+        if (deleting) ConfirmDialog("Delete entry", "Move this entry to Trash? You can undo it or restore it from Trash for 30 days.", { deleting = false }) {
+            model.undoable("Entry moved to Trash", after = { afterDelete(); close() }) { it.request("DELETE", "/entries/${segment(id)}") }
         }
         whyHere(entry).takeIf { it.isNotBlank() }?.let { Text("Why it needs you: $it", style = MaterialTheme.typography.bodyMedium) }
         entry.text("reply_to").takeIf { it.isNotBlank() }?.let { root ->
@@ -419,7 +429,7 @@ private fun EntrySheet(model: LedgerModel, entry: JSONObject, repeats: List<JSON
         }
         val details = meta?.optJSONObject("details") ?: JSONObject()
         if (meta != null) listOf(
-            "Asks you" to meta.text("ask"), "Summary" to meta.text("gist"), "Next step" to meta.text("next_step"), "Blocked by" to meta.text("blocker"),
+            "Asks you" to meta.text("ask"), "Summary" to meta.text("gist").takeUnless { sameText(it, entry.text("body")) }.orEmpty(), "Next step" to meta.text("next_step"), "Blocked by" to meta.text("blocker"),
             (if (entry.text("kind") == "decision") "Why" else "Why it matters") to meta.text("why"),
             "Chose" to details.text("chosen"), "Turned down" to details.text("rejected"),
             "Checklist" to details.rows("checklist").joinToString("\n") { (if (it.optBoolean("done")) "☑ " else "☐ ") + it.text("text") },
@@ -677,8 +687,8 @@ fun ProjectsHome(model: LedgerModel) = Load(model, "table-projects", { it.reques
                     }
                     val facts = buildList {
                         add(label(p.text("tier")))
-                        if (p.optInt("open_todos") > 0) add("${p.optInt("open_todos")} open todos")
-                        if (p.optInt("needs_you") > 0) add("${p.optInt("needs_you")} need you")
+                        if (p.optInt("open_todos") > 0) add(plural(p.optInt("open_todos"), "open todo"))
+                        if (p.optInt("needs_you") > 0) add(plural(p.optInt("needs_you"), "needs you", "need you"))
                         add(if (p.optInt("week_entries") > 0) "${p.optInt("week_entries")} this week" else "quiet")
                         if (p.text("deadline").isNotBlank()) add("due ${p.text("deadline")}")
                     }
@@ -722,7 +732,9 @@ fun ProjectScreen(model: LedgerModel, slug: String, initialTab: String = "activi
                     TextButton(onClick = { model.go("project-edit/$slug") }, enabled = !model.busy) { Text("Edit") }
                     TextButton(onClick = { model.go("project-files/$slug") }) { Text("Files") }
                     TextButton(onClick = { model.go("project-repos/$slug") }) { Text("Repos") }
-                    DeleteProject(model, slug)
+                    var deleting by remember { mutableStateOf(false) }
+                    Overflow("More actions for ${p.text("name")}", listOf(MenuAction("Delete project", danger = true) { deleting = true }), enabled = !model.busy)
+                    if (deleting) DeleteProjectDialog(model, slug) { deleting = false }
                 }
             }
             PrimaryTabRow(selectedTabIndex = projectTabs.indexOfFirst { it.first == tab }) {

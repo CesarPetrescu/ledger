@@ -162,10 +162,31 @@ fun researchHeadline(work: String, phase: String, attempt: Int, failures: Int, m
     work == "ready" -> "Queued" to "Waiting for a free sandbox."
     work == "in_progress" -> "Running · run $attempt" to progress.ifBlank { "A sandbox is working on it." }
     work == "done" -> "Accepted" to "Run again reopens it for another run."
-    phase == "review" -> "Ready for review" to "Read the result below. Accept it, or add a message saying what to change and Send back."
-    phase == "question" -> "Question for you" to "Answer it in a new message, then Resume."
+    phase == "review" -> "Ready for review" to "Read the result below. Accept it, or reply with what to change and Send back."
+    phase == "question" -> "Question for you" to "Answer it in a reply, then Resume."
     else -> "Stopped" to "$failures of $maxAttempts failed runs." + (if (lastError.isNotBlank()) " Last error: $lastError." else "") + " Retry gives it a fresh set of attempts."
 }
+
+/** A research task's state, named as on the web console's badge; blank when the server did not say. */
+fun researchStatusLabel(status: String) = when (status) {
+    "draft" -> "Draft"
+    "queued" -> "Queued"
+    "running" -> "Running"
+    "review" -> "Ready for review"
+    "question" -> "Question for you"
+    "stopped" -> "Stopped"
+    "accepted" -> "Accepted"
+    else -> ""
+}
+
+/** A handoff list row's state: a research task's status, or how many messages are in each work state. */
+fun handoffProgress(handoff: JSONObject): String =
+    if (handoff.text("kind") == "research") listOf("Research", researchStatusLabel(handoff.text("research_status"))).filter { it.isNotBlank() }.joinToString(" · ")
+    else listOf("draft_count" to "draft", "ready_count" to "ready", "in_progress_count" to "in progress", "blocked_count" to "blocked", "done_count" to "done")
+        .filter { handoff.optInt(it.first) > 0 }.joinToString(" · ") { (key, name) -> "${handoff.optInt(key)} $name" }
+
+/** "1 open todo", "3 open todos". */
+fun plural(count: Int, one: String, many: String = one + "s") = "$count ${if (count == 1) one else many}"
 
 fun messageActions(work: String, delivery: String): List<String> = buildList {
     if (delivery == "unseen" && work != "draft") add("acknowledge")
