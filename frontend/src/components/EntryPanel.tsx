@@ -3,7 +3,7 @@ import { api, describeError, OWNER_SOURCE, type HistoryEvent, type TableEntry } 
 import { useResource } from '../hooks/useResource'
 import { useUndo } from '../hooks/useUndo'
 import { refreshAll } from '../live'
-import { DeleteEntry, Facts, FocusBadges, LIVE, localDay, RelatedList, TodoState, titleOf, useOwnerAction } from './entries'
+import { DeleteEntry, Facts, FocusBadges, LIVE, RelatedList, TodoState, titleOf, useOwnerAction } from './entries'
 import { LegendButton } from './help'
 import { LabelEditor } from './LabelEditor'
 import { MarkdownText, plainText } from './Markdown'
@@ -217,10 +217,10 @@ function EntryActions({ entry }: { entry: TableEntry }) {
   )
 }
 
-/** The day a snooze ends while it is still ahead; the server keeps a past date after the entry wakes. */
+/** The day a snooze ends while it is still ahead. The server says whether it has ended, by its own calendar, since it
+ * keeps a past date after the entry wakes and the browser's day can differ from the server's. */
 function snoozedUntil(entry: TableEntry): string {
-  const until = entry.owner.snoozed_until ?? ''
-  return until > localDay() ? until : ''
+  return entry.owner.snoozed ? entry.owner.snoozed_until ?? '' : ''
 }
 
 const SNOOZE_CHOICES = [[1, 'Until tomorrow', 'Snoozed until tomorrow.'], [3, 'For 3 days', 'Snoozed for 3 days.'], [7, 'For a week', 'Snoozed for a week.']] as const

@@ -107,6 +107,8 @@ export interface OwnerState {
   starred: boolean
   handled: boolean
   snoozed_until?: string
+  /** The snooze has not ended yet by the server's calendar; snoozed_until keeps a past date after it wakes. */
+  snoozed?: boolean
 }
 
 export interface OwnerPatch {

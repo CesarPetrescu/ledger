@@ -812,7 +812,7 @@ func (s *Server) setOwnerState(w http.ResponseWriter, r *http.Request) {
 	state, actionID, err := s.db.SetOwnerState(r.Context(), id, store.OwnerPatch{Read: input.Read, Starred: input.Starred, Handled: input.Handled, SnoozeDays: input.SnoozeDays})
 	switch {
 	case err == nil:
-		writeJSON(w, http.StatusOK, withAction(map[string]any{"read": state.Read, "starred": state.Starred, "handled": state.Handled, "snoozed_until": state.SnoozedUntil}, actionID))
+		writeJSON(w, http.StatusOK, withAction(map[string]any{"read": state.Read, "starred": state.Starred, "handled": state.Handled, "snoozed_until": state.SnoozedUntil, "snoozed": state.Snoozed}, actionID))
 	case errors.Is(err, store.ErrInvalidSnooze):
 		writeError(w, http.StatusBadRequest, err.Error())
 	case store.IsNotFound(err):

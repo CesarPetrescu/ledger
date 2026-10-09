@@ -108,6 +108,25 @@ describe('inbox actions', () => {
     }
   })
 
+  it('trusts the server on whether a snooze has ended, not the browser’s calendar', async () => {
+    const day = (offset: number) => {
+      const date = new Date()
+      date.setDate(date.getDate() + offset)
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+    }
+    // The server's day is behind the browser's: a snooze ending "today" here is still on there.
+    const stillOn = { ...owner, snoozed_until: day(0), snoozed: true }
+    // And ahead of it: a snooze ending "tomorrow" here has already ended there.
+    const ended = { ...owner, snoozed_until: day(1), snoozed: false }
+    mockApi({ ...base, 'GET /admin/api/inbox': { body: { needs_you: [{ ...ask, owner: stillOn }], todos: [{ ...todo, owner: ended }], todos_total: 1, projects: [] } } })
+    renderApp('/admin/')
+    const asks = await screen.findByRole('region', { name: 'Needs you' })
+    expect(within(asks).getByRole('button', { name: 'Wake now' })).toBeInTheDocument()
+    const todos = screen.getByRole('region', { name: 'Todos' })
+    expect(within(todos).getByRole('button', { name: 'Snooze' })).toBeInTheDocument()
+    expect(within(todos).queryByRole('button', { name: 'Wake now' })).not.toBeInTheDocument()
+  })
+
   it('keeps the open entry while you type an inline answer, beside the panel’s own answer box', async () => {
     mockApi({
       ...base,
