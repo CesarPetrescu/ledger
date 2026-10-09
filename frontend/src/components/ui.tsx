@@ -8,6 +8,7 @@ import {
   IconCalendarEvent,
   IconClipboardText,
   IconCopy,
+  IconDots,
   IconDeviceDesktop,
   IconEye,
   IconEyeOff,
@@ -34,7 +35,7 @@ import {
   type IconProps,
 } from '@tabler/icons-react'
 
-export type IconName = 'eye' | 'eye-off' | 'menu' | 'close' | 'search' | 'arrow' | 'filter' | 'logout' | 'plus' | 'alert' | 'back' | 'refresh' | 'book' | 'home' | 'inbox' | 'help' | 'agents' | 'projects' | 'calendar' | 'handoffs' | 'copy' | 'paperclip' | 'clients' | 'external' | 'trash' | 'live' | 'offline' | 'table' | 'system' | 'light' | 'dark'
+export type IconName = 'eye' | 'eye-off' | 'menu' | 'close' | 'search' | 'arrow' | 'filter' | 'logout' | 'plus' | 'alert' | 'back' | 'refresh' | 'book' | 'home' | 'inbox' | 'help' | 'agents' | 'projects' | 'calendar' | 'handoffs' | 'copy' | 'paperclip' | 'clients' | 'external' | 'trash' | 'live' | 'offline' | 'table' | 'system' | 'light' | 'dark' | 'dots'
 
 const icons: Record<IconName, ComponentType<IconProps>> = {
   eye: IconEye,
@@ -68,6 +69,7 @@ const icons: Record<IconName, ComponentType<IconProps>> = {
   system: IconDeviceDesktop,
   light: IconSun,
   dark: IconMoon,
+  dots: IconDots,
 }
 
 export function Icon({ name, ...props }: { name: IconName } & IconProps) {
@@ -155,4 +157,19 @@ export function StaleNotice({ message, onRetry }: { message: string; onRetry: ()
 /** Ledger's logo: the same image as the favicon and app icon. */
 export function BrandMark({ size = 34 }: { size?: number }) {
   return <img className="brand-mark" src={`${import.meta.env.BASE_URL}icon-192.png`} alt="" width={size} height={size} />
+}
+
+export type ResearchStatus = 'draft' | 'queued' | 'running' | 'review' | 'question' | 'stopped' | 'accepted'
+
+const RESEARCH_STATUS_LABELS: Record<ResearchStatus, string> = {
+  draft: 'Draft', queued: 'Queued', running: 'Running', review: 'Ready for review', question: 'Question for you', stopped: 'Stopped', accepted: 'Accepted',
+}
+
+export function researchStatusLabel(status: string): string {
+  return RESEARCH_STATUS_LABELS[status as ResearchStatus] ?? status
+}
+
+/** A research task's state, the same words everywhere a task is listed. */
+export function ResearchStatusBadge({ status }: { status: string }) {
+  return <span className="badge" data-research={status}>{researchStatusLabel(status)}</span>
 }

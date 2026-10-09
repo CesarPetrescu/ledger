@@ -128,11 +128,17 @@ class TableTest {
         val now = java.time.OffsetDateTime.parse("2026-09-26T12:00:00Z")
         val meta = JSONObject().put("title", "t").put("ask", "Confirm pricing").put("importance", "important").put("priority", "high").put("size", "M").put("due", "2026-09-25")
         val overdue = "Overdue " + LocalDate.parse("2026-09-25").format(java.time.format.DateTimeFormatter.ofPattern("d MMM"))
-        assertEquals(listOf("Asks you", "Important", "High", "M", overdue, "Stale"),
+        // High priority is the one emphasis label; Important would repeat it.
+        assertEquals(listOf("Asks you", "High", "M", overdue, "Stale"),
             focusLabels(focus("todo", meta, created = "2026-09-01T10:00:00Z"), today, now).map { it.first })
         // Handled asks, resolved todos, and fresh todos drop those labels.
-        assertEquals(listOf("Important", "High", "M"),
+        assertEquals(listOf("High", "M"),
             focusLabels(focus("todo", meta, resolved = true, owner = JSONObject().put("handled", true)), today, now).map { it.first })
+        val emphasis = { kind: String, importance: String, priority: String ->
+            focusLabels(focus(kind, JSONObject().put("importance", importance).put("priority", priority)), today, now).map { it.first } }
+        assertEquals(listOf("Important"), emphasis("todo", "important", "low"))
+        assertEquals(listOf("Low"), emphasis("todo", "useful", "low"))
+        assertEquals(listOf("Important"), emphasis("note", "important", ""))
         assertEquals(listOf("Blocked"), focusLabels(focus("status", JSONObject().put("title", "t").put("state", "blocked")), today, now).map { it.first })
         assertEquals(Tone.Danger, focusLabels(focus("status", JSONObject().put("state", "blocked")), today, now).single().second)
         assertEquals(emptyList<Pair<String, Tone>>(), focusLabels(JSONObject().put("kind", "note"), today, now))
@@ -166,17 +172,9 @@ class TableTest {
         assertEquals(listOf("Check", "billing"), focusLabels(JSONObject().put("kind", "note").put("meta", meta)).map { it.first })
     }
 
-    @Test fun whyHereExplainsAsksAndUrgentTodosInPlainWords() {
-        val now = java.time.OffsetDateTime.parse("2026-09-20T12:00:00Z")
-        val today = LocalDate.parse("2026-09-20")
-        fun entry(kind: String, meta: JSONObject, created: String = "2026-09-20T10:00:00Z", handled: Boolean = false) = JSONObject()
-            .put("kind", kind).put("source", "codex").put("created_at", created).put("meta", meta).put("owner", JSONObject().put("handled", handled))
-        assertEquals("codex asked 2h ago and is waiting on your answer.", whyHere(entry("note", JSONObject().put("ask", "Confirm it")), today, now))
-        assertEquals("", whyHere(entry("note", JSONObject().put("ask", "Confirm it"), handled = true), today, now))
-        assertEquals("It was due 19 Sept and is still open.".replace("Sept", java.time.LocalDate.parse("2026-09-19").format(java.time.format.DateTimeFormatter.ofPattern("MMM"))), whyHere(entry("todo", JSONObject().put("due", "2026-09-19")), today, now))
-        assertEquals("The AI rated it high priority.", whyHere(entry("todo", JSONObject().put("priority", "high")), today, now))
-        assertEquals("It has been open for 20 days.", whyHere(entry("todo", JSONObject(), created = "2026-08-31T12:00:00Z"), today, now))
-        assertEquals("", whyHere(entry("decision", JSONObject()), today, now))
+    @Test fun aSummaryThatOnlyRepeatsTheBodyIsDetected() {
+        assertEquals(true, sameText("Use the Qwen3 reranker for search.", "  use the Qwen3\nreranker for search "))
+        assertEquals(false, sameText("Use the Qwen3 reranker.", "Use **Qwen3 reranker** for search, it beat BGE."))
     }
 
     @Test fun aiStatusSaysWhyLabellingIsPausedAndStaysQuietWithoutALabeller() {

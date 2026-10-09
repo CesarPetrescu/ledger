@@ -214,7 +214,7 @@ fun LedgerApp(model: LedgerModel = viewModel(), opened: MutableState<Pair<String
                             "handoff" -> HandoffDetail(model, route.substringAfter('/'))
                             "handoff-new" -> HandoffEditor(model)
                             "handoff-edit" -> HandoffEditor(model, route.substringAfter('/'))
-                            "message-new" -> MessageEditor(model, route.substringAfter('/'))
+                            "message-new" -> route.split('/').let { MessageEditor(model, it.getOrElse(1) { "" }, reply = it.getOrNull(2) == "reply") }
                             "calendar" -> CalendarScreen(model)
                             "event" -> EventEditor(model, route.substringAfter('/'))
                             "event-new" -> EventEditor(model)
@@ -256,8 +256,9 @@ fun Page(content: LazyListScope.() -> Unit) {
     LazyColumn(Modifier.fillMaxSize().testTag("page"), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp), content = content)
 }
 
+/** Fetches [key] and shows [content], filling the page; inside a dialog, [wrap] sizes it to its content instead. */
 @Composable
-fun Load(model: LedgerModel, key: String, fetch: (Api) -> JSONObject, content: @Composable (JSONObject) -> Unit) {
+fun Load(model: LedgerModel, key: String, fetch: (Api) -> JSONObject, wrap: Boolean = false, content: @Composable (JSONObject) -> Unit) {
     val client = model.api ?: return
     var value by remember(key) { mutableStateOf<JSONObject?>(null) }
     var error by remember(key) { mutableStateOf<String?>(null) }
@@ -272,7 +273,7 @@ fun Load(model: LedgerModel, key: String, fetch: (Api) -> JSONObject, content: @
             if (e is ApiError && e.status == 401) model.failed(e, client)
         } finally { loading = false }
     }
-    Column(Modifier.fillMaxSize()) {
+    Column(if (wrap) Modifier else Modifier.fillMaxSize()) {
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         error?.let { message ->
             Column(Modifier.padding(20.dp)) { Text(message, color = MaterialTheme.colorScheme.error); TextButton(onClick = model::refresh) { Text("Retry") } }
@@ -304,11 +305,12 @@ fun Choice(label: String, value: String, options: List<Pair<String, String>>, ch
 }
 
 @Composable
-fun SummaryCard(title: String, subtitle: String = "", body: String = "", onClick: (() -> Unit)? = null) {
+fun SummaryCard(title: String, subtitle: String = "", body: String = "", tags: List<Pair<String, Tone>> = emptyList(), onClick: (() -> Unit)? = null) {
     val contents: @Composable ColumnScope.() -> Unit = {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             if (subtitle.isNotBlank()) Text(subtitle, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+            if (tags.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) { tags.forEach { (text, tone) -> Tag(text, tone) } }
             if (body.isNotBlank()) SelectionContainer { Text(body, style = MaterialTheme.typography.bodyMedium) }
         }
     }
@@ -320,12 +322,34 @@ fun SummaryCard(title: String, subtitle: String = "", body: String = "", onClick
 fun Empty(text: String) { Text(text, Modifier.padding(vertical = 24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
 
 @Composable
-fun ConfirmButton(label: String, explanation: String, enabled: Boolean = true, action: () -> Unit) {
+fun ConfirmButton(label: String, explanation: String, enabled: Boolean = true, danger: Boolean = false, action: () -> Unit) {
     var confirm by remember { mutableStateOf(false) }
     OutlinedButton(onClick = { confirm = true }, enabled = enabled) { Text(label) }
-    if (confirm) AlertDialog(onDismissRequest = { confirm = false }, title = { Text(label) }, text = { Text(explanation) },
-        confirmButton = { TextButton(onClick = { confirm = false; action() }) { Text(label) } },
-        dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancel") } })
+    if (confirm) ConfirmDialog(label, explanation, { confirm = false }, danger, action)
+}
+
+/** Asks before [action]; [label] names the dialog and its confirm button, in the error colour when the action is [danger]ous. */
+@Composable
+fun ConfirmDialog(label: String, explanation: String, dismiss: () -> Unit, danger: Boolean = false, action: () -> Unit) =
+    AlertDialog(onDismissRequest = dismiss, title = { Text(label) }, text = { Text(explanation) },
+        confirmButton = { TextButton(onClick = { dismiss(); action() }) { Text(label, color = if (danger) MaterialTheme.colorScheme.error else Color.Unspecified) } },
+        dismissButton = { TextButton(onClick = dismiss) { Text("Cancel") } })
+
+class MenuAction(val label: String, val danger: Boolean = false, val run: () -> Unit)
+
+/** Secondary and destructive actions behind a ⋯ button, so a row keeps only what is used most. */
+@Composable
+fun Overflow(description: String, actions: List<MenuAction>, enabled: Boolean = true) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }, enabled = enabled) { Glyph("more", description) }
+        DropdownMenu(open, onDismissRequest = { open = false }) {
+            actions.forEach { action ->
+                DropdownMenuItem(text = { Text(action.label, color = if (action.danger) MaterialTheme.colorScheme.error else Color.Unspecified) },
+                    onClick = { open = false; action.run() })
+            }
+        }
+    }
 }
 
 fun displayTime(value: String): String = runCatching {

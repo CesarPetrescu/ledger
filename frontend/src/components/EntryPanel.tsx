@@ -3,9 +3,10 @@ import { api, describeError, OWNER_SOURCE, type HistoryEvent, type TableEntry } 
 import { useResource } from '../hooks/useResource'
 import { useUndo } from '../hooks/useUndo'
 import { refreshAll } from '../live'
-import { DeleteEntry, Facts, FocusBadges, LIVE, RelatedList, TodoState, titleOf, useOwnerAction, whyHere } from './entries'
+import { DeleteEntry, Facts, FocusBadges, LIVE, RelatedList, TodoState, titleOf, useOwnerAction } from './entries'
 import { LegendButton } from './help'
 import { LabelEditor } from './LabelEditor'
+import { MarkdownText, plainText } from './Markdown'
 import { Link, navigate, useLocation } from '../router'
 import { useToast } from './Toast'
 import { ErrorState, Icon, KindBadge, Loading, StaleNotice, Timestamp } from './ui'
@@ -121,24 +122,27 @@ export function EntryDetail({ id, onClose }: { id: string; onClose?: () => void 
       {onClose && <PanelBar id={id} onClose={onClose} />}
       {entry.stale && <StaleNotice message="Showing the last loaded version; refresh failed." onRetry={entry.reload} />}
       <header className="entry-detail-head">
-        <p className="entry-detail-context">
-          <KindBadge kind={e.kind} /> <Link to={project}>{e.project_name}</Link> · <span>{writerName(e.source)}</span> · <Timestamp iso={e.created_at} />
-        </p>
+        <div className="entry-detail-top">
+          <p className="entry-detail-context">
+            <KindBadge kind={e.kind} /> <Link to={project}>{e.project_name}</Link> · <span>{writerName(e.source)}</span> · <Timestamp iso={e.created_at} />
+          </p>
+          {/* Every entry has the ⋯ menu, so it sits on the top line rather than in an action row that may hold nothing else. */}
+          <DeleteEntry entry={e} onChanged={() => { if (onClose) onClose(); else navigate(project); refreshAll() }} />
+        </div>
         <h2 ref={headingRef} tabIndex={-1}>{titleOf(e)}</h2>
         <p className="entry-detail-badges"><FocusBadges entry={e} /> <LegendButton /></p>
-        {meta?.gist && <p className="lede">{meta.gist}</p>}
+        {meta?.gist && <p className="lede">{plainText(meta.gist)}</p>}
         {e.reply_to && <p className="entry-detail-note">A reply to <Link to={`/entries/${e.reply_to}`}>an earlier entry</Link>.</p>}
       </header>
 
       {asking && (
         <section className="entry-question" aria-label="Question for you">
           <p className="eyebrow">{e.source} asks you</p>
-          <p className="entry-question-text">{meta?.ask}</p>
-          {whyHere(e) && <p className="muted small">{whyHere(e)}</p>}
+          <p className="entry-question-text">{plainText(meta?.ask ?? '')}</p>
         </section>
       )}
 
-      <EntryActions entry={e} onDeleted={() => (onClose ? onClose() : navigate(project))} />
+      <EntryActions entry={e} />
       <ReplyBox entry={e} asking={asking} />
 
       {meta?.tags && meta.tags.length > 0 && (
@@ -154,7 +158,7 @@ export function EntryDetail({ id, onClose }: { id: string; onClose?: () => void 
 
       <details className="entry-detail-section" open={!meta?.gist}>
         <summary>Full text</summary>
-        <p className="entry-body">{e.body}</p>
+        <div className="entry-body"><MarkdownText text={e.body} /></div>
         {meta && meta.refs.length > 0 && <ul className="refs" aria-label="References">{meta.refs.map((ref) => <li key={ref}><code>{ref}</code></li>)}</ul>}
       </details>
 
@@ -180,18 +184,21 @@ function PanelBar({ id, onClose }: { id: string; onClose: () => void }) {
   )
 }
 
-/** Every action that applies to this entry, not only the ones a list row shows. */
-function EntryActions({ entry, onDeleted }: { entry: TableEntry; onDeleted: () => void }) {
+/** Every action that applies to this entry, not only the ones a list row shows; nothing when none applies. */
+function EntryActions({ entry }: { entry: TableEntry }) {
   const owner = useOwnerAction(refreshAll)
-  const asking = Boolean(entry.meta?.ask && !entry.owner.handled && entry.source !== OWNER_SOURCE)
+  const agentAsk = Boolean(entry.meta?.ask && entry.source !== OWNER_SOURCE)
+  const asking = agentAsk && !entry.owner.handled
   const link = entry.meta?.link
   const snoozable = asking || (entry.kind === 'todo' && !entry.resolved_by)
   const snoozed = entry.owner.snoozed_until
+  // A decision or note without a link has nothing here; an empty bordered row looks like missing content.
+  if (entry.kind !== 'todo' && !agentAsk && !snoozed && !link) return null
   return (
     <div className="entry-detail-actions">
       {entry.kind === 'todo' && <TodoState entry={entry} onChanged={refreshAll} />}
       {asking && <button type="button" className="btn btn-small" disabled={owner.busy} onClick={() => void owner.act(entry.id, { handled: true }, 'Marked handled.')}>Handled</button>}
-      {entry.meta?.ask && entry.owner.handled && entry.source !== OWNER_SOURCE && <button type="button" className="btn btn-small" disabled={owner.busy} onClick={() => void owner.act(entry.id, { handled: false }, 'Back in Needs you.')}>Not handled</button>}
+      {agentAsk && entry.owner.handled && <button type="button" className="btn btn-small" disabled={owner.busy} onClick={() => void owner.act(entry.id, { handled: false }, 'Back in Needs you.')}>Not handled</button>}
       {snoozable && !snoozed && (
         <label className="snooze-select">
           <span className="visually-hidden">Snooze</span>
@@ -221,7 +228,6 @@ function EntryActions({ entry, onDeleted }: { entry: TableEntry; onDeleted: () =
           </button>
         </>
       )}
-      <span className="entry-detail-actions-end"><DeleteEntry entry={entry} onChanged={() => { onDeleted(); refreshAll() }} /></span>
     </div>
   )
 }

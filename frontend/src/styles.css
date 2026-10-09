@@ -826,7 +826,9 @@ label > textarea {
 .clients { border-top: 1px solid var(--border); }
 .clients td ul li + li { margin-top: 4px; }
 
-.entry-body { max-width: 76ch; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-body); }
+.entry-body { max-width: 76ch; overflow-wrap: anywhere; color: var(--text-body); }
+/* Entries are rendered as Markdown; a line break the agent typed still breaks the line. */
+.entry-body .markdown p { white-space: pre-line; }
 .clamp { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .rank { min-width: 1.5em; color: var(--text-faint); font-family: var(--mono); }
 .score { margin-left: auto; }
@@ -932,6 +934,7 @@ label > textarea {
 .project-related li > a { display: grid; gap: 4px; padding: 15px 8px; color: var(--text); }
 .project-related li > a:hover { background: var(--surface-soft); }
 .project-related li span { overflow-wrap: anywhere; }
+.project-handoff-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .repo-list li { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: start; padding: 14px 8px; }
 .repo-list li > div { display: grid; gap: 3px; min-width: 0; }
 .repo-list .repo-sync-error { color: var(--danger, #b42318); }
@@ -1017,9 +1020,7 @@ label > textarea {
 .related-title { margin: 0 0 4px; color: var(--text-faint); font-size: 0.67rem; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; }
 .related ul { margin: 0; padding: 0; list-style: none; font-size: 0.82rem; }
 
-/* Help, reasons, and agents */
-.why-here { margin: 4px 0 0; color: var(--text-soft); font-size: 0.8rem; }
-.why-here::before { content: 'Why: '; color: var(--text-faint); font-weight: 650; }
+/* Help and agents */
 .legend-button { font-size: 0.8rem; }
 .mark-all { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0 0 16px; }
 .dialog-wide { width: min(620px, calc(100vw - 32px)); }
@@ -1069,6 +1070,10 @@ label > textarea {
 .summary-table .needs-me { margin: 4px 0 0; max-width: 42ch; color: var(--warning); }
 .summary-table code { white-space: nowrap; }
 .summary-table td:nth-child(4) { min-width: 9rem; }
+/* The create buttons share the title's row on desktops (a 330px pane) and phones from 390px; where the pane is narrower they wrap under the title. */
+.handoffs .page-head { align-items: center; column-gap: 10px; }
+.handoff-head-actions { display: flex; gap: 6px; }
+.handoff-head-actions .btn { min-height: var(--control); padding: 0 8px; gap: 4px; }
 .handoff-list { border-top: 1px solid var(--border); }
 .handoff-list li { border-bottom: 1px solid var(--border); }
 .handoff-list a { display: grid; gap: 5px; padding: 16px 10px 16px 13px; border-left: 3px solid transparent; color: var(--text); }
@@ -1081,7 +1086,8 @@ label > textarea {
 .handoff-counts [data-status='blocked'] { color: var(--danger); }
 .handoff-counts [data-status='ready'] { color: var(--accent); }
 .handoff-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin: 0; }
-.handoff-summary div { padding-bottom: 18px; border-bottom: 1px solid var(--border); }
+.handoff-summary > div { padding-bottom: 18px; border-bottom: 1px solid var(--border); }
+.handoff-summary > div:only-child { grid-column: 1 / -1; }
 .handoff-summary dt { margin-bottom: 6px; color: var(--text-faint); font-size: 0.68rem; font-weight: 650; letter-spacing: 0.07em; text-transform: uppercase; }
 .handoff-summary dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .handoff-thread > ol { border-top: 1px solid var(--border); }
@@ -1355,6 +1361,7 @@ label > textarea {
   .form-actions .muted { flex-basis: 100%; margin-right: 0; }
   .form-actions .btn { flex: 1; }
   .detail-head .btn { width: 100%; }
+  .handoff-head-actions .btn { width: auto; }
   .handoff-filter-row,
   .handoff-summary { grid-template-columns: 1fr; }
   .handoff-summary { gap: 14px; }
@@ -1381,7 +1388,8 @@ label > textarea {
   .result-meta { gap: 3px 10px; margin-top: 1px; font-size: 0.67rem; }
   .result-meta > * + *::before { margin-right: 10px; }
   .entry-head .score { flex-basis: 100%; margin-left: 0; }
-  .dialog-actions { display: grid; }
+  /* One full-width column: justify-content: flex-end would keep a content-sized track at the right. */
+  .dialog-actions { display: grid; grid-template-columns: minmax(0, 1fr); }
   .calendar-connect { width: 100%; margin: 0; padding: 28px 20px; border-width: 0 0 1px; }
   .calendar-connect form { grid-template-columns: 1fr; }
   .calendar-auth-wait { align-items: stretch; flex-direction: column; }
@@ -1439,7 +1447,6 @@ label > textarea {
 .entry-row[aria-current='true'] { margin: 0 -12px; padding-left: 12px; padding-right: 12px; background: var(--surface-accent); box-shadow: inset 3px 0 0 var(--accent); }
 .entry-row[aria-current='true'] .entry-row-title { color: var(--accent); }
 .entry-split[data-open='true'] .entry-row-gist { -webkit-line-clamp: 1; }
-.entry-split[data-open='true'] .why-here { display: none; }
 .row-note { padding: 0 6px; border: 1px solid var(--border); color: var(--text-soft); font-size: 0.7rem; line-height: 1.6; }
 
 .entry-detail { display: grid; gap: 16px; }
@@ -1447,6 +1454,9 @@ label > textarea {
 .entry-detail-head { display: grid; gap: 8px; }
 .entry-detail-head h2 { margin: 0; font-size: 1.3rem; letter-spacing: -0.02em; line-height: 1.3; outline: none; }
 .entry-page .entry-detail-head h2 { font-size: 1.55rem; }
+.entry-detail-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.entry-detail-top .icon-button { width: 34px; min-height: 34px; }
+@media (pointer: coarse) { .entry-detail-top .icon-button { width: var(--control); min-height: var(--control); } }
 .entry-detail-context { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; color: var(--text-soft); font-size: 0.8rem; }
 .entry-detail-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0; }
 .entry-detail-head .lede { margin: 0; color: var(--text-body); }
@@ -1455,11 +1465,9 @@ label > textarea {
 
 .entry-question { padding: 14px 16px; border-left: 3px solid var(--tone-amber); background: var(--tone-amber-bg); }
 .entry-question .eyebrow { margin: 0 0 4px; color: var(--tone-amber); }
-.entry-question-text { margin: 0 0 4px; color: var(--text); font-size: 1rem; font-weight: 600; line-height: 1.45; }
-.entry-question .muted { margin: 0; }
+.entry-question-text { margin: 0; color: var(--text); font-size: 1rem; font-weight: 600; line-height: 1.45; }
 
 .entry-detail-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 12px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-.entry-detail-actions-end { margin-left: auto; }
 .snooze-select select { height: 32px; padding: 0 28px 0 10px; font-size: 0.82rem; }
 
 .reply-box { display: grid; gap: 8px; }
@@ -1567,6 +1575,7 @@ label > textarea {
 .cal-week-day .cal-item-title { white-space: normal; }
 
 .calendar-agenda section[data-today='true'] > h2 { color: var(--accent); }
+.calendar-agenda section[data-overdue='true'] > h2 { color: var(--danger); }
 .cal-agenda-items { display: grid; gap: 4px; padding: 10px 0 10px 14px; border-left: 1px solid var(--border); }
 .cal-agenda-items .cal-item { padding: 8px 10px; font-size: 0.86rem; }
 .cal-agenda-items .cal-item-time { min-width: 8.5rem; }
@@ -1581,6 +1590,11 @@ label > textarea {
   .cal-cell .cal-item { font-size: 0; padding: 0; height: 6px; }
   .cal-weekdays span { padding: 6px 2px; text-align: center; font-size: 0.64rem; }
   .cal-cell { min-height: 58px; padding: 2px; }
+  /* Agenda is the phone default: the title gets its own line instead of sharing one with the label and project. */
+  .cal-agenda-items { padding-left: 0; border-left: 0; }
+  .cal-agenda-items .cal-item { flex-wrap: wrap; column-gap: 8px; }
+  .cal-agenda-items .cal-item-time { min-width: 0; }
+  .cal-agenda-items .cal-item-title { flex-basis: 100%; white-space: normal; }
 }
 
 /* ---- Scrollbars: thin, themed, out of the way ---- */
@@ -1691,6 +1705,20 @@ label > textarea {
 .research-error { overflow-wrap: anywhere; color: var(--danger); }
 .research-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .research-badge { margin-right: 6px; vertical-align: 1px; }
+.badge[data-research='draft'], .badge[data-research='stopped'] { background: var(--surface-soft); color: var(--text-muted); }
+.badge[data-research='queued'], .badge[data-research='running'] { background: var(--tone-blue-bg); color: var(--tone-blue); }
+.badge[data-research='review'], .badge[data-research='question'] { background: var(--tone-amber-bg); color: var(--tone-amber); }
+.badge[data-research='accepted'] { background: var(--tone-green-bg); color: var(--tone-green); }
+/* Its labels are already cased ("Ready for review"); .badge would capitalize every word. */
+.badge[data-research] { text-transform: none; }
+
+/* Secondary actions behind a "⋯" button. */
+.overflow-menu { position: relative; display: inline-flex; }
+.overflow-menu-list { position: absolute; top: calc(100% + 4px); right: 0; z-index: 30; display: grid; min-width: 180px; padding: 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16); }
+.overflow-menu-list button { min-height: 40px; padding: 8px 12px; border: 0; border-radius: 4px; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.overflow-menu-list button:hover, .overflow-menu-list button:focus-visible { background: var(--surface-soft); }
+.overflow-menu-list button:disabled { color: var(--text-faint); cursor: default; }
+.overflow-menu-list .overflow-menu-danger { color: var(--danger); }
 .research-share { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 16px; }
 .research-share > span { display: flex; flex-direction: column; gap: 2px; }
 

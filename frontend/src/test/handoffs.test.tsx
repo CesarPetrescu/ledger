@@ -41,7 +41,8 @@ const detail: HandoffDetail = {
 const page: HandoffPage = { handoffs: [detail.handoff] }
 
 const research: HandoffDetail = {
-  handoff: { ...detail.handoff, id: '9', kind: 'research', title: 'Vector DB survey', ready_count: 0, blocked_count: 1, done_count: 3 },
+  // A research task's description is its objective, and it has no work scope.
+  handoff: { ...detail.handoff, id: '9', kind: 'research', research_status: 'review', title: 'Vector DB survey', description: 'Compare vector databases', scope: '', ready_count: 0, blocked_count: 1, done_count: 3 },
   messages: [
     { ...detail.messages[0]!, id: '21', handoff_id: '9', body: '**Research task** · deliverable: report', work_state: 'blocked', target: '', files: [] },
     { ...detail.messages[0]!, id: '22', handoff_id: '9', body: 'Run 1 started by Adastrion dispatcher.', source: 'ledger', work_state: 'done', target: '', files: [] },
@@ -58,15 +59,20 @@ describe('handoff inbox', () => {
     const accepted = { ...research.messages[0]!, work_state: 'done' as const }
     const { calls } = mockApi({
       'GET /admin/api/session': authenticatedSession,
-      'GET /admin/api/handoffs': { body: { handoffs: [research.handoff] } },
+      'GET /admin/api/handoffs': { body: { handoffs: [research.handoff, detail.handoff] } },
       'GET /admin/api/projects': { body: { projects: [atlas] } },
       'GET /admin/api/handoffs/9': { body: research },
       'POST /admin/api/handoff-messages/21/actions': { body: accepted },
     })
     renderApp('/admin/handoffs')
     const list = await screen.findByRole('list', { name: /handoffs/i })
-    expect(within(list).getByText('Research')).toBeInTheDocument()
-    await userEvent.setup().click(within(list).getByRole('link', { name: /vector db survey/i }))
+    // The task shows its state, not message counts (its run notes would read as "3 Done"); a general handoff keeps its counts.
+    const task = within(list).getByRole('link', { name: /vector db survey/i })
+    expect(within(task).getByText('Research')).toBeInTheDocument()
+    expect(within(task).getByText('Ready for review')).toHaveAttribute('data-research', 'review')
+    expect(within(task).queryByText(/blocked|done/i)).not.toBeInTheDocument()
+    expect(within(within(list).getByRole('link', { name: /continue the release/i })).getByText('1 Ready')).toBeInTheDocument()
+    await userEvent.setup().click(task)
     const panel = await screen.findByRole('region', { name: /research status/i })
     expect(within(panel).getByRole('heading', { name: 'Ready for review' })).toBeInTheDocument()
     expect(within(panel).getByText(/accept it, or reply with what to change and send back/i)).toBeInTheDocument()
@@ -77,6 +83,71 @@ describe('handoff inbox', () => {
     expect(screen.queryByRole('button', { name: /^(claim|block)$/i })).not.toBeInTheDocument()
     await userEvent.setup().click(within(panel).getByRole('button', { name: 'Accept' }))
     await waitFor(() => expect(calls.find((call) => call.path === '/admin/api/handoff-messages/21/actions')?.body).toMatchObject({ action: 'complete' }))
+  })
+
+  it('keeps a research thread to the task: no per-message states, no empty sections, and a reply instead of a target', async () => {
+    const reply = { ...research.messages[0]!, id: '24', body: 'Add pgvector numbers', source: 'owner', work_state: 'done' as const }
+    const draftReply = { ...research.messages[0]!, id: '25', body: 'Also cover Qdrant', source: 'owner', work_state: 'draft' as const }
+    const { calls } = mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/handoffs': { body: { handoffs: [research.handoff] } },
+      'GET /admin/api/projects': { body: { projects: [atlas] } },
+      'GET /admin/api/handoffs/9': { body: { ...research, messages: [...research.messages, draftReply] } },
+      'POST /admin/api/handoffs/9/messages': { status: 201, body: reply },
+    })
+    renderApp('/admin/handoffs/9')
+    const thread = await screen.findByRole('region', { name: /handoff messages/i })
+    const items = within(thread).getAllByRole('listitem')
+    expect(items).toHaveLength(4)
+    expect(within(thread).queryByText(/^(unseen|seen|ready|blocked|done)$/i)).not.toBeInTheDocument()
+    // Only a draft keeps its marker, so its Publish button makes sense.
+    expect(within(items[3]!).getByText('Draft')).toBeInTheDocument()
+    expect(within(items[3]!).getByRole('button', { name: 'Publish' })).toBeInTheDocument()
+    expect(within(thread).getAllByText('Draft')).toHaveLength(1)
+    expect(screen.getByText('Description').closest('dl')).toHaveTextContent('Compare vector databases')
+    expect(screen.queryByText('Work scope')).not.toBeInTheDocument()
+    const form = screen.getByRole('form', { name: 'Reply' })
+    expect(within(form).getByRole('heading', { name: 'Reply' })).toBeInTheDocument()
+    expect(within(form).queryByLabelText(/target/i)).not.toBeInTheDocument()
+    // The reply text leads; Files follows it.
+    expect(within(form).getByLabelText('Feedback or answer').compareDocumentPosition(within(form).getByLabelText('Files')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const user = userEvent.setup()
+    await user.type(within(form).getByLabelText('Feedback or answer'), 'Add pgvector numbers')
+    await user.click(within(form).getByRole('button', { name: 'Add reply' }))
+    await waitFor(() => expect(calls.find((call) => call.path === '/admin/api/handoffs/9/messages')?.body).toEqual({ body: 'Add pgvector numbers', target: '', draft: false }))
+    expect(await screen.findByRole('status')).toHaveTextContent(/reply added/i)
+  })
+
+  it('hides an empty description or work scope on any handoff', async () => {
+    mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/handoffs': { body: page },
+      'GET /admin/api/projects': { body: { projects: [atlas] } },
+      'GET /admin/api/handoffs/7': { body: { ...detail, handoff: { ...detail.handoff, description: '  \n' } } },
+    })
+    renderApp('/admin/handoffs/7')
+    expect(await screen.findByText('Work scope')).toBeInTheDocument()
+    expect(screen.queryByText('Description')).not.toBeInTheDocument()
+    // A general handoff keeps its composer as it was.
+    const form = screen.getByRole('form', { name: /append handoff message/i })
+    expect(within(form).getByRole('heading', { name: 'Continue this handoff' })).toBeInTheDocument()
+    expect(within(form).getByLabelText(/target/i)).toBeInTheDocument()
+    expect(within(form).getByLabelText('Files').compareDocumentPosition(within(form).getByLabelText('Message')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('keeps the two create buttons together, beside the title', async () => {
+    mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/handoffs': { body: page },
+      'GET /admin/api/projects': { body: { projects: [atlas] } },
+    })
+    renderApp('/admin/handoffs')
+    const title = await screen.findByRole('heading', { name: 'Handoffs', level: 1 })
+    const group = screen.getByRole('link', { name: 'Research' }).parentElement
+    expect(screen.getByRole('link', { name: 'New' }).parentElement).toBe(group)
+    expect(title.nextElementSibling).toBe(group)
+    // Full-size, like the other create buttons.
+    for (const name of ['Research', 'New']) expect(screen.getByRole('link', { name })).not.toHaveClass('btn-small')
   })
 
 

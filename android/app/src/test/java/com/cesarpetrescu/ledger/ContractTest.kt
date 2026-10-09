@@ -43,9 +43,63 @@ class ContractTest {
         assertEquals(emptyList<Pair<String, String>>(), researchActions("ready", "", brief = true))
         assertEquals(emptyList<Pair<String, String>>(), researchActions("done", "", brief = false))
         assertEquals(listOf("publish" to "Publish"), researchActions("draft", "", brief = false))
-        assertEquals("Stopped", researchHeadline("blocked", "dead", 3, 3, 3, "", "exit 137").first)
+        assertEquals("3 of 3 failed runs. Last error: exit 137. Retry gives it a fresh set of attempts.", researchHint("blocked", "dead", 3, 3, 3, "", "exit 137"))
+        assertEquals("Run 2 · A sandbox is working on it.", researchHint("in_progress", "", 2, 0, 3, "", ""))
         assertEquals(listOf("complete", "release"), messageActions("blocked", "seen"))
         assertEquals(listOf("reopen"), messageActions("done", "seen"))
+    }
+
+    @Test fun handoffListShowsResearchStateInsteadOfMessageCounts() {
+        val research = org.json.JSONObject("""{"kind":"research","research_status":"review","ready_count":0,"in_progress_count":0,"done_count":0}""")
+        // The state is a coloured label, amber when it waits on the owner; the empty message counts are left out.
+        assertEquals("", handoffProgress(research))
+        assertEquals(listOf("Research" to Tone.Neutral, "Ready for review" to Tone.Warn), researchTags(research))
+        assertEquals("Question for you" to Tone.Warn, researchTags(org.json.JSONObject("""{"kind":"research","research_status":"question"}"""))[1])
+        assertEquals("Queued" to Tone.Accent, researchTags(org.json.JSONObject("""{"kind":"research","research_status":"queued"}"""))[1])
+        // A server without research_status still marks the task as research.
+        assertEquals(listOf("Research" to Tone.Neutral), researchTags(research.put("research_status", org.json.JSONObject.NULL)))
+        assertEquals(listOf("Draft", "Queued", "Running", "Ready for review", "Question for you", "Stopped", "Accepted"),
+            listOf("draft", "queued", "running", "review", "question", "stopped", "accepted").map(::researchStatusLabel))
+        val general = org.json.JSONObject("""{"kind":"general","draft_count":0,"ready_count":2,"in_progress_count":1,"blocked_count":0,"done_count":0}""")
+        assertEquals("2 ready · 1 in progress", handoffProgress(general))
+        assertEquals(emptyList<Pair<String, Tone>>(), researchTags(general))
+    }
+
+    @Test fun researchThreadHeaderShowsTheListsStateLabel() {
+        // The detail has the brief's work state and phase, not research_status; the mapping matches the server's.
+        val states = listOf("draft" to "", "ready" to "", "in_progress" to "", "done" to "", "blocked" to "review", "blocked" to "question", "blocked" to "dead")
+        assertEquals(listOf("draft", "queued", "running", "accepted", "review", "question", "stopped"), states.map { (work, phase) -> researchStatus(work, phase) })
+        assertEquals("Ready for review" to Tone.Warn, researchStatusTag(researchStatus("blocked", "review")))
+        assertEquals("Running" to Tone.Accent, researchStatusTag("running"))
+        assertEquals("Accepted" to Tone.Good, researchStatusTag("accepted"))
+        assertEquals("Stopped" to Tone.Neutral, researchStatusTag("stopped"))
+        assertNull(researchStatusTag(""))
+    }
+
+    @Test fun replyStepsBackWhileAcceptOrQueueLeads() {
+        assertEquals(true, researchLeads("blocked", "review"))
+        assertEquals(true, researchLeads("draft", ""))
+        // Answering a question, Reply is the next step and stays filled.
+        assertEquals(false, researchLeads("blocked", "question"))
+        assertEquals(false, researchLeads("in_progress", ""))
+    }
+
+    @Test fun anUnpublishedResearchReplySaysDraft() {
+        assertEquals("You · Draft", researchNoteTitle(org.json.JSONObject("""{"source":"ledger-admin","work_state":"draft"}""")))
+        assertEquals("codex", researchNoteTitle(org.json.JSONObject("""{"source":"codex","work_state":"blocked"}""")))
+    }
+
+    @Test fun countsArePluralizedCorrectly() {
+        assertEquals("1 open todo", plural(1, "open todo"))
+        assertEquals("3 open todos", plural(3, "open todo"))
+        assertEquals("1 needs you", plural(1, "needs you", "need you"))
+        assertEquals("0 entries", plural(0, "entry", "entries"))
+    }
+
+    @Test fun helpCoversCalendarResearchReposAndAccess() {
+        val help = helpSections.joinToString("\n") { "${it.first}\n${it.second}" }
+        listOf("More › Calendar", "Handoffs › Research", "Accept", "Send back", "Files travel both ways", "Repos", "GitHub sync", "API keys", "Settings › Connected apps")
+            .forEach { assertTrue(it, help.contains(it)) }
     }
 
     @Test

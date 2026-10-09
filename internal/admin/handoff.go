@@ -159,9 +159,25 @@ func (s *Server) listHandoffs(w http.ResponseWriter, r *http.Request) {
 		last := handoffs[len(handoffs)-1]
 		response["next_before"] = last.UpdatedAt.UTC().Format(time.RFC3339Nano) + "|" + strconv.FormatInt(last.ID, 10)
 	}
+	// Research tasks carry their status for the list's badge. It stays out of store.Handoff, which is
+	// an MCP tool output whose schema clients cache.
+	var researchIDs []int64
+	for _, handoff := range handoffs {
+		if handoff.Kind == "research" {
+			researchIDs = append(researchIDs, handoff.ID)
+		}
+	}
+	statuses, err := s.db.ResearchStatusOf(r.Context(), researchIDs)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
 	items := make([]map[string]any, len(handoffs))
 	for i, handoff := range handoffs {
 		items[i] = handoffResponse(handoff)
+		if status, ok := statuses[handoff.ID]; ok {
+			items[i]["research_status"] = status
+		}
 	}
 	response["handoffs"] = items
 	writeJSON(w, http.StatusOK, response)

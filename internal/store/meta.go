@@ -356,7 +356,10 @@ func (db *DB) ProjectSummaries(ctx context.Context) ([]ProjectSummary, error) {
   WHERE a.slug=p.slug AND a.source<>'`+OwnerSource+`' AND am.ask<>'' AND ao.handled_at IS NULL AND (ao.snoozed_until IS NULL OR ao.snoozed_until<=current_date))
 FROM project p
 LEFT JOIN project_digest d ON d.slug=p.slug
-LEFT JOIN LATERAL (SELECT id,body,created_at,source FROM entry WHERE slug=p.slug AND kind='status' ORDER BY created_at DESC,id DESC LIMIT 1) s ON true
+-- The headline is the newest status that is not routine bookkeeping, or the newest routine one if all are.
+-- ponytail: sorts every status of the project; a partial index on non-routine statuses if projects grow huge.
+LEFT JOIN LATERAL (SELECT e.id,e.body,e.created_at,e.source FROM entry e LEFT JOIN entry_meta em ON em.entry_id=e.id
+  WHERE e.slug=p.slug AND e.kind='status' ORDER BY COALESCE(em.importance,'')='routine',e.created_at DESC,e.id DESC LIMIT 1) s ON true
 LEFT JOIN entry_meta sm ON sm.entry_id=s.id
 LEFT JOIN LATERAL (SELECT hm.state,COALESCE(NULLIF(hm.blocker,''),hm.title) detail FROM entry h JOIN entry_meta hm ON hm.entry_id=h.id
   WHERE h.slug=p.slug AND h.kind='status' AND hm.state<>'' ORDER BY h.created_at DESC,h.id DESC LIMIT 1) hs ON true

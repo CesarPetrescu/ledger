@@ -63,9 +63,13 @@ describe('table', () => {
     expect(screen.getByRole('link', { name: 'Inbox', current: 'page' })).toBeInTheDocument()
     expect(within(asks).getByRole('button', { name: 'Confirm the pricing claims' })).toBeInTheDocument()
     expect(within(asks).getByText('Pricing question')).toBeInTheDocument()
-    // Each item says why it is there.
-    expect(within(asks).getByText(/claude-code asked .* and is waiting on your answer\./)).toBeInTheDocument()
-    expect(within(screen.getByRole('region', { name: 'Todos' })).getByText('The AI rated it high priority.')).toBeInTheDocument()
+    // The meta line and the chips say why each item is there; no "Why:" line repeats them.
+    expect(within(asks).getByText('claude-code')).toBeInTheDocument()
+    expect(asks).not.toHaveTextContent(/waiting on your answer/)
+    const todos = screen.getByRole('region', { name: 'Todos' })
+    expect(within(todos).getByText('High')).toBeInTheDocument()
+    expect(todos).not.toHaveTextContent(/high priority/)
+    expect(document.querySelector('.why-here')).toBeNull()
     expect(within(screen.getByRole('region', { name: 'Todos' })).getByText('1 of 5')).toBeInTheDocument()
     expect(within(screen.getByRole('region', { name: 'Blocked' })).getByText(/Waiting on legal/)).toBeInTheDocument()
     expect(within(screen.getByRole('region', { name: 'This week' })).getByText('Shipped the table page; two todos remain.')).toBeInTheDocument()
@@ -79,13 +83,15 @@ describe('table', () => {
     const old = new Date(Date.now() - 20 * 86400000).toISOString()
     const entries: TableEntry[] = [
       { ...todo, id: '81', created_at: old, meta: { ...todo.meta!, title: 'Old overdue task', size: 'L', due: day(-1), importance: 'important', gist: 'Needed before launch' } },
-      { ...todo, id: '82', meta: { ...todo.meta!, title: 'Upcoming task', size: 'S', due: day(3) } },
+      { ...todo, id: '82', meta: { ...todo.meta!, title: 'Upcoming task', size: 'S', due: day(3), priority: 'normal', importance: 'important', gist: 'Use **Qwen3** with `bge` as fallback' } },
     ]
     mockApi({ ...base, 'GET /admin/api/entries': { body: { entries, sources: [], tags: [] } } })
     renderApp('/admin/table?view=todos')
     const group = await screen.findByRole('region', { name: 'Atlas' })
     const rows = within(group).getAllByRole('listitem')
-    expect(rows[0]).toHaveTextContent('Important')
+    // One emphasis chip: high priority wins over importance.
+    expect(rows[0]).toHaveTextContent('High')
+    expect(rows[0]).not.toHaveTextContent('Important')
     expect(rows[0]).toHaveTextContent('Overdue')
     expect(rows[0]).toHaveTextContent('Stale')
     expect(rows[0]).toHaveTextContent('L')
@@ -93,6 +99,10 @@ describe('table', () => {
     expect(rows[0]).not.toHaveTextContent('phones…')
     expect(rows[1]).toHaveTextContent(/Due \S/)
     expect(rows[1]).not.toHaveTextContent('Stale')
+    expect(rows[1]).toHaveTextContent('Important')
+    // A one-line summary shows plain words, not Markdown syntax.
+    expect(rows[1]).toHaveTextContent('Use Qwen3 with bge as fallback')
+    expect(rows[1]).not.toHaveTextContent(/[*`]/)
   })
 
   it('says why AI labelling is paused and explains the labels', async () => {
@@ -140,7 +150,8 @@ describe('table', () => {
     expect(titles).toEqual(['Add CSV export', 'Tidy docs'])
     const request = calls.find((call) => call.path === '/admin/api/entries')!
     expect(Object.fromEntries(request.url.searchParams)).toMatchObject({ kind: 'todo', status: 'open', project: 'atlas' })
-    expect(within(group).getByText('high')).toBeInTheDocument()
+    expect(within(group).getByText('High')).toBeInTheDocument()
+    expect(within(group).getByText('Low')).toBeInTheDocument()
 
     const user = userEvent.setup()
     // A row opens beside the list, with its own address; the list stays.

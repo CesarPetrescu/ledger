@@ -2,16 +2,16 @@ import { useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
-// Handoff text is written by agents: Markdown is rendered without any raw
-// HTML (skipHtml), links open in a new tab without referrer, unsafe URL
-// schemes are dropped by react-markdown, and remote images are shown as links
-// so opening a message never loads a tracker.
+// Handoff and entry text is written by agents: raw HTML is never rendered (no
+// rehype-raw, so a tag such as <details> or Vec<u8> shows as the literal text it
+// is), links open in a new tab without referrer, unsafe URL schemes are dropped
+// by react-markdown, and remote images are shown as links so opening a message
+// never loads a tracker.
 export function MarkdownText({ text }: { text: string }) {
   return (
     <div className="markdown">
       <Markdown
         remarkPlugins={[remarkGfm]}
-        skipHtml
         components={{
           a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>,
           img: ({ src, alt }) => (typeof src === 'string' && src ? <a href={src} target="_blank" rel="noopener noreferrer">{alt || 'Image'} (image link)</a> : <span>{alt}</span>),
@@ -21,6 +21,21 @@ export function MarkdownText({ text }: { text: string }) {
       </Markdown>
     </div>
   )
+}
+
+/**
+ * Markdown as plain words, for titles and one-line summaries: heading, quote
+ * and list markers, emphasis, code ticks and link targets go. Marks inside a
+ * word (snake_case) or between spaces (2 * 3) stay, as Markdown leaves them.
+ */
+export function plainText(text: string): string {
+  return text
+    .replace(/^[ \t]*(?:#{1,6}[ \t]+|>[ \t]?|[-*+][ \t]+(?:\[[ xX]\][ \t]+)?|\d+[.)][ \t]+)/gm, '')
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/(`+)([^`]+)\1/g, '$2')
+    .replace(/(\*\*|__|~~)(?=\S)(.+?)(?<=\S)\1/g, '$2')
+    .replace(/(^|[^\w*])([*_])(?=\S)(.+?)(?<=\S)\2(?![\w*])/g, '$1$3')
+    .trim()
 }
 
 const KEY = 'ledger.markdown-preview'

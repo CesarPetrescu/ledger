@@ -156,16 +156,72 @@ fun researchActions(work: String, phase: String, brief: Boolean): List<Pair<Stri
     else -> emptyList()
 }
 
-/** The research status card: a title and what to do next. */
-fun researchHeadline(work: String, phase: String, attempt: Int, failures: Int, maxAttempts: Int, progress: String, lastError: String): Pair<String, String> = when {
-    work == "draft" -> "Research draft" to "Queue it when the brief is ready."
-    work == "ready" -> "Queued" to "Waiting for a free sandbox."
-    work == "in_progress" -> "Running · run $attempt" to progress.ifBlank { "A sandbox is working on it." }
-    work == "done" -> "Accepted" to "Run again reopens it for another run."
-    phase == "review" -> "Ready for review" to "Read the result below. Accept it, or add a message saying what to change and Send back."
-    phase == "question" -> "Question for you" to "Answer it in a new message, then Resume."
-    else -> "Stopped" to "$failures of $maxAttempts failed runs." + (if (lastError.isNotBlank()) " Last error: $lastError." else "") + " Retry gives it a fresh set of attempts."
+/** A research note's card title: who wrote it, and Draft while it is unpublished, since the run reads no drafts. */
+fun researchNoteTitle(message: JSONObject) = writerName(message.text("source")) + if (message.text("work_state") == "draft") " · Draft" else ""
+
+/** The research status card's text under its [researchStatusTag]: what to do next. */
+fun researchHint(work: String, phase: String, attempt: Int, failures: Int, maxAttempts: Int, progress: String, lastError: String): String = when {
+    work == "draft" -> "Queue it when the brief is ready."
+    work == "ready" -> "Waiting for a free sandbox."
+    work == "in_progress" -> "Run $attempt · " + progress.ifBlank { "A sandbox is working on it." }
+    work == "done" -> "Run again reopens it for another run."
+    phase == "review" -> "Read the result below. Accept it, or reply with what to change and Send back."
+    phase == "question" -> "Answer it in a reply, then Resume."
+    else -> "$failures of $maxAttempts failed runs." + (if (lastError.isNotBlank()) " Last error: $lastError." else "") + " Retry gives it a fresh set of attempts."
 }
+
+/** A research task's status from its brief's work state and phase, as the server names it in lists (research_status). */
+fun researchStatus(work: String, phase: String) = when (work) {
+    "draft" -> "draft"
+    "ready" -> "queued"
+    "in_progress" -> "running"
+    "done" -> "accepted"
+    else -> when (phase) {
+        "review", "question" -> phase
+        else -> "stopped"
+    }
+}
+
+/** A research task's state, named as on the web console's badge; blank when the server did not say. */
+fun researchStatusLabel(status: String) = when (status) {
+    "draft" -> "Draft"
+    "queued" -> "Queued"
+    "running" -> "Running"
+    "review" -> "Ready for review"
+    "question" -> "Question for you"
+    "stopped" -> "Stopped"
+    "accepted" -> "Accepted"
+    else -> ""
+}
+
+/** A research task's state label, coloured like the web badge (amber when it waits on the owner); null when the status is unknown. */
+fun researchStatusTag(status: String): Pair<String, Tone>? {
+    val tone = when (status) {
+        "review", "question" -> Tone.Warn
+        "queued", "running" -> Tone.Accent
+        "accepted" -> Tone.Good
+        else -> Tone.Neutral
+    }
+    return researchStatusLabel(status).takeIf { it.isNotBlank() }?.let { it to tone }
+}
+
+/** A research list row's labels: Research, then its [researchStatusTag]. */
+fun researchTags(handoff: JSONObject): List<Pair<String, Tone>> =
+    if (handoff.text("kind") != "research") emptyList()
+    else listOf("Research" to Tone.Neutral) + listOfNotNull(researchStatusTag(handoff.text("research_status")))
+
+/** The research card's filled buttons, Accept and Queue; while one shows ([researchLeads]), Reply is outlined so only one button leads. */
+fun isResearchPrimary(action: String) = action == "complete" || action == "publish"
+fun researchLeads(work: String, phase: String) = researchActions(work, phase, brief = true).any { isResearchPrimary(it.first) }
+
+/** A general handoff list row's state: how many messages are in each work state. A research task shows [researchTags] instead. */
+fun handoffProgress(handoff: JSONObject): String =
+    if (handoff.text("kind") == "research") ""
+    else listOf("draft_count" to "draft", "ready_count" to "ready", "in_progress_count" to "in progress", "blocked_count" to "blocked", "done_count" to "done")
+        .filter { handoff.optInt(it.first) > 0 }.joinToString(" · ") { (key, name) -> "${handoff.optInt(key)} $name" }
+
+/** "1 open todo", "3 open todos". */
+fun plural(count: Int, one: String, many: String = one + "s") = "$count ${if (count == 1) one else many}"
 
 fun messageActions(work: String, delivery: String): List<String> = buildList {
     if (delivery == "unseen" && work != "draft") add("acknowledge")

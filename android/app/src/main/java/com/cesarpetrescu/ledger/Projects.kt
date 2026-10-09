@@ -102,7 +102,7 @@ fun SearchScreen(model: LedgerModel) {
                     // An entry hit opens the entry itself; a project hit opens the project.
                     val entryId = hit.text("entry_id")
                     SummaryCard(hit.text("project_name").ifBlank { hit.text("ref") }, label(hit.text("kind")), hit.text("snippet"),
-                        when {
+                        onClick = when {
                             entryId.isNotBlank() -> ({ model.go("entry-view/${segment(entryId)}") })
                             hit.text("project_slug").isNotBlank() -> ({ model.go(projectRoute(hit.text("project_slug"))) })
                             else -> null
@@ -128,7 +128,7 @@ fun ProjectRepos(model: LedgerModel, slug: String) {
                 val (subtitle, body) = repoSummary(repo)
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     SummaryCard(repo.text("repo"), subtitle, body)
-                    ConfirmButton("Unlink", "Unlink ${repo.text("repo")}? Agents stop seeing it with this project. The repository itself is not touched.", !model.busy) {
+                    ConfirmButton("Unlink", "Unlink ${repo.text("repo")}? Agents stop seeing it with this project. The repository itself is not touched.", !model.busy, danger = true) {
                         model.act("Repository unlinked") { it.request("DELETE", "/repos/${segment(repo.text("id"))}") }
                     }
                 }

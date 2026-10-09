@@ -36,6 +36,20 @@ function localDateTime(value: string): string {
   return local.toISOString().slice(0, 16)
 }
 
+const VIEW_KEY = 'ledger.calendar-view'
+
+/**
+ * The view the owner last chose on this browser; otherwise Agenda on a phone, where the
+ * month grid shrinks every item to an unlabeled bar (styles.css, max-width 620px), and Month elsewhere.
+ */
+function initialMode(): CalendarMode {
+  try {
+    const saved = localStorage.getItem(VIEW_KEY)
+    if (saved === 'month' || saved === 'week' || saved === 'agenda') return saved
+  } catch { /* blocked storage: fall back to the screen size */ }
+  return window.matchMedia?.('(max-width: 620px)').matches ? 'agenda' : 'month'
+}
+
 function eventColor(calendarID: string): number {
   let hash = 0
   for (const character of calendarID) hash = (hash * 31 + character.charCodeAt(0)) >>> 0
@@ -281,7 +295,7 @@ function CalendarWorkspace({ connection, onDisconnected }: { connection: Calenda
   const [disconnecting, setDisconnecting] = useState(false)
   const [confirmDisconnect, setConfirmDisconnect] = useState(false)
   const [anchor, setAnchor] = useState(today())
-  const [mode, setMode] = useState<CalendarMode>('month')
+  const [mode, setMode] = useState<CalendarMode>(initialMode)
   const [calendarFilter, setCalendarFilter] = useState('')
   const [editing, setEditing] = useState<CalendarEvent | 'new' | null>(null)
   const toast = useToast()
@@ -296,6 +310,16 @@ function CalendarWorkspace({ connection, onDisconnected }: { connection: Calenda
     () => (hasCalendars ? api.listCalendarEvents(localDate(first).toISOString(), localDate(last).toISOString(), calendarFilter) : Promise.resolve([])),
     `calendar:events:${hasCalendars}:${first}:${last}:${calendarFilter}`, 'calendar')
   const ledger = useResource(() => ledgerDates(first, last), `calendar:ledger:${first}:${last}`, 'project entry entry_meta entry_owner_state')
+  // The agenda starts on its anchor, today by default, so todos already overdue fall before it; while it covers
+  // today they lead it in their own group (those due on its own past days already show there).
+  const showOverdue = mode === 'agenda' && first <= today() && today() < last
+  const overdueTodos = useResource(() => (showOverdue ? everyEntry({ kind: 'todo', status: 'open', due_before: first }) : Promise.resolve([])),
+    `calendar:overdue:${showOverdue}:${first}`, 'entry entry_meta entry_owner_state')
+
+  const todoItem = (todo: TableEntry): CalendarItem => {
+    const due = todo.meta?.due ?? ''
+    return { key: `t:${todo.id}`, date: due, time: 'Todo due', sort: `2${titleOf(todo)}`, title: titleOf(todo), detail: todo.project_name, kind: 'todo', overdue: due < today(), entryId: todo.id, open: () => entrySelection.open(todo.id) }
+  }
 
   const items = useMemo<CalendarItem[]>(() => {
     const out: CalendarItem[] = []
@@ -313,11 +337,7 @@ function CalendarWorkspace({ connection, onDisconnected }: { connection: Calenda
           detail: `${event.calendar_name}${event.location ? ` · ${event.location}` : ''}${event.recurring ? ' · Recurring' : ''}`, kind: 'event', color: eventColor(event.calendar_id), open: () => void openEvent(event) })
       }
     }
-    const now = today()
-    for (const todo of ledger.data?.due ?? []) {
-      const due = todo.meta?.due ?? ''
-      out.push({ key: `t:${todo.id}`, date: due, time: 'Todo due', sort: `2${titleOf(todo)}`, title: titleOf(todo), detail: todo.project_name, kind: 'todo', overdue: due < now, entryId: todo.id, open: () => entrySelection.open(todo.id) })
-    }
+    for (const todo of ledger.data?.due ?? []) out.push(todoItem(todo))
     for (const entry of ledger.data?.waking ?? []) {
       const day = entry.owner.snoozed_until ?? ''
       out.push({ key: `w:${entry.id}`, date: day, time: 'Wakes up', sort: `3${titleOf(entry)}`, title: titleOf(entry), detail: `${entry.project_name} · snoozed`, kind: 'wake', entryId: entry.id, open: () => entrySelection.open(entry.id) })
@@ -326,7 +346,7 @@ function CalendarWorkspace({ connection, onDisconnected }: { connection: Calenda
       out.push({ key: `d:${project.slug}`, date: project.deadline, time: 'Deadline', sort: `0${project.name}`, title: project.name, detail: 'Project deadline', kind: 'deadline', open: () => navigate(`/projects/${encodeURIComponent(project.slug)}`) })
     }
     return out.filter((item) => item.date >= first && item.date < last)
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- openEvent only reads state at click time
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- openEvent and todoItem only read state at click time
   }, [events.data, ledger.data, first, last, entrySelection.selected])
 
   const saveSelection = async () => {
@@ -352,6 +372,12 @@ function CalendarWorkspace({ connection, onDisconnected }: { connection: Calenda
     } catch (failure) {
       toast(describeError(failure), 'error')
     }
+  }
+
+  // Only a pick from the view switch is remembered; opening a day from the month grid is not.
+  const chooseMode = (next: CalendarMode) => {
+    setMode(next)
+    try { localStorage.setItem(VIEW_KEY, next) } catch { /* private mode: the choice lasts this page */ }
   }
 
   const disconnect = async () => {
@@ -421,7 +447,7 @@ function CalendarWorkspace({ connection, onDisconnected }: { connection: Calenda
         </div>
         <fieldset className="segmented">
           <legend className="visually-hidden">View</legend>
-          <div>{(['month', 'week', 'agenda'] as const).map((option) => <label key={option}><input type="radio" name="calendar-view" checked={mode === option} onChange={() => setMode(option)} /><span>{option === 'month' ? 'Month' : option === 'week' ? 'Week' : 'Agenda'}</span></label>)}</div>
+          <div>{(['month', 'week', 'agenda'] as const).map((option) => <label key={option}><input type="radio" name="calendar-view" checked={mode === option} onChange={() => chooseMode(option)} /><span>{option === 'month' ? 'Month' : option === 'week' ? 'Week' : 'Agenda'}</span></label>)}</div>
         </fieldset>
         {hasCalendars && (
           <label className="cal-filter">
@@ -436,10 +462,13 @@ function CalendarWorkspace({ connection, onDisconnected }: { connection: Calenda
       {events.stale && <StaleNotice message="Showing the last loaded calendar; refresh failed." onRetry={events.reload} />}
       {hasCalendars && !events.loading && !events.data && <ErrorState message="Couldn't load calendar events." onRetry={events.reload} />}
       {!ledger.loading && !ledger.data && <ErrorState message="Couldn't load todos, deadlines, and snoozed items." onRetry={ledger.reload} />}
-      {(events.loading || ledger.loading) && !events.data && !ledger.data ? <Loading label="Loading calendar…" />
+      {/* A failed overdue lookup must not read as "nothing overdue". */}
+      {showOverdue && overdueTodos.stale && <StaleNotice message="Showing the last loaded overdue todos; refresh failed." onRetry={overdueTodos.reload} />}
+      {showOverdue && !overdueTodos.loading && !overdueTodos.data && <ErrorState message="Couldn't load overdue todos." onRetry={overdueTodos.reload} />}
+      {((events.loading || ledger.loading) && !events.data && !ledger.data) || (showOverdue && overdueTodos.loading && !overdueTodos.data) ? <Loading label="Loading calendar…" />
         : mode === 'month' ? <MonthGrid anchor={anchor} items={items} today={today()} onDay={(day) => { setAnchor(day); setMode('agenda') }} />
         : mode === 'week' ? <WeekColumns anchor={anchor} items={items} today={today()} />
-        : <Agenda items={items} today={today()} />}
+        : <Agenda items={items} overdue={(overdueTodos.data ?? []).map(todoItem)} today={today()} />}
 
       {editing && <EventEditor key={editing === 'new' ? 'new' : `${editing.id}:${editing.etag}`} event={editing === 'new' ? null : editing} calendars={selectedCalendars} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); events.reload() }} />}
       <ConfirmDialog open={confirmDisconnect} title="Disconnect Nextcloud?" confirmLabel="Disconnect" busy={disconnecting} onCancel={() => setConfirmDisconnect(false)} onConfirm={() => void disconnect()}><p>Ledger and its MCP clients will immediately lose calendar access. Existing events remain in Nextcloud.</p></ConfirmDialog>

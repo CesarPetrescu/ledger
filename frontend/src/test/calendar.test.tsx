@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CalendarEvent, CalendarSource } from '../api'
 import { authenticatedSession, mockApi, renderApp } from './helpers'
 
@@ -23,6 +23,9 @@ const planning: CalendarEvent = {
   etag: '"v1"',
   recurring: false,
 }
+
+// A view picked in one test must not become the next test's default.
+beforeEach(() => localStorage.removeItem('ledger.calendar-view'))
 
 describe('Nextcloud calendar', () => {
   it('starts the Nextcloud login flow without asking for a password', async () => {
@@ -193,4 +196,86 @@ it('says so when Nextcloud calendars cannot be listed, with a retry', async () =
   await userEvent.setup().click(screen.getByRole('button', { name: /retry/i }))
   await waitFor(() => expect(calls.filter((call) => call.path === '/admin/api/calendar/calendars')).toHaveLength(2))
   expect(screen.queryByText(/couldn't reach your nextcloud calendars/i)).not.toBeInTheDocument()
+})
+
+describe('calendar view by screen size', () => {
+  const ledgerOnly = {
+    'GET /admin/api/session': authenticatedSession,
+    'GET /admin/api/calendar/connection': { body: { connected: false, selected_calendars: 0 } },
+    'GET /admin/api/entries': { body: { entries: [], sources: [], tags: [] } },
+    'GET /admin/api/projects': { body: { projects: [] } },
+  }
+  const screenWidth = (phone: boolean) => vi.stubGlobal('matchMedia', (query: string) => ({ matches: phone && query === '(max-width: 620px)', media: query }))
+
+  it('opens on the agenda on a phone, where the month grid has no room for labels', async () => {
+    screenWidth(true)
+    mockApi(ledgerOnly)
+    renderApp('/admin/calendar')
+    expect(await screen.findByText('Nothing in these 30 days.')).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'Agenda' })).toBeChecked()
+    expect(screen.queryByRole('grid')).not.toBeInTheDocument()
+  })
+
+  it('keeps the month grid on a wider screen', async () => {
+    screenWidth(false)
+    mockApi(ledgerOnly)
+    renderApp('/admin/calendar')
+    expect(await screen.findByRole('grid')).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'Month' })).toBeChecked()
+  })
+
+  it('leads the phone agenda with overdue todos, oldest first, since it starts today', async () => {
+    const day = (offset: number) => {
+      const date = new Date()
+      date.setDate(date.getDate() + offset)
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+    }
+    const todo = (id: string, title: string, due: string) => ({ id, slug: 'atlas', kind: 'todo', body: title, source: 'codex', client_id: 'c', created_at: new Date().toISOString(), project_name: 'Atlas',
+      owner: { read: false, starred: false, handled: false }, meta: { title, tags: [], refs: [], origin: 'model', due } })
+    screenWidth(true)
+    const { calls } = mockApi({
+      ...ledgerOnly,
+      'GET /admin/api/entries': (_init, url) => ({ body: { entries: url.searchParams.get('due_before') && !url.searchParams.get('due_from') ? [todo('2', 'File the taxes', day(-2)), todo('1', 'Renew the domain', day(-9))] : [], sources: [], tags: [] } }),
+    })
+    renderApp('/admin/calendar')
+    const group = (await screen.findByRole('heading', { name: 'Overdue' })).closest('section')!
+    expect(within(group).getAllByRole('button').map((button) => button.querySelector('.cal-item-title')?.textContent)).toEqual(['Renew the domain', 'File the taxes'])
+    expect(within(group).getAllByRole('button')[0]).toHaveAttribute('data-overdue', 'true')
+    expect(within(group).getAllByText(/^Due /)).toHaveLength(2)
+    // The 30 days themselves are still empty, and say so.
+    expect(screen.getByText('Nothing in these 30 days.')).toBeInTheDocument()
+    const overdue = calls.find((call) => call.path === '/admin/api/entries' && !call.url.searchParams.get('due_from') && call.url.searchParams.get('due_before'))!
+    expect(Object.fromEntries(overdue.url.searchParams)).toMatchObject({ kind: 'todo', status: 'open', due_before: day(0) })
+  })
+
+  it('says so when the overdue todos fail to load, with a retry, instead of showing none', async () => {
+    screenWidth(true)
+    let fail = true
+    const { calls } = mockApi({
+      ...ledgerOnly,
+      'GET /admin/api/entries': (_init, url) => url.searchParams.get('due_before') && !url.searchParams.get('due_from') && fail
+        ? { status: 500, body: { error: 'database down' } }
+        : { body: { entries: [], sources: [], tags: [] } },
+    })
+    renderApp('/admin/calendar')
+    const alert = await screen.findByText("Couldn't load overdue todos.")
+    expect(screen.queryByRole('heading', { name: 'Overdue' })).not.toBeInTheDocument()
+    fail = false
+    const before = calls.length
+    await userEvent.setup().click(within(alert.closest('[role="alert"]') ?? alert.parentElement!).getByRole('button', { name: /retry/i }))
+    await waitFor(() => expect(screen.queryByText("Couldn't load overdue todos.")).not.toBeInTheDocument())
+    expect(calls.length).toBeGreaterThan(before)
+  })
+
+  it('remembers a view the owner picked, even on a phone', async () => {
+    screenWidth(true)
+    mockApi(ledgerOnly)
+    const { unmount } = renderApp('/admin/calendar')
+    await userEvent.setup().click(await screen.findByRole('radio', { name: 'Week' }))
+    unmount()
+
+    renderApp('/admin/calendar')
+    expect(await screen.findByRole('radio', { name: 'Week' })).toBeChecked()
+    expect(screen.queryByText('Nothing in these 30 days.')).not.toBeInTheDocument()
+  })
 })

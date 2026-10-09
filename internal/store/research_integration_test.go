@@ -512,6 +512,18 @@ func TestResearchOverviewAndSharedProjectContext(t *testing.T) {
 	if _, err := db.ListResearchTasks(ctx, "bogus", "", "", 0); err == nil {
 		t.Fatal("unknown status accepted")
 	}
+	// The console's lists look the same statuses up by handoff, leaving general handoffs out.
+	general, err := db.CreateHandoff(ctx, store.Handoff{ProjectSlug: "atlas", Title: "Plan", Description: "d", Scope: "s", Source: "claude", ClientID: "c"}, store.HandoffMessage{Body: "b", WorkState: "ready", Source: "claude", ClientID: "c"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID, err := db.ResearchStatusOf(ctx, []int64{queued.ID, running.ID, general.Handoff.ID})
+	if err != nil || len(byID) != 2 || byID[queued.ID] != "review" || byID[running.ID] != "running" {
+		t.Fatalf("statuses by handoff = %v %v", byID, err)
+	}
+	if none, err := db.ResearchStatusOf(ctx, nil); err != nil || len(none) != 0 {
+		t.Fatalf("no handoffs = %v %v", none, err)
+	}
 
 	if _, err := db.AppendEntry(ctx, "atlas", "decision", "Use pgvector for search", "claude", "c"); err != nil {
 		t.Fatal(err)

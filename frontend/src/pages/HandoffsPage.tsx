@@ -13,7 +13,7 @@ import {
   type ResearchStatus,
 } from '../api'
 import { useToast } from '../components/Toast'
-import { EmptyState, ErrorState, Icon, Loading, StaleNotice, Timestamp } from '../components/ui'
+import { EmptyState, ErrorState, Icon, Loading, ResearchStatusBadge, StaleNotice, Timestamp } from '../components/ui'
 import { useResource } from '../hooks/useResource'
 import { Link, navigate } from '../router'
 
@@ -202,7 +202,9 @@ function MessagePreview({ body }: { body: string }) {
   )
 }
 
-function MessageComposer({ handoffID, preview, onAppended }: { handoffID: string; preview: boolean; onAppended: (message: HandoffMessage) => void }) {
+/** Appends to a thread. On a research task it is a reply: feedback or an answer for the next run, sent with
+ * Send back or Resume on the status panel, so it has no target. */
+function MessageComposer({ handoffID, preview, research, onAppended }: { handoffID: string; preview: boolean; research: boolean; onAppended: (message: HandoffMessage) => void }) {
   const [body, setBody] = useState('')
   const [target, setTarget] = useState('')
   const [files, setFiles] = useState<File[]>([])
@@ -229,7 +231,7 @@ function MessageComposer({ handoffID, preview, onAppended }: { handoffID: string
       setTarget('')
       setFiles([])
       if (fileInput.current) fileInput.current.value = ''
-      toast('Message appended.')
+      toast(research ? 'Reply added.' : 'Message appended.')
     } catch (failure) {
       setError(describeError(failure))
     } finally {
@@ -237,17 +239,20 @@ function MessageComposer({ handoffID, preview, onAppended }: { handoffID: string
     }
   }
 
+  const filesField = <label className={research ? 'span-2' : undefined}>Files<input ref={fileInput} type="file" multiple onChange={(event) => setFiles(Array.from(event.target.files ?? []))} /></label>
   return (
-    <form className="composer" aria-label="Append handoff message" onSubmit={(event) => void submit(event)}>
-      <h2>Continue this handoff</h2>
+    <form className="composer" aria-label={research ? 'Reply' : 'Append handoff message'} onSubmit={(event) => void submit(event)}>
+      <h2>{research ? 'Reply' : 'Continue this handoff'}</h2>
+      {/* A handoff message names its target and files first; a reply has no target, so its text leads and Files follows. */}
       <div className="form-grid">
-        <label>Target<input maxLength={100} value={target} onChange={(event) => setTarget(event.target.value)} placeholder="Optional agent or model" /></label>
-        <label>Files<input ref={fileInput} type="file" multiple onChange={(event) => setFiles(Array.from(event.target.files ?? []))} /></label>
-        <label className="span-2">Message<textarea required maxLength={100000} rows={6} value={body} onChange={(event) => setBody(event.target.value)} /></label>
+        {!research && <label>Target<input maxLength={100} value={target} onChange={(event) => setTarget(event.target.value)} placeholder="Optional agent or model" /></label>}
+        {!research && filesField}
+        <label className="span-2">{research ? 'Feedback or answer' : 'Message'}<textarea required maxLength={100000} rows={6} value={body} onChange={(event) => setBody(event.target.value)} /></label>
+        {research && filesField}
         {preview && body.trim() && <MessagePreview body={body} />}
       </div>
       {error && <p className="field-error" role="alert">{error}</p>}
-      <div className="form-actions"><span className="muted small">Messages are permanent. Add a correction instead of editing.</span><button className="btn btn-primary" disabled={busy || !body.trim()}>{busy ? 'Appending…' : 'Append message'}</button></div>
+      <div className="form-actions"><span className="muted small">Messages are permanent. Add a correction instead of editing.</span><button className="btn btn-primary" disabled={busy || !body.trim()}>{research ? (busy ? 'Adding…' : 'Add reply') : busy ? 'Appending…' : 'Append message'}</button></div>
     </form>
   )
 }
@@ -373,6 +378,7 @@ function HandoffThread({ id }: { id: string }) {
   if (!detail.data) return <ErrorState message={detail.error === 'handoff item not found' ? 'Handoff not found.' : "Couldn't load this handoff."} onRetry={detail.reload} />
   const { handoff, messages, research } = detail.data
   const text = (value: string) => markdown ? <MarkdownText text={value} /> : value
+  const summary = [{ label: 'Description', value: handoff.description }, { label: 'Work scope', value: handoff.scope }].filter((item) => item.value.trim())
   return (
     <article className="detail handoff-detail">
       <header className="detail-head">
@@ -386,7 +392,7 @@ function HandoffThread({ id }: { id: string }) {
       </header>
       {detail.stale && <StaleNotice message="Showing the last loaded version; refresh failed." onRetry={detail.reload} />}
       {research && <ResearchPanel research={research} busy={busy} onAct={(action, label) => void act(research.message_id, action, label)} />}
-      <dl className="handoff-summary"><div><dt>Description</dt><dd>{text(handoff.description)}</dd></div><div><dt>Work scope</dt><dd>{text(handoff.scope)}</dd></div></dl>
+      {summary.length > 0 && <dl className="handoff-summary">{summary.map((item) => <div key={item.label}><dt>{item.label}</dt><dd>{text(item.value)}</dd></div>)}</dl>}
       <section className="handoff-thread" aria-label="Handoff messages">
         <div className="section-head"><h2 className="section-title">Messages <span className="count">{messages.length} loaded</span></h2><MarkdownToggle on={markdown} onChange={setMarkdown} />{detail.data.next_before && <button type="button" className="btn" disabled={loadingOlder} onClick={() => void loadOlder()}>{loadingOlder ? 'Loading…' : 'Load older'}</button>}</div>
         <ol>
@@ -394,7 +400,10 @@ function HandoffThread({ id }: { id: string }) {
             <li key={message.id} className="handoff-message">
               <header>
                 <div className="handoff-message-meta"><strong>{message.source}</strong><Timestamp iso={message.created_at} />{message.target && <span>to {message.target}</span>}</div>
-                <div className="handoff-message-states"><HandoffBadge value={message.delivery_state} kind="delivery" /><HandoffBadge value={message.work_state} kind="work" /></div>
+                {/* A research thread's state is on its status panel; per-message Seen or Done would be noise. Only
+                    Draft stays, so an unpublished message says why it offers Publish. */}
+                {!research ? <div className="handoff-message-states"><HandoffBadge value={message.delivery_state} kind="delivery" /><HandoffBadge value={message.work_state} kind="work" /></div>
+                  : message.work_state === 'draft' && <div className="handoff-message-states"><HandoffBadge value="draft" kind="work" /></div>}
               </header>
               {markdown ? <div className="handoff-body handoff-body-md"><MarkdownText text={message.body} /></div> : <p className="handoff-body">{message.body}</p>}
               {message.files.length > 0 && <FileList files={message.files} removable={message.work_state === 'draft'} onRemoved={(fileID) => detail.update((current) => ({ ...current, messages: current.messages.map((item) => item.id === message.id ? { ...item, files: item.files.filter((file) => file.id !== fileID) } : item) }))} />}
@@ -407,7 +416,7 @@ function HandoffThread({ id }: { id: string }) {
           ))}
         </ol>
       </section>
-      <MessageComposer handoffID={id} preview={markdown} onAppended={(message) => detail.update((current) => ({ ...current, messages: current.messages.some((item) => item.id === message.id) ? current.messages.map((item) => item.id === message.id ? message : item) : [...current.messages, message] }))} />
+      <MessageComposer handoffID={id} preview={markdown} research={Boolean(research)} onAppended={(message) => detail.update((current) => ({ ...current, messages: current.messages.some((item) => item.id === message.id) ? current.messages.map((item) => item.id === message.id ? message : item) : [...current.messages, message] }))} />
     </article>
   )
 }
@@ -527,7 +536,7 @@ export function HandoffsPage({ id, creating = false, initialProject = '' }: { id
   return (
     <div className="split handoffs" data-mode={mode}>
       <section className="pane pane-list" aria-label="Handoff inbox">
-        <header className="page-head"><h1>Handoffs</h1><Link to="/handoffs/new?kind=research" className="btn"><Icon name="plus" /> Research</Link><Link to="/handoffs/new" className="btn btn-primary"><Icon name="plus" /> New</Link>
+        <header className="page-head"><h1>Handoffs</h1><div className="handoff-head-actions"><Link to="/handoffs/new?kind=research" className="btn"><Icon name="plus" /> Research</Link><Link to="/handoffs/new" className="btn btn-primary"><Icon name="plus" /> New</Link></div>
           <p className="muted small">Work passed from one agent, or from you, to another. Each handoff is a thread: an agent claims a message, reports progress, and marks it done.</p>
         </header>
         <div className="filters">
@@ -546,7 +555,23 @@ export function HandoffsPage({ id, creating = false, initialProject = '' }: { id
         {!list.loading && !list.data && <ErrorState message="Couldn't load handoffs." onRetry={list.reload} />}
         {list.stale && <StaleNotice message="Handoff list may be out of date." onRetry={list.reload} />}
         {list.data && visible.length === 0 && <p className="muted">No handoffs match.</p>}
-        {visible.length > 0 && <ul className="handoff-list" aria-label="Handoffs">{visible.map((handoff) => <li key={handoff.id}><Link to={`/handoffs/${handoff.id}`} aria-current={handoff.id === id ? 'page' : undefined}><strong>{handoff.kind === 'research' && <span className="badge research-badge">Research</span>}{handoff.title}</strong><span className="clamp">{handoff.description}</span><span className="handoff-list-meta">{handoff.project_name || 'General'} · <Timestamp iso={handoff.updated_at} /></span><span className="handoff-counts">{counts(handoff).map((item) => <span key={item.label} data-status={item.label.toLowerCase().replace(' ', '_')}>{item.value} {item.label}</span>)}</span></Link></li>)}</ul>}
+        {visible.length > 0 && (
+          <ul className="handoff-list" aria-label="Handoffs">
+            {visible.map((handoff) => (
+              <li key={handoff.id}>
+                <Link to={`/handoffs/${handoff.id}`} aria-current={handoff.id === id ? 'page' : undefined}>
+                  <strong>{handoff.kind === 'research' && <span className="badge research-badge">Research</span>}{handoff.title}</strong>
+                  {handoff.description.trim() && <span className="clamp">{handoff.description}</span>}
+                  <span className="handoff-list-meta">{handoff.project_name || 'General'} · <Timestamp iso={handoff.updated_at} /></span>
+                  {/* A research task's message counts mislead (its run notes count as done), so it shows the task's state. */}
+                  {handoff.kind === 'research'
+                    ? handoff.research_status && <span className="handoff-counts"><ResearchStatusBadge status={handoff.research_status} /></span>
+                    : <span className="handoff-counts">{counts(handoff).map((item) => <span key={item.label} data-status={item.label.toLowerCase().replace(' ', '_')}>{item.value} {item.label}</span>)}</span>}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
         {list.data?.next_before && <button type="button" className="btn" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? 'Loading…' : 'Load more handoffs'}</button>}
       </section>
       <section className="pane pane-detail" aria-label="Handoff inspector">

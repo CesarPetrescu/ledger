@@ -402,6 +402,8 @@ export interface Handoff {
   updated_at: string
   archived_at?: string
   kind?: 'general' | 'research'
+  /** A research task's state; only on research handoffs, in the console's list and project views. */
+  research_status?: 'draft' | 'queued' | 'running' | 'review' | 'question' | 'stopped' | 'accepted'
   draft_count: number
   ready_count: number
   in_progress_count: number
