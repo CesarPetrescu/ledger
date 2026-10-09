@@ -97,51 +97,47 @@ func (s *Searcher) Search(ctx context.Context, query string, limit int) (SearchR
 // inference service (the Searcher may have none), so it still answers while
 // ledger-index is unreachable. It reads the stored chunks of any embedding
 // model, skipping chunks of deleted entries and projects that the stopped
-// indexer has not dropped yet, plus the live text of entries and projects the
-// indexer never chunked (written since it last ran, or on an install where it
-// never ran). The result reports the vector and rerank stages as degraded.
+// indexer has not dropped yet. Entries and projects the indexer never chunked,
+// or that changed since (still queued in chunk_dirty), are matched on their
+// live text instead of a missing or stale chunk. Each ref counts once, by its
+// best chunk, before the limit. The result reports the vector and rerank
+// stages as degraded.
 //
-// ponytail: unchunked rows are tokenized per query with no index; fine while
-// the backlog is small, add a GIN index on entry body if installs run without
-// an indexer for long.
+// ponytail: live rows are tokenized per query with no index; fine while the
+// backlog is small, add a GIN index on entry body if installs run without an
+// indexer for long.
 func (s *Searcher) Lexical(ctx context.Context, query string, limit int) (SearchResult, error) {
 	rows, err := s.db.Pool.Query(ctx, `WITH q AS (SELECT websearch_to_tsquery('public.ledger_ts'::regconfig,$1) q),
+stale AS (SELECT ref FROM chunk_dirty),
 live AS (
  SELECT 'entry:'||e.id ref,e.kind,e.slug,'[project: '||p.name||' ('||e.slug||') | '||e.kind||']'||E'\n'||e.body text
  FROM entry e JOIN project p ON p.slug=e.slug
- WHERE NOT EXISTS(SELECT 1 FROM chunk c WHERE c.ref='entry:'||e.id)
+ WHERE NOT EXISTS(SELECT 1 FROM chunk c WHERE c.ref='entry:'||e.id) OR 'entry:'||e.id IN (SELECT ref FROM stale)
  UNION ALL
  SELECT 'project:'||p.slug,'project',p.slug,'[project: '||p.name||' ('||p.slug||')]'||E'\n'||concat_ws(E'\n',NULLIF(p.type,''),NULLIF(p.description,''),NULLIF(p.goal,''),NULLIF(p.needs_me,''),NULLIF(p.automate,''),NULLIF(p.stack,''))
  FROM project p
- WHERE NOT EXISTS(SELECT 1 FROM chunk c WHERE c.ref='project:'||p.slug)
+ WHERE NOT EXISTS(SELECT 1 FROM chunk c WHERE c.ref='project:'||p.slug) OR 'project:'||p.slug IN (SELECT ref FROM stale)
+),
+matches AS (
+ SELECT c.ref,c.ord,COALESCE(e.kind,'project') kind,COALESCE(e.slug,substring(c.ref from 9)) slug,c.text,ts_rank_cd(c.tsv,q.q) score
+ FROM q,chunk c LEFT JOIN entry e ON c.ref='entry:'||e.id::text
+ WHERE (e.id IS NOT NULL OR EXISTS(SELECT 1 FROM project p WHERE c.ref='project:'||p.slug)) AND c.ref NOT IN (SELECT ref FROM stale) AND c.tsv @@ q.q
+ UNION ALL
+ SELECT l.ref,0,l.kind,l.slug,l.text,ts_rank_cd(to_tsvector('public.ledger_ts'::regconfig,l.text),q.q)
+ FROM q,live l WHERE to_tsvector('public.ledger_ts'::regconfig,l.text) @@ q.q
 )
-SELECT `+rankedColumns+`,ts_rank_cd(c.tsv,q.q) score
-FROM q,chunk c LEFT JOIN entry e ON c.ref='entry:'||e.id::text
-WHERE (e.id IS NOT NULL OR EXISTS(SELECT 1 FROM project p WHERE c.ref='project:'||p.slug)) AND c.tsv @@ q.q
-UNION ALL
-SELECT l.ref,0,l.kind,l.slug,l.text,ts_rank_cd(to_tsvector('public.ledger_ts'::regconfig,l.text),q.q)
-FROM q,live l WHERE to_tsvector('public.ledger_ts'::regconfig,l.text) @@ q.q
-ORDER BY score DESC,1,2 LIMIT 30`, query)
+SELECT ref,ord,kind,slug,text,score FROM (SELECT DISTINCT ON (ref) * FROM matches ORDER BY ref,score DESC,ord) best
+ORDER BY score DESC,ref LIMIT $2`, query, limit)
 	if err != nil {
 		return SearchResult{}, err
 	}
-	matches, err := scanRanked(rows)
+	hits, err := scanRanked(rows)
 	rows.Close()
 	if err != nil {
 		return SearchResult{}, err
 	}
-	seen := map[string]bool{}
-	hits := make([]Ranked, 0, min(limit, len(matches)))
-	for _, hit := range matches {
-		if seen[hit.Ref] {
-			continue
-		}
-		seen[hit.Ref] = true
-		hit.Snippet = snippet(hit.Snippet)
-		hits = append(hits, hit)
-		if len(hits) == limit {
-			break
-		}
+	for i := range hits {
+		hits[i].Snippet = snippet(hits[i].Snippet)
 	}
 	return SearchResult{Hits: hits, Degraded: []string{"vector", "rerank"}}, nil
 }

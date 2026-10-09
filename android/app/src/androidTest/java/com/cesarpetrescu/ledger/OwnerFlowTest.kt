@@ -359,7 +359,9 @@ class OwnerFlowTest {
             // Help explains the rules.
             scrollTo("Help")
             tap("Help")
-            awaitText("How the Inbox decides")
+            awaitText("How Ledger works")
+            // Help is a lazy list: on a short screen (CI's Pixel 2) later sections exist only once scrolled to.
+            scrollTo("How the Inbox decides")
             ui.onNodeWithContentDescription("Back").performClick()
             ui.onNodeWithContentDescription("Settings").performClick()
             tap("Dark")

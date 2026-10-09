@@ -231,6 +231,10 @@ func TestSearchToolFallsBackToWordMatchesWhenIndexIsDown(t *testing.T) {
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO chunk(ref,ord,text,text_hash,model) VALUES('project:atlas',0,$1,decode(repeat('ab',32),'hex'),'qwen3-embedding')`, "[project: Atlas (atlas)]\nMigrare la PostgreSQL"); err != nil {
 		t.Fatal(err)
 	}
+	// The indexer had processed the project before it stopped.
+	if _, err := db.Pool.Exec(ctx, `DELETE FROM chunk_dirty`); err != nil {
+		t.Fatal(err)
+	}
 	addAccess(t, db, ctx, "read-token", []string{"ledger:read"})
 	// Nothing listens on port 1.
 	server := httptest.NewServer(HTTPHandler(NewServer(db, "http://127.0.0.1:1"), db, "https://ledger.example.com"))

@@ -1097,6 +1097,10 @@ func TestSearchAddsProvenanceFiltersAndDegradesGracefully(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// The indexer had processed these rows before it stopped.
+	if _, err := db.Pool.Exec(ctx, `DELETE FROM chunk_dirty`); err != nil {
+		t.Fatal(err)
+	}
 	index.Close()
 	down := request(t, server, http.MethodPost, "/admin/api/search", `{"q":"postgresql","kind":"entry"}`, authed(s, true))
 	if err := json.Unmarshal(down.Body.Bytes(), &result); err != nil || down.Code != http.StatusOK || strings.Contains(down.Body.String(), "127.0.0.1") {

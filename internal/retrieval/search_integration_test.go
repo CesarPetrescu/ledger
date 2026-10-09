@@ -159,6 +159,10 @@ func TestLexicalSearchAnswersWithoutTheIndexService(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// The indexer had processed these rows before it stopped.
+	if _, err := db.Pool.Exec(ctx, `DELETE FROM chunk_dirty`); err != nil {
+		t.Fatal(err)
+	}
 	result, err := NewSearcher(db, nil).Lexical(ctx, "postgresql", 10)
 	if err != nil {
 		t.Fatal(err)
@@ -184,6 +188,9 @@ func TestClientFallsBackToWordMatchesWhenTheIndexServiceFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO chunk(ref,ord,text,text_hash,model) VALUES('project:atlas',0,$1,decode(repeat('ab',32),'hex'),'qwen3-embedding')`, "[project: Atlas]\nRenovare bucătărie"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, `DELETE FROM chunk_dirty`); err != nil {
 		t.Fatal(err)
 	}
 	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -252,5 +259,67 @@ func TestLexicalSearchMatchesRowsTheIndexerNeverChunked(t *testing.T) {
 	}
 	if strings.Join(result.Degraded, ",") != "vector,rerank" {
 		t.Fatalf("degraded = %v", result.Degraded)
+	}
+}
+
+// A project edited after it was indexed keeps its old chunk while its ref waits
+// in chunk_dirty; the fallback must search the current text, not the stale chunk.
+func TestLexicalSearchReadsCurrentTextOfRowsQueuedForReindexing(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus", Goal: "Ship the reranker"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO chunk(ref,ord,text,text_hash,model) VALUES('project:atlas',0,'[project: Atlas (atlas)]'||chr(10)||'Ship the reranker',decode(repeat('ab',32),'hex'),'qwen3-embedding')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, `DELETE FROM chunk_dirty`); err != nil {
+		t.Fatal(err)
+	}
+	// Edited while the indexer is down: the trigger queues it again.
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus", Goal: "Ship the planner"}); err != nil {
+		t.Fatal(err)
+	}
+	searcher := NewSearcher(db, nil)
+	current, err := searcher.Lexical(ctx, "planner", 10)
+	if err != nil || len(current.Hits) != 1 || current.Hits[0].Ref != "project:atlas" || current.Hits[0].Snippet != "Ship the planner" {
+		t.Fatalf("current text = %#v, %v", current, err)
+	}
+	if removed, err := searcher.Lexical(ctx, "reranker", 10); err != nil || len(removed.Hits) != 0 {
+		t.Fatalf("removed words still match the stale chunk: %#v, %v", removed, err)
+	}
+}
+
+// One entry with many matching chunks must not crowd others out before the limit.
+func TestLexicalSearchCountsEachRefOnceBeforeTheLimit(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	long, err := db.AppendEntry(ctx, "atlas", "note", "A long design note.", "agent", "client-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	short, err := db.AppendEntry(ctx, "atlas", "decision", "Use PostgreSQL.", "agent", "client-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	longRef, shortRef := "entry:"+strconv.FormatInt(long.ID, 10), "entry:"+strconv.FormatInt(short.ID, 10)
+	for ord := range 40 {
+		if _, err := db.Pool.Exec(ctx, `INSERT INTO chunk(ref,ord,text,text_hash,model) VALUES($1,$2,'[atlas | note]'||chr(10)||'PostgreSQL PostgreSQL PostgreSQL',decode(lpad(to_hex($2::int),64,'0'),'hex'),'qwen3-embedding')`, longRef, ord); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO chunk(ref,ord,text,text_hash,model) VALUES($1,0,'[atlas | decision]'||chr(10)||'Use PostgreSQL.',decode(repeat('ff',32),'hex'),'qwen3-embedding')`, shortRef); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, `DELETE FROM chunk_dirty`); err != nil {
+		t.Fatal(err)
+	}
+	result, err := NewSearcher(db, nil).Lexical(ctx, "postgresql", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Hits) != 2 || result.Hits[0].Ref != longRef || result.Hits[1].Ref != shortRef {
+		t.Fatalf("hits = %#v", result.Hits)
 	}
 }
