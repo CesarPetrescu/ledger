@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { api, describeError, OWNER_SOURCE, type HistoryEvent, type TableEntry } from '../api'
 import { useResource } from '../hooks/useResource'
 import { useUndo } from '../hooks/useUndo'
@@ -199,23 +199,7 @@ function EntryActions({ entry }: { entry: TableEntry }) {
       {entry.kind === 'todo' && <TodoState entry={entry} onChanged={refreshAll} />}
       {asking && <button type="button" className="btn btn-small" disabled={owner.busy} onClick={() => void owner.act(entry.id, { handled: true }, 'Marked handled.')}>Handled</button>}
       {agentAsk && entry.owner.handled && <button type="button" className="btn btn-small" disabled={owner.busy} onClick={() => void owner.act(entry.id, { handled: false }, 'Back in Needs you.')}>Not handled</button>}
-      {snoozable && !snoozed && (
-        <label className="snooze-select">
-          <span className="visually-hidden">Snooze</span>
-          <select value="" disabled={owner.busy} onChange={(event) => {
-            const days = Number(event.target.value)
-            if (days) void owner.act(entry.id, { snooze_days: days }, days === 1 ? 'Snoozed until tomorrow.' : `Snoozed for ${days} days.`)
-          }}>
-            <option value="">Snooze…</option>
-            <option value="1">Until tomorrow</option>
-            <option value="3">For 3 days</option>
-            <option value="7">For a week</option>
-          </select>
-        </label>
-      )}
-      {snoozed && (
-        <span className="muted small">Snoozed until {new Date(`${snoozed}T12:00:00`).toLocaleDateString()} <button type="button" className="link-button" disabled={owner.busy} onClick={() => void owner.act(entry.id, { snooze_days: 0 }, 'Unsnoozed.')}>Wake now</button></span>
-      )}
+      {(snoozable || snoozed) && <Snooze entry={entry} owner={owner} />}
       {link && (
         <>
           <a className="btn btn-small" href={link} target="_blank" rel="noopener noreferrer">Open link <Icon name="external" /></a>
@@ -232,8 +216,32 @@ function EntryActions({ entry }: { entry: TableEntry }) {
   )
 }
 
-/** Your answer, saved under the entry where the agent reads it. */
-function ReplyBox({ entry, asking }: { entry: TableEntry; asking: boolean }) {
+/** Snooze choices, or when a snoozed entry wakes; shared by the entry panel and the Inbox rows. */
+export function Snooze({ entry, owner }: { entry: TableEntry; owner: ReturnType<typeof useOwnerAction> }) {
+  const snoozed = entry.owner.snoozed_until
+  if (snoozed) {
+    return <span className="muted small">Snoozed until {new Date(`${snoozed}T12:00:00`).toLocaleDateString()} <button type="button" className="link-button" disabled={owner.busy} onClick={() => void owner.act(entry.id, { snooze_days: 0 }, 'Unsnoozed.')}>Wake now</button></span>
+  }
+  return (
+    <label className="snooze-select">
+      <span className="visually-hidden">Snooze</span>
+      <select value="" disabled={owner.busy} onChange={(event) => {
+        const days = Number(event.target.value)
+        if (days) void owner.act(entry.id, { snooze_days: days }, days === 1 ? 'Snoozed until tomorrow.' : `Snoozed for ${days} days.`)
+      }}>
+        <option value="">Snooze…</option>
+        <option value="1">Until tomorrow</option>
+        <option value="3">For 3 days</option>
+        <option value="7">For a week</option>
+      </select>
+    </label>
+  )
+}
+
+/** Your answer, saved under the entry where the agent reads it; in the panel and inline under an Inbox row. */
+export function ReplyBox({ entry, asking, autoFocus = false }: { entry: TableEntry; asking: boolean; autoFocus?: boolean }) {
+  // The panel and an Inbox row can both show a box for the same entry; ids must not collide.
+  const id = useId()
   const [body, setBody] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -265,12 +273,12 @@ function ReplyBox({ entry, asking }: { entry: TableEntry; asking: boolean }) {
   }
   return (
     <form className="reply-box" data-asking={asking ? 'true' : undefined} onSubmit={(event) => void send(event)}>
-      <label htmlFor={`reply-${entry.id}`} className={asking ? 'reply-label' : 'visually-hidden'}>{asking ? `Answer ${agent}` : 'Reply'}</label>
-      <textarea id={`reply-${entry.id}`} rows={asking ? 3 : 2} maxLength={4000} value={body} disabled={busy}
+      <label htmlFor={`${id}-reply`} className={asking ? 'reply-label' : 'visually-hidden'}>{asking ? `Answer ${agent}` : 'Reply'}</label>
+      <textarea id={`${id}-reply`} rows={asking ? 3 : 2} maxLength={4000} value={body} disabled={busy} autoFocus={autoFocus}
         placeholder={asking ? 'Type your answer…' : agent ? `Add a note or instruction for ${agent}…` : 'Add a note…'}
-        onChange={(event) => setBody(event.target.value)} onKeyDown={onKeyDown} aria-describedby={`reply-hint-${entry.id}`} />
+        onChange={(event) => setBody(event.target.value)} onKeyDown={onKeyDown} aria-describedby={`${id}-hint`} />
       <div className="reply-box-foot">
-        <p id={`reply-hint-${entry.id}`} className="muted small">
+        <p id={`${id}-hint`} className="muted small">
           {agent ? `Saved under this entry; ${agent} sees it the next time it checks Ledger.` : 'Saved under this entry.'}
           {asking ? ' Sending marks the question handled.' : ''} Ctrl+Enter sends.
         </p>

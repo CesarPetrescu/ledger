@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
 /** What each label on an entry means, in the order they appear on a row. */
 export const LABEL_GUIDE: { label: string; attrs: Record<string, string>; meaning: string }[] = [
-  { label: 'Asks you', attrs: { 'data-focus': 'ask' }, meaning: 'An agent asked you a question or needs something from you. It stays in your Inbox until you mark it handled.' },
+  { label: 'Asks you', attrs: { 'data-focus': 'ask' }, meaning: 'An agent asked you a question or needs something from you. It stays in your Inbox until you answer it or mark it handled.' },
   { label: 'Important', attrs: { 'data-focus': 'important' }, meaning: 'The AI rated it important: a decision that changes direction, a blocker, a production problem, a deadline, or something you must act on.' },
   { label: 'High / Low', attrs: { 'data-priority': 'high' }, meaning: 'A todo’s priority, read from its text: high when urgent, blocking, or broken; low when nice to have. A row shows at most one of High, Important, and Low, preferring them in that order.' },
   { label: 'S / M / L', attrs: { 'data-focus': 'size' }, meaning: 'A todo’s estimated size: under an hour, about a day, or several days.' },
