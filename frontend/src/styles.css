@@ -1069,6 +1069,10 @@ label > textarea {
 .summary-table .needs-me { margin: 4px 0 0; max-width: 42ch; color: var(--warning); }
 .summary-table code { white-space: nowrap; }
 .summary-table td:nth-child(4) { min-width: 9rem; }
+/* The inbox pane is 300px wide on laptops, less its scrollbar, so the two create buttons are compact enough to share the title's row. */
+.handoffs .page-head { align-items: center; column-gap: 10px; }
+.handoff-head-actions { display: flex; gap: 6px; }
+.handoff-head-actions .btn { padding: 0 8px; gap: 4px; }
 .handoff-list { border-top: 1px solid var(--border); }
 .handoff-list li { border-bottom: 1px solid var(--border); }
 .handoff-list a { display: grid; gap: 5px; padding: 16px 10px 16px 13px; border-left: 3px solid transparent; color: var(--text); }
@@ -1082,6 +1086,7 @@ label > textarea {
 .handoff-counts [data-status='ready'] { color: var(--accent); }
 .handoff-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin: 0; }
 .handoff-summary div { padding-bottom: 18px; border-bottom: 1px solid var(--border); }
+.handoff-summary > div:only-child { grid-column: 1 / -1; }
 .handoff-summary dt { margin-bottom: 6px; color: var(--text-faint); font-size: 0.68rem; font-weight: 650; letter-spacing: 0.07em; text-transform: uppercase; }
 .handoff-summary dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .handoff-thread > ol { border-top: 1px solid var(--border); }
@@ -1355,6 +1360,7 @@ label > textarea {
   .form-actions .muted { flex-basis: 100%; margin-right: 0; }
   .form-actions .btn { flex: 1; }
   .detail-head .btn { width: 100%; }
+  .handoff-head-actions .btn { width: auto; }
   .handoff-filter-row,
   .handoff-summary { grid-template-columns: 1fr; }
   .handoff-summary { gap: 14px; }
@@ -1408,6 +1414,7 @@ label > textarea {
 
 @media (pointer: coarse) {
   .primary-nav a { min-height: 48px; }
+  .handoff-head-actions .btn { min-height: var(--control); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1695,6 +1702,8 @@ label > textarea {
 .badge[data-research='queued'], .badge[data-research='running'] { background: var(--tone-blue-bg); color: var(--tone-blue); }
 .badge[data-research='review'], .badge[data-research='question'] { background: var(--tone-amber-bg); color: var(--tone-amber); }
 .badge[data-research='accepted'] { background: var(--tone-green-bg); color: var(--tone-green); }
+/* Its labels are already cased ("Ready for review"); .badge would capitalize every word. */
+.badge[data-research] { text-transform: none; }
 
 /* Secondary actions behind a "⋯" button. */
 .overflow-menu { position: relative; display: inline-flex; }
