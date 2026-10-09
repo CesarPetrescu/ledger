@@ -17,10 +17,11 @@ export function HelpPage() {
         <h2 id="help-where" className="section-title">Where to look</h2>
         <dl className="help-list">
           <div><dt><Link to="/">Inbox</Link></dt><dd>Start here. Questions agents are waiting on you to answer, the most urgent todos, blocked projects, and each project's week.</dd></div>
-          <div><dt><Link to="/projects">Projects</Link></dt><dd>One page per project: its weekly summary and health, then its activity, todos, decisions, details, handoffs, and files.</dd></div>
+          <div><dt><Link to="/projects">Projects</Link></dt><dd>One page per project: its weekly summary and health, then its activity, todos, decisions, details, handoffs, files, and repos.</dd></div>
           <div><dt><Link to="/table">Table</Link></dt><dd>Every project's entries in one list, filterable by project, agent, tag, or text, with a spreadsheet download. Reading collects linked articles.</dd></div>
-          <div><dt><Link to="/handoffs">Handoffs</Link></dt><dd>Work passed from one agent, or from you, to another, as a thread per task.</dd></div>
-          <div><dt><Link to="/agents">Agents</Link></dt><dd>What each agent did lately, how to connect a new one, and which apps have access.</dd></div>
+          <div><dt><Link to="/calendar">Calendar</Link></dt><dd>Todos that are due, project deadlines, and the day snoozed items come back. Connect Nextcloud to see your own events too; agents see only the calendars you select.</dd></div>
+          <div><dt><Link to="/handoffs">Handoffs</Link></dt><dd>Work passed from one agent, or from you, to another, as a thread per task. Research tasks live here too.</dd></div>
+          <div><dt><Link to="/agents">Agents</Link></dt><dd>What each agent did lately, how to connect a new one, and the access settings.</dd></div>
           <div><dt><Link to="/search">Search</Link></dt><dd>Finds entries and projects by meaning as well as exact words.</dd></div>
         </dl>
       </section>
@@ -43,6 +44,27 @@ export function HelpPage() {
           <li>Routine entries, such as checkpoints and heartbeats, are hidden from lists unless you tick <strong>Show routine entries</strong> or search. Repeats of the same news are folded under one row.</li>
         </ul>
         <LabelLegend />
+      </section>
+
+      <section aria-labelledby="help-research">
+        <h2 id="help-research" className="section-title">Research</h2>
+        <ul className="help-points">
+          <li>Choose <strong>Research</strong> on <Link to="/handoffs">Handoffs</Link> to queue a task: what to find out, the checks the result must meet, and any files it needs. A sandbox picks it up and works until every check is met. Agents can queue research too.</li>
+          <li>Its badge shows where it stands: Draft, Queued, Running, Ready for review, Question for you, Stopped, or Accepted.</li>
+          <li>When it is ready for review, read the result, then <strong>Accept</strong> it, or reply with what to change and <strong>Send back</strong>. Accepting publishes the result to the project's log. A question for you is answered the same way: reply, then <strong>Resume</strong>.</li>
+          <li>Files travel both ways: attach them to the task or to a reply, and the run's result files appear in the thread.</li>
+          <li>Runs browse the open web. They see a project's details and repos only if you turn on <strong>Share with research runs</strong> on its Details tab.</li>
+        </ul>
+      </section>
+
+      <section aria-labelledby="help-access">
+        <h2 id="help-access" className="section-title">Repos and access</h2>
+        <ul className="help-points">
+          <li>A project's <strong>Repos</strong> tab lists the Git repositories it spans, so agents know where its code lives. Agents clone with their own Git access; a link never carries a password or token.</li>
+          <li><strong>GitHub sync</strong> uses a read-only GitHub token to refresh each linked GitHub repository every 15 minutes: its latest commit, open pull requests, and latest release. Turning it off forgets the token and what it synced; the links stay.</li>
+          <li><strong>API keys</strong> let a server, such as a research dispatcher, use Ledger without signing in. A key is shown once and can only dispatch research.</li>
+          <li>Access settings are on <Link to="/agents">Agents</Link>: connected apps (revoke one to cut its access at once), API keys, GitHub sync, and the approval password.</li>
+        </ul>
       </section>
 
       <section aria-labelledby="help-undo">

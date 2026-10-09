@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CalendarEvent, CalendarSource } from '../api'
 import { authenticatedSession, mockApi, renderApp } from './helpers'
 
@@ -23,6 +23,9 @@ const planning: CalendarEvent = {
   etag: '"v1"',
   recurring: false,
 }
+
+// A view picked in one test must not become the next test's default.
+beforeEach(() => localStorage.removeItem('ledger.calendar-view'))
 
 describe('Nextcloud calendar', () => {
   it('starts the Nextcloud login flow without asking for a password', async () => {
@@ -193,4 +196,43 @@ it('says so when Nextcloud calendars cannot be listed, with a retry', async () =
   await userEvent.setup().click(screen.getByRole('button', { name: /retry/i }))
   await waitFor(() => expect(calls.filter((call) => call.path === '/admin/api/calendar/calendars')).toHaveLength(2))
   expect(screen.queryByText(/couldn't reach your nextcloud calendars/i)).not.toBeInTheDocument()
+})
+
+describe('calendar view by screen size', () => {
+  const ledgerOnly = {
+    'GET /admin/api/session': authenticatedSession,
+    'GET /admin/api/calendar/connection': { body: { connected: false, selected_calendars: 0 } },
+    'GET /admin/api/entries': { body: { entries: [], sources: [], tags: [] } },
+    'GET /admin/api/projects': { body: { projects: [] } },
+  }
+  const screenWidth = (phone: boolean) => vi.stubGlobal('matchMedia', (query: string) => ({ matches: phone && query === '(max-width: 620px)', media: query }))
+
+  it('opens on the agenda on a phone, where the month grid has no room for labels', async () => {
+    screenWidth(true)
+    mockApi(ledgerOnly)
+    renderApp('/admin/calendar')
+    expect(await screen.findByText('Nothing in these 30 days.')).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'Agenda' })).toBeChecked()
+    expect(screen.queryByRole('grid')).not.toBeInTheDocument()
+  })
+
+  it('keeps the month grid on a wider screen', async () => {
+    screenWidth(false)
+    mockApi(ledgerOnly)
+    renderApp('/admin/calendar')
+    expect(await screen.findByRole('grid')).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'Month' })).toBeChecked()
+  })
+
+  it('remembers a view the owner picked, even on a phone', async () => {
+    screenWidth(true)
+    mockApi(ledgerOnly)
+    const { unmount } = renderApp('/admin/calendar')
+    await userEvent.setup().click(await screen.findByRole('radio', { name: 'Week' }))
+    unmount()
+
+    renderApp('/admin/calendar')
+    expect(await screen.findByRole('radio', { name: 'Week' })).toBeChecked()
+    expect(screen.queryByText('Nothing in these 30 days.')).not.toBeInTheDocument()
+  })
 })
