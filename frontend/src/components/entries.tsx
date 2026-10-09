@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { api, describeError, ENTRY_KINDS, OWNER_SOURCE, type EntryFilter, type OwnerPatch, type TableEntry } from '../api'
 import { useResource } from '../hooks/useResource'
 import { useUndo } from '../hooks/useUndo'
 import { refreshAll } from '../live'
 import { ConfirmDialog } from './ConfirmDialog'
-import { useEntrySelection, writerName } from './EntryPanel'
+import { ReplyBox, Snooze, useEntrySelection, writerName } from './EntryPanel'
 import { plainText } from './Markdown'
 import { OverflowMenu } from './OverflowMenu'
 import { Link } from '../router'
@@ -40,8 +40,8 @@ export function titleOf(entry: TableEntry): string {
   return line.length > 110 ? `${line.slice(0, 109)}…` : line
 }
 
-/** Local calendar date as YYYY-MM-DD, to compare with due dates. */
-function localDay(date = new Date()): string {
+/** Local calendar date as YYYY-MM-DD, to compare with due and snooze dates. */
+export function localDay(date = new Date()): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
@@ -309,6 +309,19 @@ export function Facts({ entry, hideAsk = false }: { entry: TableEntry; hideAsk?:
   )
 }
 
+/** A row leaving its list (answered, handled, snoozed, done) takes keyboard focus with it, dropping it on the page; hand
+ * it to the next row, or the previous one at the end, so keyboard and screen-reader users keep their place. Runs before
+ * React removes the row, while focus may still be inside it; [hadFocus] covers focus already lost to a disabled button. */
+function passFocusOn(row: HTMLElement, hadFocus: boolean) {
+  const lost = () => !document.activeElement || document.activeElement === document.body
+  if (!row.contains(document.activeElement) && !(hadFocus && lost())) return
+  // The same entry can sit in two groups (a todo that asks); when it leaves both, its twin is no place to land.
+  const others = [...document.querySelectorAll<HTMLElement>('.entry-row')].filter((other) => other.dataset.entryId !== row.dataset.entryId)
+  const next = others.find((other) => row.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING) ?? others.at(-1)
+  // After the commit: a whole page going away (a link in the row) leaves nothing connected to focus.
+  queueMicrotask(() => { if (next?.isConnected && lost()) next.querySelector<HTMLElement>('.entry-row-title')?.focus() })
+}
+
 export function EntryRow({ entry, repeats = [], view, headline, hideProject = false, onChanged }: { entry: TableEntry; repeats?: TableEntry[]; view: RowView; headline?: string; hideProject?: boolean; onTag?: (tag: string) => void; onChanged: () => void }) {
   const selection = useEntrySelection()
   const owner = useOwnerAction(onChanged)
@@ -316,8 +329,19 @@ export function EntryRow({ entry, repeats = [], view, headline, hideProject = fa
   const summary = plainText((reading ? entry.meta?.why || entry.meta?.gist : entry.meta?.gist) ?? '')
   const asking = Boolean(entry.meta?.ask && !entry.owner.handled && entry.source !== OWNER_SOURCE)
   const selected = selection.selected === entry.id
+  // The Inbox answers and snoozes in place, like the app; other lists leave that to the entry panel.
+  const inbox = view === 'inbox'
+  // Unset until the answer box first opens; closing it only hides it, so what you typed is still there when it reopens.
+  const [answering, setAnswering] = useState<boolean>()
+  const rowRef = useRef<HTMLLIElement>(null)
+  const hadFocus = useRef(false)
+  useLayoutEffect(() => {
+    const row = rowRef.current
+    return () => { if (row) passFocusOn(row, hadFocus.current) }
+  }, [])
   return (
-    <li className="entry-row" data-entry-id={entry.id} aria-current={selected ? 'true' : undefined} data-done={entry.resolved_by ? 'true' : undefined} data-read={reading && entry.owner.read ? 'true' : undefined}>
+    <li ref={rowRef} className="entry-row" data-entry-id={entry.id} aria-current={selected ? 'true' : undefined} data-done={entry.resolved_by ? 'true' : undefined} data-read={reading && entry.owner.read ? 'true' : undefined} data-answering={answering ? 'true' : undefined}
+      onFocus={() => { hadFocus.current = true }} onBlur={(event) => { if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) hadFocus.current = false }}>
       <div className="entry-row-main">
         <div className="entry-row-head">
           <button type="button" className="entry-row-title" aria-haspopup="dialog" onClick={() => selection.open(entry.id)}>
@@ -340,8 +364,10 @@ export function EntryRow({ entry, repeats = [], view, headline, hideProject = fa
         </div>
       </div>
       <div className="entry-row-actions">
+        {inbox && asking && <button type="button" className="btn btn-small answer-toggle" aria-expanded={Boolean(answering)} onClick={() => setAnswering((open) => !open)}>Answer</button>}
         {entry.kind === 'todo' && <TodoState entry={entry} onChanged={onChanged} />}
         {asking && <button type="button" className="btn btn-small" disabled={owner.busy} onClick={() => void owner.act(entry.id, { handled: true }, 'Marked handled.')}>Handled</button>}
+        {inbox && (asking || (entry.kind === 'todo' && !entry.resolved_by)) && <Snooze entry={entry} owner={owner} />}
         {reading && (
           <>
             <button type="button" className="btn btn-small" disabled={owner.busy} onClick={() => void owner.act(entry.id, { read: !entry.owner.read }, entry.owner.read ? 'Marked unread.' : 'Marked read.')}>
@@ -354,6 +380,7 @@ export function EntryRow({ entry, repeats = [], view, headline, hideProject = fa
           </>
         )}
       </div>
+      {answering !== undefined && asking && <div className="row-answer" hidden={!answering}><ReplyBox entry={entry} asking autoFocus={answering} /></div>}
     </li>
   )
 }

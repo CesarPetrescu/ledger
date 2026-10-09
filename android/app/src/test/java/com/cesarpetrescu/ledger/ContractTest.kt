@@ -98,11 +98,13 @@ class ContractTest {
 
     @Test fun helpCoversCalendarResearchReposAndAccess() {
         val help = helpSections.joinToString("\n") { "${it.first}\n${it.second}" }
-        listOf("More › Calendar", "Handoffs › Research", "Accept", "Send back", "Files travel both ways", "Repos", "GitHub sync", "API keys",
+        listOf("More › Calendar", "Handoffs › Research", "Accept", "Send back", "Files travel both ways", "Repos tab", "GitHub sync", "API keys",
             "Settings › Access › Connected apps", "Settings › Access › Connect an agent", "web console › Access › GitHub sync")
             .forEach { assertTrue(it, help.contains(it)) }
         // Access moved off the Agents page, which now only shows what agents did.
         listOf("Agents page", "Agents › API keys", "Agents › GitHub sync", "how to connect").forEach { assertFalse(it, help.contains(it)) }
+        // Files and Repos moved from the project's ⋯ menu into its tabs.
+        listOf("⋯ menu opens Files", "(from its ⋯ menu)").forEach { assertFalse(it, help.contains(it)) }
     }
 
     @Test

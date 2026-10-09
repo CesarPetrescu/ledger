@@ -68,6 +68,56 @@ describe('overflow menu', () => {
     }
   })
 
+  it('opens rightward from a button near the screen’s left edge, where opening leftward would cut it off', async () => {
+    const at = (left: number) => ({ left, right: left + 180, top: 0, bottom: 120, width: 180, height: 120, x: left, y: 0, toJSON: () => ({}) }) as DOMRect
+    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+    try {
+      render(<OverflowMenu label="Snooze" text="Snooze" items={[{ label: 'Until tomorrow', onSelect: vi.fn() }]} />)
+      const user = userEvent.setup()
+      rect.mockReturnValue(at(200))
+      await user.click(screen.getByRole('button', { name: 'Snooze' }))
+      expect(screen.getByRole('menu')).not.toHaveAttribute('data-align')
+      await user.keyboard('{Escape}')
+      // A phone row's actions start at the left: anchored to the button's right, the list would begin off screen.
+      rect.mockReturnValue(at(-3))
+      await user.click(screen.getByRole('button', { name: 'Snooze' }))
+      expect(screen.getByRole('menu')).toHaveAttribute('data-align', 'start')
+    } finally {
+      rect.mockRestore()
+    }
+  })
+
+  it('scrolls a list opened low on the page into view, so its last item is not left under the fold or the tab bar', async () => {
+    const scrolled: Element[] = []
+    Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this) }
+    try {
+      render(<OverflowMenu label="Snooze" text="Snooze" items={[{ label: 'Until tomorrow', onSelect: vi.fn() }, { label: 'For a week', onSelect: vi.fn() }]} />)
+      await userEvent.setup().click(screen.getByRole('button', { name: 'Snooze' }))
+      expect(scrolled).toEqual([screen.getByRole('menu')])
+    } finally {
+      delete (Element.prototype as Partial<Element>).scrollIntoView
+    }
+  })
+
+  it('opens upward when it would end below the window and there is no page left to scroll', async () => {
+    const at = (top: number) => ({ left: 200, right: 380, top, bottom: top + 130, width: 180, height: 130, x: 200, y: top, toJSON: () => ({}) }) as DOMRect
+    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+    try {
+      render(<OverflowMenu label="Snooze" text="Snooze" items={[{ label: 'Until tomorrow', onSelect: vi.fn() }]} />)
+      const user = userEvent.setup()
+      rect.mockReturnValue(at(100))
+      await user.click(screen.getByRole('button', { name: 'Snooze' }))
+      expect(screen.getByRole('menu')).not.toHaveAttribute('data-side')
+      await user.keyboard('{Escape}')
+      // The last row on a phone: below it is only the tab bar.
+      rect.mockReturnValue(at(window.innerHeight - 60))
+      await user.click(screen.getByRole('button', { name: 'Snooze' }))
+      expect(screen.getByRole('menu')).toHaveAttribute('data-side', 'top')
+    } finally {
+      rect.mockRestore()
+    }
+  })
+
   it('names every research state the same way', () => {
     expect(researchStatusLabel('review')).toBe('Ready for review')
     expect(researchStatusLabel('question')).toBe('Question for you')

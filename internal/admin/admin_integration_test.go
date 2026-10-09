@@ -1875,6 +1875,36 @@ func TestEntriesCanLeaveOutSnoozedOnes(t *testing.T) {
 	}
 }
 
+// The console asks the server whether a snooze is still on: it keeps the past date after the entry wakes, and the
+// browser's calendar day can differ from the database's.
+func TestOwnerStateSaysWhetherASnoozeHasEnded(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
+	_, s := login(t, server, "correct horse", "")
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	todo, _ := db.AppendEntry(ctx, "atlas", "todo", "Snoozed", "codex", "c")
+	id := strconv.FormatInt(todo.ID, 10)
+	res := request(t, server, http.MethodPost, "/admin/api/entries/"+id+"/owner", `{"snooze_days":1}`, authed(s, true))
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"snoozed":true`) {
+		t.Fatalf("snooze = %d %s", res.Code, res.Body.String())
+	}
+	listed := func() string {
+		return request(t, server, http.MethodGet, "/admin/api/entries?kind=todo", "", authed(s, false)).Body.String()
+	}
+	if body := listed(); !strings.Contains(body, `"snoozed":true`) {
+		t.Fatalf("snoozed entry = %s", body)
+	}
+	// The day it wakes: the date stays, the snooze is over.
+	if _, err := db.Pool.Exec(ctx, `UPDATE entry_owner_state SET snoozed_until=current_date WHERE entry_id=$1`, todo.ID); err != nil {
+		t.Fatal(err)
+	}
+	if body := listed(); !strings.Contains(body, `"snoozed_until":"`) || strings.Contains(body, `"snoozed":true`) {
+		t.Fatalf("woken entry = %s", body)
+	}
+}
+
 func TestEntriesCanKeepOnlyOverdueOnes(t *testing.T) {
 	db, ctx := testdb.Open(t)
 	server := newIntegrationServer(t, db, "http://127.0.0.1:1")

@@ -16,6 +16,8 @@ type OwnerState struct {
 	Starred      bool   `json:"starred"`
 	Handled      bool   `json:"handled"`
 	SnoozedUntil string `json:"snoozed_until,omitempty"`
+	// Snoozed says the snooze has not ended yet by the database's calendar; SnoozedUntil keeps a past date after it wakes.
+	Snoozed bool `json:"snoozed,omitempty"`
 }
 
 // OwnerPatch changes only the fields that are set. SnoozeDays 0 clears a
@@ -81,8 +83,8 @@ ON CONFLICT(entry_id) DO UPDATE SET
  handled_at=CASE WHEN $4::bool IS NULL THEN o.handled_at WHEN $4 THEN COALESCE(o.handled_at,now()) END,
  snoozed_until=CASE WHEN $5::int IS NULL THEN o.snoozed_until WHEN $5>0 THEN current_date+$5::int END,
  updated_at=now()
-RETURNING o.read_at IS NOT NULL,o.starred,o.handled_at IS NOT NULL,COALESCE(to_char(o.snoozed_until,'YYYY-MM-DD'),'')`,
-		entryID, p.Read, p.Starred, p.Handled, p.SnoozeDays).Scan(&s.Read, &s.Starred, &s.Handled, &s.SnoozedUntil); err != nil {
+RETURNING o.read_at IS NOT NULL,o.starred,o.handled_at IS NOT NULL,COALESCE(to_char(o.snoozed_until,'YYYY-MM-DD'),''),COALESCE(o.snoozed_until>current_date,false)`,
+		entryID, p.Read, p.Starred, p.Handled, p.SnoozeDays).Scan(&s.Read, &s.Starred, &s.Handled, &s.SnoozedUntil, &s.Snoozed); err != nil {
 		return OwnerState{}, nil, nil, err
 	}
 	after, err := snapshot()

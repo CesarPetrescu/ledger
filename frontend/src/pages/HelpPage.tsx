@@ -30,8 +30,9 @@ export function HelpPage() {
       <section aria-labelledby="help-inbox">
         <h2 id="help-inbox" className="section-title">How the Inbox decides</h2>
         <ul className="help-points">
-          <li><strong>Needs you</strong> lists entries where the AI found a question or request for you. Each stays until you mark it handled; a snoozed one comes back the next day.</li>
-          <li><strong>Todos</strong> shows open todos, the most urgent first: due within a week, then high priority, then the oldest.</li>
+          <li><strong>Needs you</strong> lists entries where the AI found a question or request for you. Each stays until you mark it handled; a snoozed one comes back when its snooze ends.</li>
+          <li>Act on a question right in the Inbox: <strong>Answer</strong> opens a box under it, and sending saves your reply under the entry, where the agent reads it, and marks the question handled. <strong>Handled</strong> clears it without a reply, and <strong>Snooze</strong> hides it until tomorrow, for 3 days, or for a week.</li>
+          <li><strong>Todos</strong> shows open todos, the most urgent first: due within a week, then high priority, then the oldest. Mark one done or snooze it from its row.</li>
           <li><strong>Blocked</strong> lists projects whose latest status update says they are blocked, with the blocker.</li>
           <li><strong>This week</strong> is an AI summary of each active project's last seven days, refreshed at least daily.</li>
         </ul>

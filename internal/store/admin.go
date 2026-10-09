@@ -151,7 +151,7 @@ func (db *DB) ListEntries(ctx context.Context, f EntryFilter) ([]EntryWithProjec
  COALESCE(m.category,''),COALESCE(m.details,'{}'),
  -- The model's doubts stay stored; a field the owner corrected is no longer in doubt.
  ARRAY(SELECT u FROM unnest(COALESCE(m.unsure,'{}')) u WHERE u<>ALL(COALESCE(m.edited,'{}'))),COALESCE(m.edited,'{}'),
- o.read_at IS NOT NULL,COALESCE(o.starred,false),o.handled_at IS NOT NULL,COALESCE(to_char(o.snoozed_until,'YYYY-MM-DD'),''),
+ o.read_at IS NOT NULL,COALESCE(o.starred,false),o.handled_at IS NOT NULL,COALESCE(to_char(o.snoozed_until,'YYYY-MM-DD'),''),COALESCE(o.snoozed_until>current_date,false),
  rb.entry_id,COALESCE(rb.origin,''),rb.created_at
 FROM entry e JOIN project p ON p.slug=e.slug
 LEFT JOIN entry_meta m ON m.entry_id=e.id
@@ -189,7 +189,7 @@ ORDER BY e.created_at DESC,e.id DESC LIMIT $8`, f.ProjectSlug, f.Kind, f.Source,
 			&meta.Gist, &meta.Importance, &meta.Ask, &meta.State, &meta.NextStep, &meta.Blocker,
 			&meta.Why, &meta.Size, &meta.Due, &meta.SourceName, &meta.Link,
 			&meta.Category, &meta.Details, &meta.Unsure, &meta.Edited,
-			&e.Owner.Read, &e.Owner.Starred, &e.Owner.Handled, &e.Owner.SnoozedUntil,
+			&e.Owner.Read, &e.Owner.Starred, &e.Owner.Handled, &e.Owner.SnoozedUntil, &e.Owner.Snoozed,
 			&resolverID, &resolution.Origin, &resolvedAt); err != nil {
 			return nil, err
 		}

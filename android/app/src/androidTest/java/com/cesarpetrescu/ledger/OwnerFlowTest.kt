@@ -74,6 +74,12 @@ class OwnerFlowTest {
         }
         ui.onNodeWithText(text).assertIsDisplayed()
     }
+    /** Opens a project tab; on a phone the tab row scrolls sideways, so the tab may start out of sight. */
+    private fun projectTab(text: String) {
+        awaitText(text)
+        ui.onNodeWithText(text).performScrollTo()
+        tap(text)
+    }
     /** Runs network work off the main thread, as the system job does. */
     private fun <T> onBackground(block: () -> T): T {
         var result: Result<T>? = null
@@ -109,6 +115,9 @@ class OwnerFlowTest {
     @Test fun nativeSignInRejectsCleartext() {
         ActivityScenario.launch(MainActivity::class.java).use {
             awaitText("Server address")
+            // The login shows Ledger's mark and wordmark, as the web does.
+            ui.onNodeWithTag("ledger-logo").assertIsDisplayed()
+            ui.onNodeWithText("Ledger").assertIsDisplayed()
             fillField("Server address", "http://example.com")
             scrollTo("Owner password")
             fillField("Owner password", "fixture-password")
@@ -212,11 +221,43 @@ class OwnerFlowTest {
             awaitText("Activity")
             scrollTo("Android verification note")
             ui.onNodeWithText("Android verification note").assertExists()
+            // Scrolling the list on slides the header away while the tabs stay; scrolling back brings it back.
+            ui.onNodeWithTag("page").performTouchInput { swipeUp() }
+            ui.waitForIdle()
+            ui.onNodeWithText("Add entry").assertIsNotDisplayed()
+            ui.onNodeWithText("Todos").assertIsDisplayed()
+            ui.onNodeWithTag("page").performTouchInput { swipeDown() }
+            ui.waitForIdle()
+            ui.onNodeWithText("Add entry").assertIsDisplayed()
+            // The stat tiles lead to what they count: open todos switches to the Todos tab.
+            tap("open todo")
+            awaitText("Write the fixture todo")
+            // The question tile opens the Inbox on top of the project, so Back returns to the project, as on the web.
+            tap("question waits for you")
+            awaitText("Confirm the fixture pricing")
+            androidx.test.espresso.Espresso.pressBack()
+            awaitText("Write the fixture todo")
+            ui.onNodeWithText("question waits for you").assertIsDisplayed()
+            // Details lists the project's fields; Handoffs lists its handoffs, each opening its thread.
+            projectTab("Details")
+            awaitText("Ship the next milestone")
+            awaitText("Edit project")
+            projectTab("Handoffs")
+            tap("Atlas handoff")
+            awaitText("Add message")
+            ui.onNodeWithContentDescription("Back").performClick()
+            // Files and Repos are tabs now; the ⋯ menu keeps Edit project and Delete project.
+            ui.onNodeWithContentDescription("More actions for Atlas").performClick()
+            awaitText("Delete project")
+            listOf("Files", "Repos").forEach { ui.onNode(hasText(it) and hasAnyAncestor(isPopup())).assertDoesNotExist() }
+            tap("Edit project")
+            awaitText("Atlas · Edit")
+            ui.onNodeWithContentDescription("Back").performClick()
+            projectTab("Files")
+            awaitText("No handoff attachments for this project.")
             // The top bar names the project; Repos keeps its link form folded until asked for, and folds it again after linking.
             awaitText("Atlas")
-            ui.onNodeWithContentDescription("More actions for Atlas").performClick()
-            tap("Repos")
-            awaitText("Atlas · Repos")
+            projectTab("Repos")
             awaitText("No repositories linked yet.")
             ui.onNodeWithText("Repository URL").assertDoesNotExist()
             // The empty state reads before the button it motivates.
@@ -229,7 +270,6 @@ class OwnerFlowTest {
             ui.waitUntilDoesNotExist(hasText("Repository URL"), 15_000)
             tap("Unlink")
             tap("Cancel")
-            ui.onNodeWithContentDescription("Back").performClick()
             ui.onNodeWithContentDescription("Back").performClick()
             tap("Handoffs")
             tap("Atlas handoff")
