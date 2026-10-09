@@ -93,43 +93,44 @@ func (s *Searcher) Search(ctx context.Context, query string, limit int) (SearchR
 	return SearchResult{Hits: hits, Degraded: degraded}, nil
 }
 
-// liveDocuments is the current text of the entries and projects the indexer
-// has not chunked, or must chunk again, written like buildRef writes it.
+// liveDocuments lists the entries and projects the indexer has not chunked, or
+// must chunk again (still queued in chunk_dirty), with the header and body
+// buildRef would write for them.
 const liveDocuments = `
- SELECT 'entry:'||e.id ref,e.kind,e.slug,format(E'[project: %s (%s) | %s | %s | by %s]\n%s',p.name,e.slug,e.kind,to_char(e.created_at AT TIME ZONE 'UTC','YYYY-MM-DD'),e.source,e.body) text
+ SELECT 'entry:'||e.id ref,e.kind,e.slug,format('[project: %s (%s) | %s | %s | by %s]',p.name,e.slug,e.kind,to_char(e.created_at AT TIME ZONE 'UTC','YYYY-MM-DD'),e.source) header,e.body
  FROM entry e JOIN project p ON p.slug=e.slug
  WHERE NOT EXISTS(SELECT 1 FROM chunk c WHERE c.ref='entry:'||e.id) OR 'entry:'||e.id IN (SELECT ref FROM chunk_dirty)
  UNION ALL
- SELECT 'project:'||p.slug,'project',p.slug,format(E'[project: %s (%s) | tier: %s | deadline: %s]\nHours/week: %s\nType: %s\nDescription: %s\nGoal: %s\nNeeds me: %s\nAutomate: %s\nStack: %s',p.name,p.slug,p.tier,p.deadline,p.hours_wk,p.type,p.description,p.goal,p.needs_me,p.automate,p.stack)
+ SELECT 'project:'||p.slug,'project',p.slug,format('[project: %s (%s) | tier: %s | deadline: %s]',p.name,p.slug,p.tier,p.deadline),
+  format(E'Hours/week: %s\nType: %s\nDescription: %s\nGoal: %s\nNeeds me: %s\nAutomate: %s\nStack: %s',p.hours_wk,p.type,p.description,p.goal,p.needs_me,p.automate,p.stack)
  FROM project p
  WHERE NOT EXISTS(SELECT 1 FROM chunk c WHERE c.ref='project:'||p.slug) OR 'project:'||p.slug IN (SELECT ref FROM chunk_dirty)
 `
+
+// liveChunks splits a live document exactly as buildRef would.
+func liveChunks(kind, header, body string) []Chunk {
+	if kind == "project" {
+		return ProjectChunks(header + "\n" + body)
+	}
+	return ChunkEntry(header, body)
+}
 
 // Lexical ranks Postgres full-text matches alone and never calls the
 // inference service (the Searcher may have none), so it still answers while
 // ledger-index is unreachable. It reads the stored chunks of any embedding
 // model, skipping chunks of deleted entries and projects that the stopped
 // indexer has not dropped yet. Entries and projects the indexer never chunked,
-// or that changed since (still queued in chunk_dirty), are matched on their
-// live text, built like buildRef builds it, instead of a missing or stale
-// chunk. Each ref counts once, by its best chunk, before the limit. The result
-// reports the vector and rerank stages as degraded.
-//
-// ponytail: live rows are tokenized per query with no index; fine while the
-// backlog is small, add a GIN index on entry body if installs run without an
-// indexer for long.
+// or that changed since, are chunked from their live text as the indexer would
+// chunk them, instead of using a missing or stale chunk. Each ref counts once,
+// by its best chunk, before the limit. The result reports the vector and
+// rerank stages as degraded.
 func (s *Searcher) Lexical(ctx context.Context, query string, limit int) (SearchResult, error) {
-	rows, err := s.db.Pool.Query(ctx, `WITH q AS (SELECT websearch_to_tsquery('public.ledger_ts'::regconfig,$1) q),
-live AS (`+liveDocuments+`),
-matches AS (
- SELECT c.ref,c.ord,COALESCE(e.kind,'project') kind,COALESCE(e.slug,substring(c.ref from 9)) slug,c.text,ts_rank_cd(c.tsv,q.q) score
+	rows, err := s.db.Pool.Query(ctx, `WITH q AS (SELECT websearch_to_tsquery('public.ledger_ts'::regconfig,$1) q)
+SELECT ref,ord,kind,slug,text,score FROM (
+ SELECT DISTINCT ON (c.ref) c.ref,c.ord,COALESCE(e.kind,'project') kind,COALESCE(e.slug,substring(c.ref from 9)) slug,c.text,ts_rank_cd(c.tsv,q.q) score
  FROM q,chunk c LEFT JOIN entry e ON c.ref='entry:'||e.id::text
  WHERE (e.id IS NOT NULL OR EXISTS(SELECT 1 FROM project p WHERE c.ref='project:'||p.slug)) AND c.ref NOT IN (SELECT ref FROM chunk_dirty) AND c.tsv @@ q.q
- UNION ALL
- SELECT l.ref,0,l.kind,l.slug,l.text,ts_rank_cd(to_tsvector('public.ledger_ts'::regconfig,l.text),q.q)
- FROM q,live l WHERE to_tsvector('public.ledger_ts'::regconfig,l.text) @@ q.q
-)
-SELECT ref,ord,kind,slug,text,score FROM (SELECT DISTINCT ON (ref) * FROM matches ORDER BY ref,score DESC,ord) best
+ ORDER BY c.ref,score DESC,c.ord) best
 ORDER BY score DESC,ref LIMIT $2`, query, limit)
 	if err != nil {
 		return SearchResult{}, err
@@ -139,10 +140,80 @@ ORDER BY score DESC,ref LIMIT $2`, query, limit)
 	if err != nil {
 		return SearchResult{}, err
 	}
+	live, err := s.lexicalLive(ctx, query)
+	if err != nil {
+		return SearchResult{}, err
+	}
+	// The two sets never share a ref: stored chunks of queued refs are skipped above.
+	hits = append(hits, live...)
+	sort.SliceStable(hits, func(i, j int) bool {
+		if hits[i].Score != hits[j].Score {
+			return hits[i].Score > hits[j].Score
+		}
+		return hits[i].Ref < hits[j].Ref
+	})
+	hits = hits[:min(limit, len(hits))]
 	for i := range hits {
 		hits[i].Snippet = snippet(hits[i].Snippet)
 	}
 	return SearchResult{Hits: hits, Degraded: []string{"vector", "rerank"}}, nil
+}
+
+// lexicalLive chunks the live documents that match and ranks each chunk, keeping each ref's best.
+//
+// ponytail: live rows are tokenized per query with no index, and only the 200
+// best matching documents are chunked; fine while the indexer's backlog is
+// small, index entry text if installs run without an indexer for long.
+func (s *Searcher) lexicalLive(ctx context.Context, query string) ([]Ranked, error) {
+	rows, err := s.db.Pool.Query(ctx, `WITH q AS (SELECT websearch_to_tsquery('public.ledger_ts'::regconfig,$1) q)
+SELECT l.ref,l.kind,l.slug,l.header,l.body FROM q,(`+liveDocuments+`) l
+WHERE to_tsvector('public.ledger_ts'::regconfig,l.header||E'\n'||l.body) @@ q.q
+ORDER BY ts_rank_cd(to_tsvector('public.ledger_ts'::regconfig,l.header||E'\n'||l.body),q.q) DESC,l.ref LIMIT 200`, query)
+	if err != nil {
+		return nil, err
+	}
+	var candidates []Ranked
+	var texts []string
+	for rows.Next() {
+		var ref, kind, slug, header, body string
+		if err := rows.Scan(&ref, &kind, &slug, &header, &body); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		for _, chunk := range liveChunks(kind, header, body) {
+			candidates = append(candidates, Ranked{Ref: ref, Ord: chunk.Ord, Kind: kind, ProjectSlug: slug, Snippet: chunk.Text})
+			texts = append(texts, chunk.Text)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil || len(texts) == 0 {
+		return []Ranked{}, err
+	}
+	rows, err = s.db.Pool.Query(ctx, `WITH q AS (SELECT websearch_to_tsquery('public.ledger_ts'::regconfig,$1) q)
+SELECT u.i::int-1,ts_rank_cd(to_tsvector('public.ledger_ts'::regconfig,u.t),q.q) FROM q,unnest($2::text[]) WITH ORDINALITY u(t,i)
+WHERE to_tsvector('public.ledger_ts'::regconfig,u.t) @@ q.q`, query, texts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	best := map[string]Ranked{}
+	for rows.Next() {
+		var i int
+		var score float64
+		if err := rows.Scan(&i, &score); err != nil {
+			return nil, err
+		}
+		hit := candidates[i]
+		hit.Score = score
+		if current, ok := best[hit.Ref]; !ok || score > current.Score || score == current.Score && hit.Ord < current.Ord {
+			best[hit.Ref] = hit
+		}
+	}
+	out := make([]Ranked, 0, len(best))
+	for _, hit := range best {
+		out = append(out, hit)
+	}
+	return out, rows.Err()
 }
 
 // fts returns the 30 best full-text matches among chunks of the current model.

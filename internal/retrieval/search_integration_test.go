@@ -289,8 +289,9 @@ func TestLexicalSearchReadsCurrentTextOfRowsQueuedForReindexing(t *testing.T) {
 	}
 }
 
-// Live text carries every field the indexer makes searchable: a project's tier,
-// deadline, and hours, and an entry's date and author.
+// Live text carries every field the indexer makes searchable (a project's tier,
+// deadline, and hours, an entry's date and author) and is cut at the same
+// chunk boundaries, so a match deep in a long entry shows the chunk holding it.
 func TestLexicalLiveTextMatchesWhatTheIndexerWouldStore(t *testing.T) {
 	db, ctx := testdb.Open(t)
 	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "maintain", HoursWK: 12, Deadline: "2026-11-15", Goal: "Ship it"}); err != nil {
@@ -300,31 +301,57 @@ func TestLexicalLiveTextMatchesWhatTheIndexerWouldStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	paragraphs := make([]string, 30)
+	for i := range paragraphs {
+		paragraphs[i] = fmt.Sprintf("Paragraph %d covers the benchmark setup, the warm cache, and the cold start numbers in detail.", i)
+	}
+	paragraphs[29] = "Finally the zeppelin experiment settled it."
+	long, err := db.AppendEntry(ctx, "atlas", "note", strings.Join(paragraphs, "\n\n"), "agent", "client-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entryRef, longRef := "entry:"+strconv.FormatInt(entry.ID, 10), "entry:"+strconv.FormatInt(long.ID, 10)
 	searcher := NewSearcher(db, nil)
-	for query, want := range map[string]string{"maintain": "project:atlas", "2026-11-15": "project:atlas", "codex": "entry:" + strconv.FormatInt(entry.ID, 10)} {
+	deepOrd := -1
+	for query, want := range map[string]string{"maintain": "project:atlas", "2026-11-15": "project:atlas", "codex": entryRef, "zeppelin": longRef} {
 		result, err := searcher.Lexical(ctx, query, 10)
 		if err != nil || len(result.Hits) != 1 || result.Hits[0].Ref != want {
 			t.Fatalf("%q = %#v, %v", query, result, err)
 		}
+		if query == "zeppelin" {
+			deepOrd = result.Hits[0].Ord
+		}
 	}
-	// Built exactly as buildRef builds it, so a fallback hit reads like an indexed one.
 	tx, err := db.Pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx)
-	for _, ref := range []string{"project:atlas", "entry:" + strconv.FormatInt(entry.ID, 10)} {
-		chunks, err := buildRef(ctx, tx, ref)
-		if err != nil || len(chunks) != 1 {
-			t.Fatalf("buildRef(%s) = %#v, %v", ref, chunks, err)
-		}
-		var live string
-		if err := db.Pool.QueryRow(ctx, `SELECT text FROM (`+liveDocuments+`) l WHERE ref=$1`, ref).Scan(&live); err != nil {
+	rows, err := db.Pool.Query(ctx, `SELECT ref,kind,header,body FROM (`+liveDocuments+`) l`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	seen := 0
+	for rows.Next() {
+		var ref, kind, header, body string
+		if err := rows.Scan(&ref, &kind, &header, &body); err != nil {
 			t.Fatal(err)
 		}
-		if live != chunks[0].Text {
-			t.Fatalf("%s live text %q, indexer %q", ref, live, chunks[0].Text)
+		want, err := buildRef(ctx, tx, ref)
+		if err != nil {
+			t.Fatal(err)
 		}
+		if got := liveChunks(kind, header, body); !slices.Equal(got, want) {
+			t.Fatalf("%s live chunks %#v, indexer %#v", ref, got, want)
+		}
+		if ref == longRef && (len(want) < 2 || deepOrd < 1 || !strings.Contains(want[deepOrd].Text, "zeppelin")) {
+			t.Fatalf("a match deep in a long entry must come from the chunk holding it: chunk %d of %d", deepOrd, len(want))
+		}
+		seen++
+	}
+	if rows.Err() != nil || seen != 3 {
+		t.Fatalf("compared %d live documents: %v", seen, rows.Err())
 	}
 }
 
