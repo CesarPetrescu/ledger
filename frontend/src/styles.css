@@ -887,6 +887,30 @@ label > textarea {
 .project-name { overflow: hidden; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .project-tags { grid-column: 1 / -1; display: flex; align-items: center; gap: 9px; min-width: 0; }
 .project-tags code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* With no project open the list fills the page: each row is the project, its week, and four facts in columns. */
+.projects[data-mode='list'] { grid-template-columns: minmax(0, 1fr); }
+.projects[data-mode='list'] .pane-list { position: static; max-height: none; overflow: visible; }
+.project-list[data-full] a { grid-template-columns: minmax(0, 1fr) 8rem 6rem 9.5rem 8.5rem; align-items: start; gap: 6px 20px; padding: 14px 12px 14px 13px; }
+.project-row-main { display: grid; gap: 4px; min-width: 0; }
+.project-row-title { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 9px; min-width: 0; }
+.project-row-title .project-name { white-space: normal; overflow-wrap: anywhere; }
+.project-headline { display: -webkit-box; overflow: hidden; max-width: 90ch; color: var(--text-soft); font-size: 0.86rem; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.project-headline.muted { color: var(--text-muted); }
+/* Facts never wrap: a long free-text deadline ends in an ellipsis and shows whole on hover. */
+.project-fact { overflow: hidden; padding-top: 3px; font-size: 0.8rem; text-overflow: ellipsis; white-space: nowrap; }
+.project-fact .badge { margin-top: -3px; }
+@media (min-width: 861px) {
+  .projects[data-mode='list'] .filters { flex-direction: row; flex-wrap: wrap; align-items: center; }
+  .projects[data-mode='list'] .filters input[type='search'] { flex: 1 1 16rem; max-width: 26rem; }
+}
+/* Too narrow for columns: the facts follow the week on one wrapping line. */
+@media (max-width: 1100px) {
+  .project-list[data-full] a { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+  .project-row-main { flex-basis: 100%; }
+  .project-fact { padding-top: 0; }
+  .project-fact:empty { display: none; }
+  .project-fact .badge { margin-top: 0; }
+}
 
 .detail { display: flex; flex-direction: column; gap: 26px; }
 .detail-head { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 14px 18px; padding-bottom: 22px; border-bottom: 1px solid var(--border); }
@@ -923,11 +947,18 @@ label > textarea {
 .composer-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; }
 .composer-row label { width: 170px; }
 .counter { white-space: nowrap; }
-.detail-tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
+/* Every tab stays in sight: where one row is too narrow (phones, the pane beside the project list) the tabs fill two rows instead of scrolling out of view. */
+.detail-tabs-frame { container: project-tabs / inline-size; }
+.detail-tabs { display: flex; flex-wrap: wrap; gap: 0 24px; border-bottom: 1px solid var(--border); }
 .detail-tabs a { flex: none; white-space: nowrap; }
 .detail-tabs a { padding: 9px 2px 10px; border-bottom: 2px solid transparent; color: var(--text-muted); font-weight: 600; }
 .detail-tabs a:hover { color: var(--text); }
 .detail-tabs a[aria-current='page'] { border-bottom-color: var(--accent); color: var(--accent); }
+@container project-tabs (max-width: 600px) {
+  .detail-tabs { gap: 0; border-bottom: 0; }
+  /* At most four to a row, so the seven split four and three rather than leaving one alone. */
+  .detail-tabs a { flex: 1 1 22%; padding: 10px 6px; box-shadow: 0 1px 0 var(--border); text-align: center; }
+}
 .project-related > .section-title { margin-bottom: 14px; }
 .project-related > ul { border-top: 1px solid var(--border); }
 .project-related li { border-bottom: 1px solid var(--border); }
@@ -938,7 +969,8 @@ label > textarea {
 .repo-list li { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: start; padding: 14px 8px; }
 .repo-list li > div { display: grid; gap: 3px; min-width: 0; }
 .repo-list .repo-sync-error { color: var(--danger, #b42318); }
-.repo-form { margin-top: 18px; }
+.repo-hint { margin: 0 0 14px; }
+.repo-form { margin: 0 0 18px; }
 
 /* Handoffs */
 .handoff-filter-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -1010,9 +1042,6 @@ label > textarea {
 .btn-small { min-height: 32px; padding: 0 12px; font-size: 0.8rem; white-space: nowrap; }
 .todo-done { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; color: var(--success); font-size: 0.76rem; font-weight: 600; text-align: right; white-space: nowrap; }
 .entry-run-more { padding: 7px 0 9px; border-bottom: 1px solid var(--border); font-size: 0.78rem; }
-.summary-table .status-text { margin: 0 0 3px; }
-.summary-table td > div > .muted.small { display: block; }
-.summary-table .agents { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; font-size: 0.72rem; }
 .chip-repeat { border-style: dashed; }
 .repeats { margin: 6px 0 0; padding: 0 0 0 12px; border-left: 2px dashed var(--border-strong); list-style: none; color: var(--text-soft); font-size: 0.8rem; }
 .repeats li { padding: 2px 0; }
@@ -1065,11 +1094,6 @@ label > textarea {
 .project-status-facts { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0; padding: 0; list-style: none; color: var(--text-soft); font-size: 0.84rem; }
 .lede { margin: 0; max-width: 72ch; color: var(--text-body); font-size: 1.02rem; }
 .related li { padding: 2px 0; }
-.summary-table .digest { margin: 0 0 6px; max-width: 70ch; line-height: 1.45; -webkit-line-clamp: 4; }
-.summary-table .latest-status { margin: 0; }
-.summary-table .needs-me { margin: 4px 0 0; max-width: 42ch; color: var(--warning); }
-.summary-table code { white-space: nowrap; }
-.summary-table td:nth-child(4) { min-width: 9rem; }
 /* The create buttons share the title's row on desktops (a 330px pane) and phones from 390px; where the pane is narrower they wrap under the title. */
 .handoffs .page-head { align-items: center; column-gap: 10px; }
 .handoff-head-actions { display: flex; gap: 6px; }
@@ -1336,7 +1360,6 @@ label > textarea {
   .detail-title { flex-basis: 100%; }
   .detail-actions { flex-basis: 100%; }
   .detail-actions .btn { flex: 1; }
-  .detail-tabs { gap: 18px; }
   .table-add[data-fixed] { grid-template-columns: 1fr; }
 
   .table-filters,
