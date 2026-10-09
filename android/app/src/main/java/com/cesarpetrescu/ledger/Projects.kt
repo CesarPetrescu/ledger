@@ -2,6 +2,7 @@ package com.cesarpetrescu.ledger
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -19,6 +20,40 @@ fun ProjectEditor(model: LedgerModel, slug: String) {
     if (slug.isBlank()) ProjectForm(model, "", JSONObject())
     else Load(model, "edit-project:$slug", { it.request("GET", "/projects/${segment(slug)}?entries=1") }) { ProjectForm(model, slug, it.getJSONObject("project")) }
 }
+
+/** The Details tab's fields, like the web's; [summary] is the project's row from /table/projects, for its latest status. */
+fun projectDetails(p: JSONObject, summary: JSONObject): List<Pair<String, String>> = listOf(
+    "Tier" to label(p.text("tier")),
+    "Hours per week" to p.optInt("hours_wk").toString(),
+    "Goal" to p.text("goal"),
+    "Deadline" to p.text("deadline").let { deadlineDate(it) ?: it },
+    "Type" to p.text("type"),
+    "Description" to p.text("description"),
+    "Needs me" to p.text("needs_me"),
+    "Automate" to p.text("automate"),
+    "Stack" to p.text("stack"),
+    // The AI's title, or the update itself until labelling catches up; then who wrote it and when.
+    "Latest status" to listOf(summary.text("status_title").ifBlank { summary.text("status_body") },
+        listOf(writerName(summary.text("status_source")), displayTime(summary.text("status_at"))).filter { it.isNotBlank() }.joinToString(" · ")
+    ).filter { it.isNotBlank() }.joinToString("\n"),
+)
+
+/** A project's fields, read-only; Edit project changes them. */
+@Composable
+fun ProjectDetails(model: LedgerModel, slug: String, summary: JSONObject) =
+    Load(model, "project-details:$slug", { it.request("GET", "/projects/${segment(slug)}?entries=1") }) { data ->
+        Page {
+            item { OutlinedButton(onClick = { model.go("project-edit/$slug") }, enabled = !model.busy) { Text("Edit project") } }
+            items(projectDetails(data.getJSONObject("project"), summary)) { (name, value) ->
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(name, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    // An empty field reads as a dash, as on the web.
+                    if (value.isBlank()) Text("—", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    else SelectionContainer { Text(value, style = MaterialTheme.typography.bodyMedium) }
+                }
+            }
+        }
+    }
 
 @Composable
 private fun ProjectForm(model: LedgerModel, existingSlug: String, p: JSONObject) {
