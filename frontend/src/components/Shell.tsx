@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { describeError } from '../api'
 import { useAuth } from '../auth'
 import { Link, navigate, useLocation } from '../router'
+import { OverflowMenu } from './OverflowMenu'
 import { useToast } from './Toast'
 import { BrandMark, Icon, formatRelative, type IconName } from './ui'
 import { useLiveUpdates } from '../live'
@@ -16,7 +17,9 @@ const NAV: { to: string; label: string; icon: IconName; match: (path: string) =>
   { to: '/calendar', label: 'Calendar', icon: 'calendar', match: (path) => path === '/calendar' },
   { to: '/handoffs', label: 'Handoffs', icon: 'handoffs', match: (path) => path.startsWith('/handoffs') },
   { to: '/search', label: 'Search', icon: 'search', match: (path) => path === '/search', mobileHidden: true },
-  { to: '/agents', label: 'Agents', icon: 'agents', match: (path) => path === '/agents' || path === '/clients' },
+  { to: '/agents', label: 'Agents', icon: 'agents', match: (path) => path === '/agents' },
+  // Phones reach Access from the account menu in the top bar; the bottom bar has no room for it.
+  { to: '/access', label: 'Access', icon: 'clients', match: (path) => path === '/access' || path === '/clients' || path === '/connect', mobileHidden: true },
 ]
 
 function isTypingTarget(target: EventTarget | null): boolean {
@@ -86,9 +89,15 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
           <span>Search</span>
           <kbd>{isMac ? '⌘K' : 'Ctrl K'}</kbd>
         </button>
-        <button type="button" className="icon-button mobile-signout" aria-label="End session" title="Sign out" disabled={signingOut} onClick={() => void handleSignOut()}>
-          <Icon name="logout" />
-        </button>
+        {/* Phones only: the top bar keeps one menu instead of separate Help, theme, and sign-out buttons. */}
+        <div className="account-menu">
+          <OverflowMenu label="Account menu" items={[
+            { label: 'Help', onSelect: () => navigate('/help') },
+            { label: `Theme: ${THEME_LABEL[theme]} (switch to ${THEME_LABEL[nextTheme]})`, onSelect: cycleTheme },
+            { label: 'Access', onSelect: () => navigate('/access') },
+            { label: signingOut ? 'Signing out…' : 'Sign out', onSelect: () => void handleSignOut(), disabled: signingOut },
+          ]} />
+        </div>
       </header>
       <aside id="sidebar" className="sidebar">
         <div className="brand">
@@ -104,10 +113,6 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
           ))}
         </nav>
         <div className="sidebar-foot">
-          <p className="live-status sidebar-live" data-status={live}>
-            <Icon name={live === 'live' ? 'live' : 'offline'} />
-            <span>{live === 'live' ? 'Live updates on' : live === 'connecting' ? 'Connecting…' : 'Updates offline'}</span>
-          </p>
           {expires && (
             <p className="muted small">
               Session ends <time dateTime={expires}>{formatRelative(expires)}</time>
