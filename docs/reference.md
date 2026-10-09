@@ -64,7 +64,7 @@ nginx :8080 (only published port)
 - OAuth 2.1 authorization code flow with PKCE S256, Dynamic Client Registration, and Client ID Metadata Documents, so hosted clients such as ChatGPT connect without manual key exchange
 - Hashed authorization codes and tokens, rotating refresh-token families, replay revocation
 - PostgreSQL full-text search plus optional pgvector retrieval and reranking, fused with reciprocal rank fusion
-- Graceful fallback to lexical-only search when the inference endpoint is unavailable
+- Graceful fallback to lexical-only search when the inference endpoint, or the ledger-index service itself, is unavailable
 - Cross-agent Handoffs inbox with append-only threads, per-message status, and up to 10 attachments per message
 - Optional Nextcloud calendar integration with owner-selected calendars and ETag-safe event updates
 - Responsive operator console with live WebSocket updates. It opens on an Inbox of what agents are waiting on you for (each item says why it is there), urgent todos, blocked projects, and each project's week; project pages lead with the weekly summary and health, then activity, todos, and decisions; clicking any entry opens it beside the list (or on its own page) with where it came from, everything that happened to it, and a box to reply to the agent that wrote it; an Agents page shows what each agent did lately and how to connect one; and a Help page explains the rules and labels. The Android app mirrors these screens and can notify you when an agent asks you something or a todo becomes overdue; it asks your own server about every 15 minutes, with no push service in between

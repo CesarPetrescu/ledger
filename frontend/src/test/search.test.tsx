@@ -29,10 +29,54 @@ describe('search', () => {
     // Entry hits open the entry itself; project hits open the project.
     expect(within(items[0]!).getByRole('link', { name: /postgresql/i })).toHaveAttribute('href', '/admin/entries/41')
     expect(items[1]).toHaveTextContent('Atlas')
+    // Reranked results carry their relevance.
+    expect(items[0]).toHaveTextContent('91%')
     const post = calls.find((call) => call.method === 'POST')
     expect(post?.body).toEqual({ q: 'postgres', limit: 20, project: 'atlas', kind: 'decision' })
     expect(window.location.search).toContain('q=postgres')
     expect(screen.queryByRole('status', { name: /degraded/i })).not.toBeInTheDocument()
+    // Two filters are applied beyond the scope tabs.
+    expect(screen.getByRole('button', { name: 'Filters, 2 active' })).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('uses the standard page layout: eyebrow, title, a plain field, and scope tabs', async () => {
+    mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/projects': { body: { projects: [atlas] } },
+    })
+    renderApp('/admin/search')
+    expect(await screen.findByRole('heading', { level: 1, name: 'Search' })).toBeInTheDocument()
+    const head = screen.getByRole('heading', { level: 1 }).closest('header')
+    expect(head).toHaveClass('page-head')
+    expect(head?.querySelector('.eyebrow')).not.toBeNull()
+    expect(document.querySelector('.search-command')).toBeNull()
+    expect(screen.getByRole('group', { name: /search scope/i })).toHaveClass('view-tabs')
+    expect(screen.getByRole('button', { name: 'Filters' })).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('says word matches only, without scores, when meaning search is offline', async () => {
+    mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/projects': { body: { projects: [atlas] } },
+      'POST /admin/api/search': { body: { ...searchResponse, degraded: ['vector', 'rerank'] } },
+    })
+    renderApp('/admin/search?q=postgres')
+    const results = await screen.findByRole('region', { name: /results/i })
+    expect(screen.getByRole('status', { name: /degraded/i })).toHaveTextContent('Showing word matches only; meaning search is offline.')
+    expect(within(results).getAllByRole('listitem')).toHaveLength(2)
+    expect(results).not.toHaveTextContent('%')
+  })
+
+  it('explains a ranking-only outage', async () => {
+    mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/projects': { body: { projects: [atlas] } },
+      'POST /admin/api/search': { body: { ...searchResponse, degraded: ['rerank'] } },
+    })
+    renderApp('/admin/search?q=postgres')
+    const results = await screen.findByRole('region', { name: /results/i })
+    expect(screen.getByRole('status', { name: /degraded/i })).toHaveTextContent(/relevance ranking is offline/i)
+    expect(results).not.toHaveTextContent('%')
   })
 
   it('explains degraded retrieval, empty results, and unavailability with retry', async () => {
@@ -48,8 +92,8 @@ describe('search', () => {
     renderApp('/admin/search?q=nothing')
     expect(await screen.findByText(/no results for/i)).toBeInTheDocument()
     const degraded = screen.getByRole('status', { name: /degraded/i })
-    expect(degraded).toHaveTextContent(/vector retrieval/i)
-    expect(degraded).toHaveTextContent(/reranking/i)
+    expect(degraded).toHaveTextContent(/word matches only/i)
+    expect(degraded).not.toHaveTextContent(/ranking/i)
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: /^search$/i }))
     expect(await screen.findByRole('alert')).toHaveTextContent(/search is unavailable/i)

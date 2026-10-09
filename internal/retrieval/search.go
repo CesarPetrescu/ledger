@@ -93,11 +93,42 @@ func (s *Searcher) Search(ctx context.Context, query string, limit int) (SearchR
 	return SearchResult{Hits: hits, Degraded: degraded}, nil
 }
 
+// Lexical ranks chunks by Postgres full-text match alone and never calls the
+// inference service (the Searcher may have none), so it still answers while
+// ledger-index is unreachable. Chunks of any embedding model match; chunks of
+// deleted entries and projects, which the stopped indexer has not dropped yet,
+// do not. The result reports the vector and rerank stages as degraded.
+func (s *Searcher) Lexical(ctx context.Context, query string, limit int) (SearchResult, error) {
+	matches, err := s.textMatches(ctx, `(e.id IS NOT NULL OR EXISTS(SELECT 1 FROM project p WHERE c.ref='project:'||p.slug))`, query)
+	if err != nil {
+		return SearchResult{}, err
+	}
+	seen := map[string]bool{}
+	hits := make([]Ranked, 0, min(limit, len(matches)))
+	for _, hit := range matches {
+		if seen[hit.Ref] {
+			continue
+		}
+		seen[hit.Ref] = true
+		hit.Snippet = snippet(hit.Snippet)
+		hits = append(hits, hit)
+		if len(hits) == limit {
+			break
+		}
+	}
+	return SearchResult{Hits: hits, Degraded: []string{"vector", "rerank"}}, nil
+}
+
 func (s *Searcher) fts(ctx context.Context, query string) ([]Ranked, error) {
+	return s.textMatches(ctx, `c.model=$2`, query, s.infer.embeddingModel)
+}
+
+// textMatches returns the 30 best full-text chunk matches for $1 that also satisfy filter.
+func (s *Searcher) textMatches(ctx context.Context, filter string, args ...any) ([]Ranked, error) {
 	rows, err := s.db.Pool.Query(ctx, `SELECT `+rankedColumns+`,ts_rank_cd(c.tsv,websearch_to_tsquery('public.ledger_ts'::regconfig,$1)) score
 FROM chunk c LEFT JOIN entry e ON c.ref='entry:'||e.id::text
-WHERE c.model=$2 AND c.tsv @@ websearch_to_tsquery('public.ledger_ts'::regconfig,$1)
-ORDER BY score DESC,c.ref,c.ord LIMIT 30`, query, s.infer.embeddingModel)
+WHERE `+filter+` AND c.tsv @@ websearch_to_tsquery('public.ledger_ts'::regconfig,$1)
+ORDER BY score DESC,c.ref,c.ord LIMIT 30`, args...)
 	if err != nil {
 		return nil, err
 	}

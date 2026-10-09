@@ -221,6 +221,37 @@ func TestWriteOnlyTokenCannotRead(t *testing.T) {
 	}
 }
 
+// When ledger-index itself is unreachable the search tool still answers from
+// Postgres word matches, in its unchanged output shape, marked degraded.
+func TestSearchToolFallsBackToWordMatchesWhenIndexIsDown(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO chunk(ref,ord,text,text_hash,model) VALUES('project:atlas',0,$1,decode(repeat('ab',32),'hex'),'qwen3-embedding')`, "[project: Atlas (atlas)]\nMigrare la PostgreSQL"); err != nil {
+		t.Fatal(err)
+	}
+	addAccess(t, db, ctx, "read-token", []string{"ledger:read"})
+	// Nothing listens on port 1.
+	server := httptest.NewServer(HTTPHandler(NewServer(db, "http://127.0.0.1:1"), db, "https://ledger.example.com"))
+	defer server.Close()
+	session := connectMCP(t, server.URL+"/mcp", "read-token", "reader")
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "search", Arguments: map[string]any{"q": "postgresql"}})
+	if err != nil || result.IsError {
+		t.Fatalf("search = %#v, %v", result, err)
+	}
+	raw, _ := json.Marshal(result.StructuredContent)
+	var output map[string]json.RawMessage
+	var hits []map[string]any
+	var degraded []string
+	if json.Unmarshal(raw, &output) != nil || len(output) != 2 || json.Unmarshal(output["hits"], &hits) != nil || json.Unmarshal(output["degraded"], &degraded) != nil {
+		t.Fatalf("search output = %s", raw)
+	}
+	if len(hits) != 1 || hits[0]["ref"] != "project:atlas" || hits[0]["kind"] != "project" || hits[0]["snippet"] != "Migrare la PostgreSQL" || len(hits[0]) != 5 || strings.Join(degraded, ",") != "vector,rerank" {
+		t.Fatalf("search output = %s", raw)
+	}
+}
+
 func TestCalendarScopesAreIndependent(t *testing.T) {
 	db, ctx := testdb.Open(t)
 	addAccess(t, db, ctx, "ledger-only", []string{"ledger:read", "ledger:write"})
