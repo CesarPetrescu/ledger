@@ -70,7 +70,7 @@ function Results({ request }: { request: SearchRequest }) {
         </p>
       )}
       {hits.length === 0 ? (
-        <p className="muted">No results for “{request.q}”.</p>
+        <p className="muted">{degraded.includes('vector') ? 'No word matches' : 'No results'} for “{request.q}”.</p>
       ) : (
         <>
           <p className="search-summary">

@@ -14,7 +14,7 @@ export function AgentsPage() {
           <p className="eyebrow">Who writes to Ledger</p>
           <h1>Agents</h1>
         </div>
-        <Link to="/access">Manage access <span aria-hidden="true">→</span></Link>
+        <Link className="page-head-link" to="/access">Manage access <span aria-hidden="true">→</span></Link>
         <p className="muted">What each agent did lately and what it is waiting on you for.</p>
       </header>
       {agents.loading && <Loading label="Loading agents…" />}

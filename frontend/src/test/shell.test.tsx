@@ -1,4 +1,4 @@
-import { act, screen, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { navigate } from '../router'
@@ -46,12 +46,15 @@ describe('shell', () => {
 
     await user.click(menu)
     const items = within(screen.getByRole('menu', { name: 'Account menu' })).getAllByRole('menuitem').map((item) => item.textContent)
-    expect(items).toEqual(['Help', 'Theme: System (switch to Light)', 'Access', 'Sign out'])
+    expect(items).toEqual(['Help', 'Light theme', 'Access', 'Sign out'])
 
-    await user.click(screen.getByRole('menuitem', { name: 'Theme: System (switch to Light)' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Light theme' }))
     expect(document.documentElement.dataset.theme).toBe('light')
     await user.click(menu)
-    expect(screen.getByRole('menuitem', { name: 'Theme: Light (switch to Dark)' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: 'Dark theme' })).toBeInTheDocument()
+    await user.click(screen.getByRole('menuitem', { name: 'Dark theme' }))
+    await user.click(menu)
+    expect(screen.getByRole('menuitem', { name: 'Match system theme' })).toBeInTheDocument()
 
     await user.click(screen.getByRole('menuitem', { name: 'Access' }))
     expect(window.location.pathname).toBe('/admin/access')
@@ -66,11 +69,24 @@ describe('shell', () => {
     expect(calls.some((call) => call.method === 'POST' && call.path === '/admin/api/logout')).toBe(true)
   })
 
+  it('drops the top-bar search trigger on the Search page, which has its own field', async () => {
+    mockApi({ 'GET /admin/api/session': authenticatedSession, 'GET /admin/api/projects': { body: { projects: [] } }, ...homeRoutes })
+    renderApp()
+    await screen.findByRole('heading', { name: /^inbox$/i })
+    expect(document.querySelector('.topbar .search-trigger')).not.toBeNull()
+    act(() => navigate('/search'))
+    expect(await screen.findByRole('heading', { level: 1, name: 'Search' })).toBeInTheDocument()
+    expect(document.querySelector('.topbar .search-trigger')).toBeNull()
+  })
+
   it('shows the live status once, in the top bar, and keeps the session note in the sidebar', async () => {
     vi.stubGlobal('WebSocket', FakeWebSocket as unknown as typeof WebSocket)
+    FakeWebSocket.last = null
     mockApi({ 'GET /admin/api/session': authenticatedSession, ...homeRoutes })
     renderApp()
     await screen.findByRole('heading', { name: /^inbox$/i })
+    // The heading can render before the Shell's effects open the socket.
+    await waitFor(() => expect(FakeWebSocket.last).not.toBeNull())
     act(() => FakeWebSocket.last?.onopen?.({} as Event))
 
     const live = screen.getAllByText(/^live/i)

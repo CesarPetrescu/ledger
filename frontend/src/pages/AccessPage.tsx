@@ -194,13 +194,16 @@ function ApprovalPassword() {
   return <section className="connected-apps" aria-labelledby="password-title">
     <h2 id="password-title" className="section-title">Approval password</h2>
     <p className="muted small">You can approve apps with your Ledger owner login. To set a new approval password, confirm your owner password below. You do not need the old approval password.</p>
-    <form onSubmit={event => void save(event)}>
-      <label htmlFor="approval-owner-password">Owner password</label>
-      <input id="approval-owner-password" type="password" autoComplete="current-password" value={ownerPassword} onChange={event => setOwnerPassword(event.target.value)} required maxLength={4096} disabled={busy} />
-      <label htmlFor="new-approval-password">New approval password</label>
-      <input id="new-approval-password" type="password" autoComplete="new-password" value={password} onChange={event => setPassword(event.target.value)} required minLength={12} maxLength={4096} disabled={busy} />
-      <label htmlFor="confirm-approval-password">Confirm new approval password</label>
-      <input id="confirm-approval-password" type="password" autoComplete="new-password" value={confirmation} onChange={event => setConfirmation(event.target.value)} required minLength={12} maxLength={4096} disabled={busy} />
+    <form className="password-form" onSubmit={event => void save(event)}>
+      <label>Owner password
+        <input id="approval-owner-password" type="password" autoComplete="current-password" value={ownerPassword} onChange={event => setOwnerPassword(event.target.value)} required maxLength={4096} disabled={busy} />
+      </label>
+      <label>New approval password
+        <input id="new-approval-password" type="password" autoComplete="new-password" value={password} onChange={event => setPassword(event.target.value)} required minLength={12} maxLength={4096} disabled={busy} />
+      </label>
+      <label>Confirm new approval password
+        <input id="confirm-approval-password" type="password" autoComplete="new-password" value={confirmation} onChange={event => setConfirmation(event.target.value)} required minLength={12} maxLength={4096} disabled={busy} />
+      </label>
       {error && <p role="alert">{error}</p>}
       {saved && <p role="status">Approval password changed.</p>}
       <div className="form-actions"><button className="btn btn-primary" disabled={busy}>Change approval password</button></div>

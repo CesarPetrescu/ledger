@@ -339,7 +339,10 @@ class OwnerFlowTest {
             awaitText("Working on 1 handoff")
             ui.onNodeWithText("Connect an agent").assertDoesNotExist()
             tap("Manage access →")
-            scrollTo("Connect an agent")
+            // Settings opens at its Access heading, not at Appearance.
+            awaitText("Connect an agent")
+            ui.onNodeWithText("Access").assertIsDisplayed()
+            ui.onNodeWithText("Connect an agent").assertIsDisplayed()
             tap("Connect an agent")
             awaitText("ledger connect codex --server https://localhost:8443")
             ui.onNodeWithContentDescription("Back").performClick()

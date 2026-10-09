@@ -34,7 +34,8 @@ private fun ProjectForm(model: LedgerModel, existingSlug: String, p: JSONObject)
     var automate by rememberSaveable { mutableStateOf(p.text("automate")) }
     var stack by rememberSaveable { mutableStateOf(p.text("stack")) }
     Page {
-        item { Text(if (existingSlug.isBlank()) "New project" else "Edit project", style = MaterialTheme.typography.headlineSmall) }
+        // Editing, the top bar already says "<Project> · Edit".
+        if (existingSlug.isBlank()) item { Text("New project", style = MaterialTheme.typography.headlineSmall) }
         item { Field("Project slug", slug, { slug = it }, max = 64, enabled = existingSlug.isBlank(), placeholder = "atlas") }
         item { Field("Name", name, { name = it }, max = 200) }
         item { Choice("Tier", tier, tiers) { tier = it } }
@@ -126,19 +127,11 @@ fun ProjectRepos(model: LedgerModel, slug: String) {
         Page {
             item { Text("Where this project's code lives; link every repository it spans. Agents see them with the project and clone with their own Git access.",
                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            if (repos.isEmpty()) item { Empty("No repositories linked yet.") }
-            items(repos, key = { it.text("id") }) { repo ->
-                val (subtitle, body) = repoSummary(repo)
-                SummaryCard(repo.text("repo"), subtitle, body, actions = {
-                    ConfirmButton("Unlink", "Unlink ${repo.text("repo")}? Agents stop seeing it with this project. The repository itself is not touched.", !model.busy, danger = true) {
-                        model.act("Repository unlinked") { it.request("DELETE", "/repos/${segment(repo.text("id"))}") }
-                    }
-                })
-            }
+            // Above the list, so the button is in sight without scrolling past every repo and the form opens where it was tapped.
             if (!linking) item {
-                // With nothing linked yet, linking is the screen's one job.
+                // With nothing linked yet, linking is the screen's one job; otherwise it is tonal, apart from each card's red Unlink.
                 if (repos.isEmpty()) Button(onClick = { linking = true }, enabled = !model.busy) { Text("Link a repository") }
-                else OutlinedButton(onClick = { linking = true }, enabled = !model.busy) { Text("Link a repository") }
+                else FilledTonalButton(onClick = { linking = true }, enabled = !model.busy) { Text("Link a repository") }
             } else {
                 item { Text("Link a repository", style = MaterialTheme.typography.titleMedium) }
                 item { Field("Repository URL", url, { url = it }, max = 500, placeholder = "https://github.com/owner/repo", keyboard = KeyboardType.Uri) }
@@ -154,6 +147,15 @@ fun ProjectRepos(model: LedgerModel, slug: String) {
                         TextButton(onClick = { linking = false }, enabled = !model.busy) { Text("Cancel") }
                     }
                 }
+            }
+            if (repos.isEmpty()) item { Empty("No repositories linked yet.") }
+            items(repos, key = { it.text("id") }) { repo ->
+                val (subtitle, body) = repoSummary(repo)
+                SummaryCard(repo.text("repo"), subtitle, body, actions = {
+                    ConfirmButton("Unlink", "Unlink ${repo.text("repo")}? Agents stop seeing it with this project. The repository itself is not touched.", !model.busy, danger = true) {
+                        model.act("Repository unlinked") { it.request("DELETE", "/repos/${segment(repo.text("id"))}") }
+                    }
+                })
             }
         }
     }

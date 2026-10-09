@@ -9,6 +9,8 @@ import { useLiveUpdates } from '../live'
 import { applyTheme, readTheme, THEME_ORDER, type ThemeChoice } from '../theme'
 
 const THEME_LABEL: Record<ThemeChoice, string> = { system: 'System', light: 'Light', dark: 'Dark' }
+/** The account menu names the action alone: what choosing the item switches to. */
+const THEME_ACTION: Record<ThemeChoice, string> = { system: 'Match system theme', light: 'Light theme', dark: 'Dark theme' }
 
 const NAV: { to: string; label: string; icon: IconName; match: (path: string) => boolean; mobileHidden?: boolean }[] = [
   { to: '/', label: 'Inbox', icon: 'inbox', match: (path) => path === '/' },
@@ -84,16 +86,19 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
           aria-label={`Theme: ${THEME_LABEL[theme]}. Switch to ${THEME_LABEL[nextTheme]}`} title={`Theme: ${THEME_LABEL[theme]}`}>
           <Icon name={theme} />
         </button>
-        <button type="button" className="search-trigger" onClick={() => navigate('/search')}>
-          <Icon name="search" />
-          <span>Search</span>
-          <kbd>{isMac ? '⌘K' : 'Ctrl K'}</kbd>
-        </button>
+        {/* The Search page has its own field, so the trigger would only repeat it. */}
+        {path !== '/search' && (
+          <button type="button" className="search-trigger" onClick={() => navigate('/search')}>
+            <Icon name="search" />
+            <span>Search</span>
+            <kbd>{isMac ? '⌘K' : 'Ctrl K'}</kbd>
+          </button>
+        )}
         {/* Phones only: the top bar keeps one menu instead of separate Help, theme, and sign-out buttons. */}
         <div className="account-menu">
           <OverflowMenu label="Account menu" items={[
             { label: 'Help', onSelect: () => navigate('/help') },
-            { label: `Theme: ${THEME_LABEL[theme]} (switch to ${THEME_LABEL[nextTheme]})`, onSelect: cycleTheme },
+            { label: THEME_ACTION[nextTheme], onSelect: cycleTheme },
             { label: 'Access', onSelect: () => navigate('/access') },
             { label: signingOut ? 'Signing out…' : 'Sign out', onSelect: () => void handleSignOut(), disabled: signingOut },
           ]} />

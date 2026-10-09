@@ -716,15 +716,8 @@ fun ProjectsHome(model: LedgerModel) = Load(model, "table-projects", { it.reques
                     Text(p.text("name"), Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     HealthTag(p.text("status_state"))
                 }
-                val facts = buildList {
-                    add(label(p.text("tier")))
-                    if (p.optInt("open_todos") > 0) add(plural(p.optInt("open_todos"), "open todo"))
-                    if (p.optInt("needs_you") > 0) add(plural(p.optInt("needs_you"), "needs you", "need you"))
-                    add(if (p.optInt("week_entries") > 0) "${p.optInt("week_entries")} this week" else "quiet")
-                    if (p.text("deadline").isNotBlank()) add("due ${p.text("deadline")}")
-                }
                 // Facts are metadata, not links: the whole row opens the project.
-                Text(facts.joinToString(" · "), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(projectFacts(p), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 val summary = p.text("digest").ifBlank { p.text("status_title").ifBlank { p.text("status_body") } }
                 if (summary.isNotBlank()) Text(summary, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
             }
@@ -732,6 +725,18 @@ fun ProjectsHome(model: LedgerModel) = Load(model, "table-projects", { it.reques
         }
     }
 }
+
+/** A project row's facts. A date deadline reads "due 15 Nov 2026" and wraps as one piece. */
+fun projectFacts(p: JSONObject): String = buildList {
+    add(label(p.text("tier")))
+    if (p.optInt("open_todos") > 0) add(plural(p.optInt("open_todos"), "open todo"))
+    if (p.optInt("needs_you") > 0) add(plural(p.optInt("needs_you"), "needs you", "need you"))
+    add(if (p.optInt("week_entries") > 0) "${p.optInt("week_entries")} this week" else "quiet")
+    val deadline = p.text("deadline")
+    // Free text stays as written; only a date is shortened and held together.
+    val date = runCatching { LocalDate.parse(deadline).format(DateTimeFormatter.ofPattern("d MMM yyyy")).replace(' ', '\u00A0') }.getOrNull()
+    if (deadline.isNotBlank()) add("due\u00A0" + (date ?: deadline))
+}.joinToString(" · ")
 
 private val projectTabs = listOf("todos" to "Todos", "decisions" to "Decisions", "activity" to "Activity")
 
@@ -770,7 +775,9 @@ fun ProjectScreen(model: LedgerModel, slug: String, initialTab: String = "activi
                 }
             }
             PrimaryTabRow(selectedTabIndex = projectTabs.indexOfFirst { it.first == tab }) {
-                projectTabs.forEach { (id, name) -> Tab(selected = tab == id, onClick = { tab = id }, text = { Text(name) }) }
+                projectTabs.forEach { (id, name) -> Tab(selected = tab == id, onClick = { tab = id }, text = { Text(name) },
+                    // Only the selected tab is blue; the rest are muted, like other metadata.
+                    selectedContentColor = MaterialTheme.colorScheme.primary, unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
             PagedEntries(model, pager, query, empty = if (tab == "todos" && todoState == "open") "No open todos. Nice." else "No entries match.", header = {
                 item {

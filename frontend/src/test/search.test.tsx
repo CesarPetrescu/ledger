@@ -90,7 +90,8 @@ describe('search', () => {
       ],
     })
     renderApp('/admin/search?q=nothing')
-    expect(await screen.findByText(/no results for/i)).toBeInTheDocument()
+    // With meaning search offline, the empty result says what was searched.
+    expect(await screen.findByText('No word matches for “nothing”.')).toBeInTheDocument()
     const degraded = screen.getByRole('status', { name: /degraded/i })
     expect(degraded).toHaveTextContent(/word matches only/i)
     expect(degraded).not.toHaveTextContent(/ranking/i)

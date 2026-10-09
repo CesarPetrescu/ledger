@@ -93,13 +93,40 @@ func (s *Searcher) Search(ctx context.Context, query string, limit int) (SearchR
 	return SearchResult{Hits: hits, Degraded: degraded}, nil
 }
 
-// Lexical ranks chunks by Postgres full-text match alone and never calls the
+// Lexical ranks Postgres full-text matches alone and never calls the
 // inference service (the Searcher may have none), so it still answers while
-// ledger-index is unreachable. Chunks of any embedding model match; chunks of
-// deleted entries and projects, which the stopped indexer has not dropped yet,
-// do not. The result reports the vector and rerank stages as degraded.
+// ledger-index is unreachable. It reads the stored chunks of any embedding
+// model, skipping chunks of deleted entries and projects that the stopped
+// indexer has not dropped yet, plus the live text of entries and projects the
+// indexer never chunked (written since it last ran, or on an install where it
+// never ran). The result reports the vector and rerank stages as degraded.
+//
+// ponytail: unchunked rows are tokenized per query with no index; fine while
+// the backlog is small, add a GIN index on entry body if installs run without
+// an indexer for long.
 func (s *Searcher) Lexical(ctx context.Context, query string, limit int) (SearchResult, error) {
-	matches, err := s.textMatches(ctx, `(e.id IS NOT NULL OR EXISTS(SELECT 1 FROM project p WHERE c.ref='project:'||p.slug))`, query)
+	rows, err := s.db.Pool.Query(ctx, `WITH q AS (SELECT websearch_to_tsquery('public.ledger_ts'::regconfig,$1) q),
+live AS (
+ SELECT 'entry:'||e.id ref,e.kind,e.slug,'[project: '||p.name||' ('||e.slug||') | '||e.kind||']'||E'\n'||e.body text
+ FROM entry e JOIN project p ON p.slug=e.slug
+ WHERE NOT EXISTS(SELECT 1 FROM chunk c WHERE c.ref='entry:'||e.id)
+ UNION ALL
+ SELECT 'project:'||p.slug,'project',p.slug,'[project: '||p.name||' ('||p.slug||')]'||E'\n'||concat_ws(E'\n',NULLIF(p.type,''),NULLIF(p.description,''),NULLIF(p.goal,''),NULLIF(p.needs_me,''),NULLIF(p.automate,''),NULLIF(p.stack,''))
+ FROM project p
+ WHERE NOT EXISTS(SELECT 1 FROM chunk c WHERE c.ref='project:'||p.slug)
+)
+SELECT `+rankedColumns+`,ts_rank_cd(c.tsv,q.q) score
+FROM q,chunk c LEFT JOIN entry e ON c.ref='entry:'||e.id::text
+WHERE (e.id IS NOT NULL OR EXISTS(SELECT 1 FROM project p WHERE c.ref='project:'||p.slug)) AND c.tsv @@ q.q
+UNION ALL
+SELECT l.ref,0,l.kind,l.slug,l.text,ts_rank_cd(to_tsvector('public.ledger_ts'::regconfig,l.text),q.q)
+FROM q,live l WHERE to_tsvector('public.ledger_ts'::regconfig,l.text) @@ q.q
+ORDER BY score DESC,1,2 LIMIT 30`, query)
+	if err != nil {
+		return SearchResult{}, err
+	}
+	matches, err := scanRanked(rows)
+	rows.Close()
 	if err != nil {
 		return SearchResult{}, err
 	}
@@ -119,16 +146,12 @@ func (s *Searcher) Lexical(ctx context.Context, query string, limit int) (Search
 	return SearchResult{Hits: hits, Degraded: []string{"vector", "rerank"}}, nil
 }
 
+// fts returns the 30 best full-text matches among chunks of the current model.
 func (s *Searcher) fts(ctx context.Context, query string) ([]Ranked, error) {
-	return s.textMatches(ctx, `c.model=$2`, query, s.infer.embeddingModel)
-}
-
-// textMatches returns the 30 best full-text chunk matches for $1 that also satisfy filter.
-func (s *Searcher) textMatches(ctx context.Context, filter string, args ...any) ([]Ranked, error) {
 	rows, err := s.db.Pool.Query(ctx, `SELECT `+rankedColumns+`,ts_rank_cd(c.tsv,websearch_to_tsquery('public.ledger_ts'::regconfig,$1)) score
 FROM chunk c LEFT JOIN entry e ON c.ref='entry:'||e.id::text
-WHERE `+filter+` AND c.tsv @@ websearch_to_tsquery('public.ledger_ts'::regconfig,$1)
-ORDER BY score DESC,c.ref,c.ord LIMIT 30`, args...)
+WHERE c.model=$2 AND c.tsv @@ websearch_to_tsquery('public.ledger_ts'::regconfig,$1)
+ORDER BY score DESC,c.ref,c.ord LIMIT 30`, query, s.infer.embeddingModel)
 	if err != nil {
 		return nil, err
 	}

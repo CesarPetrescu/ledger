@@ -124,6 +124,7 @@ class TableTest {
         assertEquals("Connect an agent", screenTitle("connect"))
         assertEquals("Calendars", screenTitle("calendar-settings"))
         assertEquals("Settings", screenTitle("settings"))
+        assertEquals("Settings", screenTitle("settings/access"))
     }
 
     private fun actions(json: String) = entryActions(JSONObject(json))
@@ -190,6 +191,16 @@ class TableTest {
         assertEquals(listOf("Blocked"), focusLabels(focus("status", JSONObject().put("title", "t").put("state", "blocked")), today, now).map { it.first })
         assertEquals(Tone.Danger, focusLabels(focus("status", JSONObject().put("state", "blocked")), today, now).single().second)
         assertEquals(emptyList<Pair<String, Tone>>(), focusLabels(JSONObject().put("kind", "note"), today, now))
+    }
+
+    @Test fun aProjectDeadlineIsAShortDateThatWrapsWithDue() {
+        val p = JSONObject().put("tier", "focus").put("open_todos", 4).put("needs_you", 1).put("week_entries", 0).put("deadline", "2026-11-15")
+        val date = LocalDate.parse("2026-11-15").format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy")).replace(' ', '\u00A0')
+        assertEquals("Focus · 4 open todos · 1 needs you · quiet · due\u00A0$date", projectFacts(p))
+        assertEquals(false, projectFacts(p).substringAfter("due").contains(' '))
+        // A free-text deadline stays as written; no deadline, no "due".
+        assertEquals("Park · 2 this week · due\u00A0after the beta", projectFacts(JSONObject().put("tier", "park").put("week_entries", 2).put("deadline", "after the beta")))
+        assertEquals("Maintain · quiet", projectFacts(JSONObject().put("tier", "maintain")))
     }
 
     @Test fun summariesAndAgesAreShort() {

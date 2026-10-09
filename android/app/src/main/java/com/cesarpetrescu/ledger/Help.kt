@@ -134,7 +134,7 @@ fun AgentsScreen(model: LedgerModel) = Load(model, "agents", { it.request("GET",
         item {
             Column {
                 Text("What each agent did lately and what it is waiting on you for.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                TextButton(onClick = { model.go("settings") }, enabled = !model.busy, contentPadding = PaddingValues(vertical = 8.dp)) { Text("Manage access →") }
+                TextButton(onClick = { model.go("settings/access") }, enabled = !model.busy, contentPadding = PaddingValues(vertical = 8.dp)) { Text("Manage access →") }
             }
         }
         if (agents.isEmpty()) item {

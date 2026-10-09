@@ -201,3 +201,56 @@ func TestClientFallsBackToWordMatchesWhenTheIndexServiceFails(t *testing.T) {
 		t.Fatal("a client without a database has no fallback and must report the outage")
 	}
 }
+
+// Entries and projects written while the indexer was down (or on an install
+// where it never ran) have no chunks yet; the fallback matches their live text.
+func TestLexicalSearchMatchesRowsTheIndexerNeverChunked(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	for _, project := range []store.Project{
+		{Slug: "atlas", Name: "Atlas", Tier: "focus", Goal: "Ship the reranker"},
+		{Slug: "beacon", Name: "Beacon", Tier: "park"},
+	} {
+		if _, err := db.UpsertProject(ctx, project); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fresh, err := db.AppendEntry(ctx, "beacon", "note", "Measured it.\nSwapped the reranker for a smaller one.", "agent", "client-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexed, err := db.AppendEntry(ctx, "beacon", "decision", "Keep the reranker.", "agent", "client-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.AppendEntry(ctx, "beacon", "note", "Unrelated words.", "agent", "client-1"); err != nil {
+		t.Fatal(err)
+	}
+	indexedRef := "entry:" + strconv.FormatInt(indexed.ID, 10)
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO chunk(ref,ord,text,text_hash,model) VALUES($1,0,'[beacon | decision]'||chr(10)||'Keep the reranker.',decode(repeat('ab',32),'hex'),'qwen3-embedding')`, indexedRef); err != nil {
+		t.Fatal(err)
+	}
+	result, err := NewSearcher(db, nil).Lexical(ctx, "reranker", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hits := map[string]Ranked{}
+	for _, hit := range result.Hits {
+		if _, dup := hits[hit.Ref]; dup {
+			t.Fatalf("%s listed twice: %#v", hit.Ref, result.Hits)
+		}
+		hits[hit.Ref] = hit
+	}
+	freshRef := "entry:" + strconv.FormatInt(fresh.ID, 10)
+	if len(hits) != 3 || hits[indexedRef].Kind != "decision" {
+		t.Fatalf("hits = %#v", result.Hits)
+	}
+	if hit := hits[freshRef]; hit.Kind != "note" || hit.ProjectSlug != "beacon" || hit.Snippet != "Measured it.\nSwapped the reranker for a smaller one." {
+		t.Fatalf("unchunked entry = %#v", hit)
+	}
+	if hit := hits["project:atlas"]; hit.Kind != "project" || hit.ProjectSlug != "atlas" || hit.Snippet != "Ship the reranker" {
+		t.Fatalf("unchunked project = %#v", hit)
+	}
+	if strings.Join(result.Degraded, ",") != "vector,rerank" {
+		t.Fatalf("degraded = %v", result.Degraded)
+	}
+}

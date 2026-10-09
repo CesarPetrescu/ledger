@@ -10,6 +10,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -37,10 +38,12 @@ fun openBrowser(context: Context, address: String, model: LedgerModel): Boolean 
     }
 }
 
+/** Settings; [atAccess] (from Agents › Manage access) opens it at the Access heading instead of the top. */
 @Composable
-fun Settings(model: LedgerModel) {
+fun Settings(model: LedgerModel, atAccess: Boolean = false) {
     val context = LocalContext.current
-    Page {
+    // The Access heading is the fourth item: after the version card, Appearance, and Notifications.
+    Page(rememberLazyListState(initialFirstVisibleItemIndex = if (atAccess) 3 else 0)) {
         item { SummaryCard("Ledger ${BuildConfig.VERSION_NAME}", "Owner console", model.api?.origin ?: "") }
         item { ThemeChoice(model) }
         item { NotificationsChoice(model) }
@@ -60,7 +63,7 @@ fun Settings(model: LedgerModel) {
         item { Text("This phone", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }
         item { OutlinedButton(onClick = { openBrowser(context, "https://github.com/CesarPetrescu/ledger/releases/latest", model) }) { Text("Check for updates") } }
         item { ConfirmButton("Sign out", "Sign out and revoke this phone's owner session?", !model.busy, action = model::logout) }
-        item { ConfirmButton("Forget this phone", "Remove the saved session from this phone without contacting the server. Use this if the server is unreachable. The server session remains valid until it expires.", !model.busy, action = model::forget) }
+        item { ConfirmButton("Forget this phone", "Remove the saved session from this phone without contacting the server. Use this if the server is unreachable. The server session remains valid until it expires.", !model.busy, danger = true, action = model::forget) }
     }
 }
 

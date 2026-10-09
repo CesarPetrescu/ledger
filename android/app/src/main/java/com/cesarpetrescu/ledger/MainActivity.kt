@@ -11,6 +11,8 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
@@ -150,7 +152,7 @@ fun LedgerApp(model: LedgerModel = viewModel(), opened: MutableState<Pair<String
                 if (model.stack.size > 1) IconButton(onClick = model::back, enabled = !model.busy) { Glyph("back", "Back") }
             }, actions = {
                 IconButton(onClick = { model.go("search") }, enabled = !model.busy && route != "search") { Glyph("search", "Search") }
-                IconButton(onClick = { model.go("settings") }, enabled = !model.busy && route != "settings") { Glyph("settings", "Settings") }
+                IconButton(onClick = { model.go("settings") }, enabled = !model.busy && route.substringBefore('/') != "settings") { Glyph("settings", "Settings") }
             })
         },
         bottomBar = {
@@ -207,6 +209,7 @@ fun LedgerApp(model: LedgerModel = viewModel(), opened: MutableState<Pair<String
                             "connect" -> ConnectScreen(model)
                             "api-keys" -> ApiKeys(model)
                             "device" -> Device(model)
+                            "settings" -> Settings(model, atAccess = route == "settings/access")
                             else -> Settings(model)
                         }
                     }
@@ -270,8 +273,8 @@ fun screenTitle(route: String, projectNames: Map<String, String> = emptyMap()): 
 }
 
 @Composable
-fun Page(content: LazyListScope.() -> Unit) {
-    LazyColumn(Modifier.fillMaxSize().testTag("page"), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp), content = content)
+fun Page(state: LazyListState = rememberLazyListState(), content: LazyListScope.() -> Unit) {
+    LazyColumn(Modifier.fillMaxSize().testTag("page"), state = state, contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp), content = content)
 }
 
 /** Fetches [key] and shows [content], filling the page, where a pull reloads it; inside a dialog, [wrap] sizes it to its content instead. */
@@ -357,7 +360,9 @@ fun Empty(text: String) { Text(text, Modifier.padding(vertical = 24.dp), color =
 @Composable
 fun ConfirmButton(label: String, explanation: String, enabled: Boolean = true, danger: Boolean = false, action: () -> Unit) {
     var confirm by remember { mutableStateOf(false) }
-    OutlinedButton(onClick = { confirm = true }, enabled = enabled) { Text(label) }
+    // A dangerous action reads as one before it is tapped, not only in its dialog.
+    OutlinedButton(onClick = { confirm = true }, enabled = enabled,
+        colors = if (danger) ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error) else ButtonDefaults.outlinedButtonColors()) { Text(label) }
     if (confirm) ConfirmDialog(label, explanation, { confirm = false }, danger, action)
 }
 

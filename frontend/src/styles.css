@@ -769,6 +769,8 @@ label > textarea {
 }
 .account-menu { display: none; }
 .account-menu .overflow-menu-list button { white-space: nowrap; }
+/* Sign out ends the menu, set apart from the places it opens. */
+.account-menu .overflow-menu-list button:last-child { margin-top: 4px; border-top: 1px solid var(--border); border-radius: 0 0 4px 4px; }
 
 .content {
   grid-area: main;
@@ -903,6 +905,8 @@ label > textarea {
 @media (min-width: 861px) {
   .projects[data-mode='list'] .filters { flex-direction: row; flex-wrap: wrap; align-items: center; }
   .projects[data-mode='list'] .filters input[type='search'] { flex: 1 1 16rem; max-width: 26rem; }
+  /* A basis of its own, so the tier segments spread out instead of shrinking to one run of text. */
+  .projects[data-mode='list'] .segmented { flex: 0 1 26rem; min-width: 0; }
 }
 /* Too narrow for columns: the facts follow the week on one wrapping line. */
 @media (max-width: 1100px) {
@@ -1084,6 +1088,7 @@ label > textarea {
 .connect-guide dt { font-size: 0.9rem; font-weight: 650; }
 .connect-guide dd { margin: 2px 0 0; color: var(--text-body); font-size: 0.9rem; }
 .connected-apps { display: grid; gap: 12px; margin: 0 0 32px; }
+.password-form { display: grid; gap: 14px; max-width: 30rem; }
 @media (max-width: 620px) {
   .label-legend div,
   .help-list div { grid-template-columns: 1fr; gap: 2px; }
@@ -1314,6 +1319,10 @@ label > textarea {
   .counts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; }
   .counts li { justify-content: space-between; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
   .section-head { align-items: flex-start; }
+  /* A project tab's heading (Repositories, Handoffs) centres on its one button. */
+  .project-related > .section-head { align-items: center; }
+  /* Below the description instead of beside the eyebrow. */
+  .page-head-link { order: 1; }
 
   .table thead { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
   .table,
@@ -1340,6 +1349,10 @@ label > textarea {
   .entry-row-actions { justify-content: flex-start; max-width: none; }
   .facts div { grid-template-columns: 1fr; gap: 2px; }
   .view-tabs a { padding: 10px 9px; }
+  /* Wrapped onto two rows, the Table tabs fill each row and carry their own baseline, so the selected one never floats above the border. */
+  nav.view-tabs { gap: 0; border-bottom: 0; }
+  nav.view-tabs a { flex: 1 1 auto; box-shadow: 0 1px 0 var(--border); text-align: center; }
+  nav.view-tabs a[data-history] { margin-left: 0; }
   .todo-done { align-items: flex-start; flex-direction: row; gap: 10px; }
 
   .meta-grid,
