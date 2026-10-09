@@ -277,6 +277,50 @@ describe('project browser', () => {
     expect(screen.queryByText('checks.txt', { selector: '.timeline *' })).not.toBeInTheDocument()
   })
 
+  it('keeps Delete project behind the ⋯ menu next to Edit, with the typed-slug confirmation', async () => {
+    mockApi({
+      ...projectBase,
+      'GET /admin/api/projects': { body: { projects: [atlas] } },
+      'GET /admin/api/projects/atlas': { body: atlasDetail },
+      'GET /admin/api/projects/atlas/deletion': { body: { name: 'Atlas', entries: 3, handoffs: 0, files: 0 } },
+    })
+    renderApp('/admin/projects/atlas/details')
+    await screen.findByRole('heading', { name: 'Atlas', level: 1 })
+    const actions = screen.getByRole('button', { name: /edit project/i }).parentElement!
+    expect(within(actions).queryByRole('button', { name: /delete project/i })).not.toBeInTheDocument()
+    const user = userEvent.setup()
+    await user.click(within(actions).getByRole('button', { name: 'More actions for Atlas' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Delete project' }))
+    const dialog = screen.getByRole('dialog', { name: 'Delete Atlas?' })
+    expect(await within(dialog).findByText(/its 3 entries to Trash/)).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Delete project' })).toBeDisabled()
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('marks research handoffs in the project tab with a Research marker and their state', async () => {
+    const general = {
+      id: '7', project_slug: 'atlas', project_name: 'Atlas', title: 'Continue Atlas', description: 'Release context', scope: 'Release', source: 'Codex',
+      created_at: '2026-09-04T08:00:00Z', updated_at: '2026-09-04T09:00:00Z', draft_count: 0, ready_count: 1, in_progress_count: 0, blocked_count: 0, done_count: 0,
+    }
+    const research = { ...general, id: '9', kind: 'research' as const, research_status: 'review' as const, title: 'Vector DB survey', description: '', ready_count: 0, done_count: 0 }
+    mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/projects': { body: { projects: [atlas] } },
+      'GET /admin/api/projects/atlas': { body: atlasDetail },
+      'GET /admin/api/handoffs': { body: { handoffs: [research, general] } },
+    })
+    renderApp('/admin/projects/atlas/handoffs')
+    const linked = await screen.findByRole('region', { name: /project handoffs/i })
+    const task = within(linked).getByRole('link', { name: /vector db survey/i })
+    expect(within(task).getByText('Research')).toHaveClass('research-badge')
+    expect(within(task).getByText('Ready for review')).toHaveAttribute('data-research', 'review')
+    expect(task.querySelectorAll('span:empty')).toHaveLength(0)
+    const plain = within(linked).getByRole('link', { name: /continue atlas/i })
+    expect(within(plain).queryByText('Research')).not.toBeInTheDocument()
+    expect(plain.querySelector('[data-research]')).toBeNull()
+  })
+
   it('loads every page of project handoffs', async () => {
     const handoff = {
       id: '7', project_slug: 'atlas', project_name: 'Atlas', title: 'Continue Atlas', description: 'Release context', scope: 'Release', source: 'Codex',
