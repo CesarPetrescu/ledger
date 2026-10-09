@@ -698,12 +698,13 @@ label > textarea {
   display: flex;
   align-items: center;
   gap: 16px;
+  min-width: 0;
   padding: 0 34px;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
 }
 
-.topbar-title { flex: 1; color: var(--text-muted); font-weight: 600; }
+.topbar-title { flex: 1; min-width: 0; overflow: hidden; color: var(--text-muted); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 
 .search-trigger {
   justify-content: flex-start;
@@ -766,8 +767,8 @@ label > textarea {
   padding: 15px 9px 0;
   border-top: 1px solid var(--border);
 }
-.sidebar-live { min-height: 28px; }
-.mobile-signout { display: none; }
+.account-menu { display: none; }
+.account-menu .overflow-menu-list button { white-space: nowrap; }
 
 .content {
   grid-area: main;
@@ -1270,14 +1271,16 @@ label > textarea {
   .search-trigger { min-width: var(--control); width: var(--control); padding: 0; }
   .search-trigger span,
   .search-trigger kbd { display: none; }
-  .mobile-signout { display: inline-flex; }
+  .help-link, .theme-toggle { display: none; }
+  .account-menu { display: inline-flex; }
   .calendar-agenda section { grid-template-columns: 116px minmax(0, 1fr); }
 }
 
 @media (max-width: 620px) {
   :root { --control: 46px; }
   h1 { font-size: 1.85rem; }
-  .topbar .live-status span { display: none; }
+  /* The live dot stays; its word is kept for screen readers only. */
+  .topbar .live-status span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
   .page-head { align-items: flex-start; margin-bottom: 25px; }
   .page-head .btn { width: 100%; }
   .counts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; }
@@ -1572,7 +1575,7 @@ label > textarea {
   .shell { grid-template-columns: 72px minmax(0, 1fr); }
   .sidebar { padding: 18px 10px; gap: 26px; align-items: center; }
   .sidebar .brand { padding: 0; }
-  .sidebar .nav-label, .sidebar-foot .muted, .sidebar-live span { display: none; }
+  .sidebar .nav-label, .sidebar-foot .muted { display: none; }
   .primary-nav a { justify-content: center; width: 48px; height: 44px; padding: 0; }
   .sidebar-foot { align-items: center; }
   .sidebar-foot .btn { width: 48px; padding: 0; justify-content: center; }
@@ -1595,7 +1598,6 @@ label > textarea {
 /* Folded phones' cover screens (about 340px): the top bar's buttons share the width. */
 @media (max-width: 380px) {
   .topbar { gap: 6px; padding: 0 10px; }
-  .topbar-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .topbar .icon-button, .search-trigger { width: 40px; min-width: 40px; height: 40px; }
   .content { padding-inline: 14px; }
   .calendar-toolbar, .calendar-manage { margin-inline: -14px; padding-inline: 14px; }

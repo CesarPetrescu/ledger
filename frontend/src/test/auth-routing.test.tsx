@@ -12,10 +12,10 @@ describe('authenticated shell and routing', () => {
       'POST /admin/api/logout': { status: 204 },
       ...homeRoutes,
     })
-    renderApp('/admin/clients')
+    renderApp('/admin/agents')
     expect(await screen.findByRole('heading', { name: /^agents$/i })).toBeInTheDocument()
     const nav = screen.getByRole('navigation', { name: /primary/i })
-    for (const label of ['Inbox', 'Projects', 'Table', 'Search', 'Calendar', 'Agents']) {
+    for (const label of ['Inbox', 'Projects', 'Table', 'Search', 'Calendar', 'Agents', 'Access']) {
       expect(within(nav).getByRole('link', { name: label })).toBeInTheDocument()
     }
     expect(within(nav).getByRole('link', { name: 'Agents' })).toHaveAttribute('aria-current', 'page')
