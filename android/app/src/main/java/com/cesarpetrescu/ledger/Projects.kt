@@ -128,7 +128,7 @@ fun ProjectRepos(model: LedgerModel, slug: String) {
                 val (subtitle, body) = repoSummary(repo)
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     SummaryCard(repo.text("repo"), subtitle, body)
-                    ConfirmButton("Unlink", "Unlink ${repo.text("repo")}? Agents stop seeing it with this project. The repository itself is not touched.", !model.busy) {
+                    ConfirmButton("Unlink", "Unlink ${repo.text("repo")}? Agents stop seeing it with this project. The repository itself is not touched.", !model.busy, danger = true) {
                         model.act("Repository unlinked") { it.request("DELETE", "/repos/${segment(repo.text("id"))}") }
                     }
                 }

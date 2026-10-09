@@ -43,7 +43,8 @@ class ContractTest {
         assertEquals(emptyList<Pair<String, String>>(), researchActions("ready", "", brief = true))
         assertEquals(emptyList<Pair<String, String>>(), researchActions("done", "", brief = false))
         assertEquals(listOf("publish" to "Publish"), researchActions("draft", "", brief = false))
-        assertEquals("Stopped", researchHeadline("blocked", "dead", 3, 3, 3, "", "exit 137").first)
+        assertEquals("3 of 3 failed runs. Last error: exit 137. Retry gives it a fresh set of attempts.", researchHint("blocked", "dead", 3, 3, 3, "", "exit 137"))
+        assertEquals("Run 2 · A sandbox is working on it.", researchHint("in_progress", "", 2, 0, 3, "", ""))
         assertEquals(listOf("complete", "release"), messageActions("blocked", "seen"))
         assertEquals(listOf("reopen"), messageActions("done", "seen"))
     }
@@ -62,6 +63,17 @@ class ContractTest {
         val general = org.json.JSONObject("""{"kind":"general","draft_count":0,"ready_count":2,"in_progress_count":1,"blocked_count":0,"done_count":0}""")
         assertEquals("2 ready · 1 in progress", handoffProgress(general))
         assertEquals(emptyList<Pair<String, Tone>>(), researchTags(general))
+    }
+
+    @Test fun researchThreadHeaderShowsTheListsStateLabel() {
+        // The detail has the brief's work state and phase, not research_status; the mapping matches the server's.
+        val states = listOf("draft" to "", "ready" to "", "in_progress" to "", "done" to "", "blocked" to "review", "blocked" to "question", "blocked" to "dead")
+        assertEquals(listOf("draft", "queued", "running", "accepted", "review", "question", "stopped"), states.map { (work, phase) -> researchStatus(work, phase) })
+        assertEquals("Ready for review" to Tone.Warn, researchStatusTag(researchStatus("blocked", "review")))
+        assertEquals("Running" to Tone.Accent, researchStatusTag("running"))
+        assertEquals("Accepted" to Tone.Good, researchStatusTag("accepted"))
+        assertEquals("Stopped" to Tone.Neutral, researchStatusTag("stopped"))
+        assertNull(researchStatusTag(""))
     }
 
     @Test fun replyStepsBackWhileAcceptOrQueueLeads() {

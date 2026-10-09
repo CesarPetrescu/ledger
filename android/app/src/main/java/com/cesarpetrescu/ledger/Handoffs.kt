@@ -74,11 +74,13 @@ fun HandoffDetail(model: LedgerModel, id: String) {
         Page {
             item { MarkdownCard(h.text("title"), h.text("project_name").ifBlank { "General" }, listOf(h.text("description"), h.text("scope")).filter { it.isNotBlank() }.joinToString("\n\n"), markdown.value) }
             if (research != null) item {
-                val (title, hint) = researchHeadline(research.text("state"), research.text("phase"), research.optInt("attempt"), research.optInt("failures"), research.optInt("max_attempts"), research.text("progress"), research.text("last_error"))
-                MarkdownCard("Research task", title, hint, false)
+                val (state, phase) = research.text("state") to research.text("phase")
+                // The state is the same coloured label as on the Handoffs list.
+                SummaryCard("Research task", body = researchHint(state, phase, research.optInt("attempt"), research.optInt("failures"), research.optInt("max_attempts"), research.text("progress"), research.text("last_error")),
+                    tags = listOfNotNull(researchStatusTag(researchStatus(state, phase))))
                 // The task's buttons live here: the brief is the oldest message and a long thread pages it out.
                 Row(Modifier.padding(top = 12.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    researchActions(research.text("state"), research.text("phase"), true).forEach { (action, name) ->
+                    researchActions(state, phase, true).forEach { (action, name) ->
                         val run: () -> Unit = { model.act("$name applied") { it.request("POST", "/handoff-messages/${segment(research.text("message_id"))}/actions", json("action" to action)) } }
                         // Accept and Queue lead; Send back and the other moves are secondary.
                         if (isResearchPrimary(action)) Button(onClick = run, enabled = !model.busy) { Text(name) }
@@ -251,7 +253,7 @@ fun FileRow(model: LedgerModel, file: JSONObject, removable: Boolean = false) {
         Text("${(file.optLong("size_bytes") + 1023) / 1024} KiB", style = MaterialTheme.typography.bodySmall)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             DownloadButton(model, "/handoff-files/${segment(file.text("id"))}", file.text("filename"), mime = file.text("media_type").ifBlank { "application/octet-stream" })
-            if (removable) ConfirmButton("Remove", "Remove this attachment from the draft?", !model.busy) {
+            if (removable) ConfirmButton("Remove", "Remove this attachment from the draft?", !model.busy, danger = true) {
                 model.act("Attachment removed") { it.request("DELETE", "/handoff-files/${segment(file.text("id"))}") }
             }
         }

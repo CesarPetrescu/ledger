@@ -41,7 +41,7 @@ fun TrashScreen(model: LedgerModel) = Load(model, "trash", { it.request("GET", "
                 SummaryCard(item.text("label"), what, "Deleted ${ago(item.text("deleted_at"))} · removed for good in ${plural(days.toInt(), "day")}")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { model.act("Restored") { it.request("POST", "/trash/${segment(id)}/restore") } }, enabled = !model.busy) { Text("Restore") }
-                    ConfirmButton("Delete forever", "Remove \"${item.text("label")}\" permanently? This cannot be undone.", !model.busy) {
+                    ConfirmButton("Delete forever", "Remove \"${item.text("label")}\" permanently? This cannot be undone.", !model.busy, danger = true) {
                         model.act("Deleted forever") { it.request("DELETE", "/trash/${segment(id)}") }
                     }
                 }
@@ -55,7 +55,8 @@ fun TrashScreen(model: LedgerModel) = Load(model, "trash", { it.request("GET", "
 fun DeleteProjectDialog(model: LedgerModel, slug: String, close: () -> Unit) {
     var typed by remember { mutableStateOf("") }
     AlertDialog(onDismissRequest = close, title = { Text("Delete project?") }, text = {
-        Load(model, "deletion:$slug", { it.request("GET", "/projects/${segment(slug)}/deletion") }) { p ->
+        // Filling the page, Load stretched the dialog to the screen's height.
+        Load(model, "deletion:$slug", { it.request("GET", "/projects/${segment(slug)}/deletion") }, wrap = true) { p ->
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("${p.text("name")} and its ${plural(p.optInt("entries"), "entry", "entries")} move to Trash. You can undo this or restore it for 30 days." +
                     (if (p.optInt("handoffs") > 0) " ${plural(p.optInt("handoffs"), "handoff stays", "handoffs stay")}, without the project link until restored." else ""))
