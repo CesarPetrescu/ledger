@@ -1691,6 +1691,18 @@ label > textarea {
 .research-error { overflow-wrap: anywhere; color: var(--danger); }
 .research-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .research-badge { margin-right: 6px; vertical-align: 1px; }
+.badge[data-research='draft'], .badge[data-research='stopped'] { background: var(--surface-soft); color: var(--text-muted); }
+.badge[data-research='queued'], .badge[data-research='running'] { background: var(--tone-blue-bg); color: var(--tone-blue); }
+.badge[data-research='review'], .badge[data-research='question'] { background: var(--tone-amber-bg); color: var(--tone-amber); }
+.badge[data-research='accepted'] { background: var(--tone-green-bg); color: var(--tone-green); }
+
+/* Secondary actions behind a "⋯" button. */
+.overflow-menu { position: relative; display: inline-flex; }
+.overflow-menu-list { position: absolute; top: calc(100% + 4px); right: 0; z-index: 30; display: grid; min-width: 180px; padding: 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16); }
+.overflow-menu-list button { min-height: 40px; padding: 8px 12px; border: 0; border-radius: 4px; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.overflow-menu-list button:hover, .overflow-menu-list button:focus-visible { background: var(--surface-soft); }
+.overflow-menu-list button:disabled { color: var(--text-faint); cursor: default; }
+.overflow-menu-list .overflow-menu-danger { color: var(--danger); }
 .research-share { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 16px; }
 .research-share > span { display: flex; flex-direction: column; gap: 2px; }
 
