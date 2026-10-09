@@ -7,6 +7,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -30,6 +31,7 @@ import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -225,7 +227,14 @@ fun Login(model: LedgerModel) {
     // The owner password is deliberately excluded from saved state and persistent storage.
     var password by remember { mutableStateOf("") }
     Page {
-        item { Spacer(Modifier.height(44.dp)); Text("L /", style = MaterialTheme.typography.displayLarge, color = MaterialTheme.colorScheme.primary) }
+        item {
+            Spacer(Modifier.height(44.dp))
+            // The same mark and wordmark as the web console's sign-in.
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Image(painterResource(R.drawable.ledger_mark), contentDescription = null, modifier = Modifier.size(40.dp).testTag("ledger-logo"))
+                Text("Ledger", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            }
+        }
         item { Text("Your work,\nwithin reach.", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold) }
         item { Text("Sign in to your Ledger owner console.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         item { Field("Server address", origin, { origin = it }, placeholder = "https://ledger.example.com", keyboard = KeyboardType.Uri) }

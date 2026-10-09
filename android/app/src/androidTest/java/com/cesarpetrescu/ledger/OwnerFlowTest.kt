@@ -115,6 +115,9 @@ class OwnerFlowTest {
     @Test fun nativeSignInRejectsCleartext() {
         ActivityScenario.launch(MainActivity::class.java).use {
             awaitText("Server address")
+            // The login shows Ledger's mark and wordmark, as the web does.
+            ui.onNodeWithTag("ledger-logo").assertIsDisplayed()
+            ui.onNodeWithText("Ledger").assertIsDisplayed()
             fillField("Server address", "http://example.com")
             scrollTo("Owner password")
             fillField("Owner password", "fixture-password")
