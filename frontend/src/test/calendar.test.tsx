@@ -248,6 +248,25 @@ describe('calendar view by screen size', () => {
     expect(Object.fromEntries(overdue.url.searchParams)).toMatchObject({ kind: 'todo', status: 'open', due_before: day(0) })
   })
 
+  it('says so when the overdue todos fail to load, with a retry, instead of showing none', async () => {
+    screenWidth(true)
+    let fail = true
+    const { calls } = mockApi({
+      ...ledgerOnly,
+      'GET /admin/api/entries': (_init, url) => url.searchParams.get('due_before') && !url.searchParams.get('due_from') && fail
+        ? { status: 500, body: { error: 'database down' } }
+        : { body: { entries: [], sources: [], tags: [] } },
+    })
+    renderApp('/admin/calendar')
+    const alert = await screen.findByText("Couldn't load overdue todos.")
+    expect(screen.queryByRole('heading', { name: 'Overdue' })).not.toBeInTheDocument()
+    fail = false
+    const before = calls.length
+    await userEvent.setup().click(within(alert.closest('[role="alert"]') ?? alert.parentElement!).getByRole('button', { name: /retry/i }))
+    await waitFor(() => expect(screen.queryByText("Couldn't load overdue todos.")).not.toBeInTheDocument())
+    expect(calls.length).toBeGreaterThan(before)
+  })
+
   it('remembers a view the owner picked, even on a phone', async () => {
     screenWidth(true)
     mockApi(ledgerOnly)

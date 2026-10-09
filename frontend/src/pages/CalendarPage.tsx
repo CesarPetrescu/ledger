@@ -462,7 +462,10 @@ function CalendarWorkspace({ connection, onDisconnected }: { connection: Calenda
       {events.stale && <StaleNotice message="Showing the last loaded calendar; refresh failed." onRetry={events.reload} />}
       {hasCalendars && !events.loading && !events.data && <ErrorState message="Couldn't load calendar events." onRetry={events.reload} />}
       {!ledger.loading && !ledger.data && <ErrorState message="Couldn't load todos, deadlines, and snoozed items." onRetry={ledger.reload} />}
-      {(events.loading || ledger.loading) && !events.data && !ledger.data ? <Loading label="Loading calendar…" />
+      {/* A failed overdue lookup must not read as "nothing overdue". */}
+      {showOverdue && overdueTodos.stale && <StaleNotice message="Showing the last loaded overdue todos; refresh failed." onRetry={overdueTodos.reload} />}
+      {showOverdue && !overdueTodos.loading && !overdueTodos.data && <ErrorState message="Couldn't load overdue todos." onRetry={overdueTodos.reload} />}
+      {((events.loading || ledger.loading) && !events.data && !ledger.data) || (showOverdue && overdueTodos.loading && !overdueTodos.data) ? <Loading label="Loading calendar…" />
         : mode === 'month' ? <MonthGrid anchor={anchor} items={items} today={today()} onDay={(day) => { setAnchor(day); setMode('agenda') }} />
         : mode === 'week' ? <WeekColumns anchor={anchor} items={items} today={today()} />
         : <Agenda items={items} overdue={(overdueTodos.data ?? []).map(todoItem)} today={today()} />}
