@@ -5,9 +5,11 @@ import { useUndo } from '../hooks/useUndo'
 import { refreshAll } from '../live'
 import { ConfirmDialog } from './ConfirmDialog'
 import { useEntrySelection, writerName } from './EntryPanel'
+import { plainText } from './Markdown'
+import { OverflowMenu } from './OverflowMenu'
 import { Link } from '../router'
 import { useToast } from './Toast'
-import { EmptyState, ErrorState, formatRelative, Icon, KindBadge, Loading, StaleNotice, TierBadge, Timestamp } from './ui'
+import { EmptyState, ErrorState, Icon, KindBadge, Loading, StaleNotice, TierBadge, Timestamp } from './ui'
 
 // Entry lists shared by the Inbox, the Table, project pages, and entry pages.
 
@@ -31,10 +33,10 @@ function dayLabel(iso: string, now = new Date()): string {
   return dayFormat.format(date)
 }
 
-/** The extracted title, or the entry's first line until extraction catches up. */
+/** The extracted title, or the entry's first line until extraction catches up; plain text either way. */
 export function titleOf(entry: TableEntry): string {
-  if (entry.meta?.title) return entry.meta.title
-  const line = entry.body.trim().split('\n')[0] ?? ''
+  if (entry.meta?.title) return plainText(entry.meta.title)
+  const line = plainText(entry.body.trim().split('\n')[0] ?? '')
   return line.length > 110 ? `${line.slice(0, 109)}…` : line
 }
 
@@ -197,33 +199,19 @@ export function TodoState({ entry, onChanged }: { entry: TableEntry; onChanged: 
   )
 }
 
-/**
- * Why an entry needs the owner, in plain words, built from the labels it
- * already has; empty when nothing is waiting on them.
- */
-export function whyHere(entry: TableEntry, now = Date.now()): string {
-  const meta = entry.meta
-  if (meta?.ask && !entry.owner.handled && entry.source !== OWNER_SOURCE) return `${entry.source} asked ${formatRelative(entry.created_at, now)} and is waiting on your answer.`
-  if (entry.kind !== 'todo' || entry.resolved_by) return ''
-  if (meta?.due) {
-    const due = shortDate.format(new Date(`${meta.due}T12:00:00`))
-    return meta.due < localDay(new Date(now)) ? `It was due ${due} and is still open.` : `It's due ${due}.`
-  }
-  if (meta?.priority === 'high') return 'The AI rated it high priority.'
-  if (isStale(entry, now)) return `It has been open for ${Math.floor((now - Date.parse(entry.created_at)) / 86400000)} days.`
-  return `An open todo from ${entry.source}, added ${formatRelative(entry.created_at, now)}.`
-}
-
 /** Short facts shown beside the title so the row never needs the full text. */
 export function FocusBadges({ entry }: { entry: TableEntry }) {
   const meta = entry.meta
   const today = localDay()
+  const priority = entry.kind === 'todo' ? meta?.priority : undefined
   return (
     <span className="focus-badges">
       {meta?.ask && !entry.owner.handled && entry.source !== OWNER_SOURCE && <span className="badge" data-focus="ask">Asks you</span>}
-      {meta?.importance === 'important' && <span className="badge" data-focus="important">Important</span>}
+      {/* One emphasis at most: a high priority outranks importance, which outranks a low priority. */}
+      {priority === 'high' ? <span className="badge" data-priority="high">High</span>
+        : meta?.importance === 'important' ? <span className="badge" data-focus="important">Important</span>
+        : priority === 'low' ? <span className="badge" data-priority="low">Low</span> : null}
       {meta?.state && <span className="badge" data-state={meta.state}>{STATE_LABEL[meta.state]}</span>}
-      {entry.kind === 'todo' && meta?.priority && meta.priority !== 'normal' && <span className="badge" data-priority={meta.priority}>{meta.priority}</span>}
       {meta?.size && <span className="badge" data-focus="size" title="Estimated size">{meta.size}</span>}
       {meta?.due && !entry.resolved_by && (
         <span className="badge" data-focus={meta.due < today ? 'overdue' : 'due'}>
@@ -236,7 +224,7 @@ export function FocusBadges({ entry }: { entry: TableEntry }) {
   )
 }
 
-/** Deletes an entry after confirmation; it goes to Trash and can be undone. */
+/** The entry's ⋯ menu: Delete, after confirmation; it goes to Trash and can be undone. */
 export function DeleteEntry({ entry, onChanged }: { entry: TableEntry; onChanged: () => void }) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -257,7 +245,7 @@ export function DeleteEntry({ entry, onChanged }: { entry: TableEntry; onChanged
   }
   return (
     <>
-      <button type="button" className="link-button danger" onClick={() => setOpen(true)}><Icon name="trash" /> Delete entry</button>
+      <OverflowMenu label="More actions for this entry" items={[{ label: 'Delete entry', danger: true, onSelect: () => setOpen(true) }]} />
       <ConfirmDialog open={open} title="Delete this entry?" confirmLabel="Delete entry" busy={busy} onConfirm={() => void confirm()} onCancel={() => setOpen(false)}>
         <p>“{titleOf(entry)}” moves to Trash for 30 days. Agents and search stop seeing it. You can undo right away or restore it from Trash.</p>
       </ConfirmDialog>
@@ -325,7 +313,7 @@ export function EntryRow({ entry, repeats = [], view, headline, hideProject = fa
   const selection = useEntrySelection()
   const owner = useOwnerAction(onChanged)
   const reading = view === 'reading'
-  const summary = reading ? entry.meta?.why || entry.meta?.gist : entry.meta?.gist
+  const summary = plainText((reading ? entry.meta?.why || entry.meta?.gist : entry.meta?.gist) ?? '')
   const asking = Boolean(entry.meta?.ask && !entry.owner.handled && entry.source !== OWNER_SOURCE)
   const selected = selection.selected === entry.id
   return (
@@ -333,12 +321,11 @@ export function EntryRow({ entry, repeats = [], view, headline, hideProject = fa
       <div className="entry-row-main">
         <div className="entry-row-head">
           <button type="button" className="entry-row-title" aria-haspopup="dialog" onClick={() => selection.open(entry.id)}>
-            {headline ?? titleOf(entry)}
+            {headline ? plainText(headline) : titleOf(entry)}
           </button>
           <FocusBadges entry={entry} />
         </div>
         {headline ? <p className="entry-row-gist">{titleOf(entry)}</p> : summary && <p className="entry-row-gist">{summary}</p>}
-        {view === 'inbox' && whyHere(entry) && <p className="why-here">{whyHere(entry)}</p>}
         <div className="entry-row-meta">
           {view === 'activity' && <KindBadge kind={entry.kind} />}
           {entry.meta?.category && <span className="category">{entry.meta.category}</span>}
@@ -569,7 +556,7 @@ export function InboxView() {
             {blocked.map((project) => (
               <li key={project.slug}>
                 <Link to={`/projects/${encodeURIComponent(project.slug)}`}>{project.name}</Link>
-                <span className="muted"> · {project.status_detail || project.status_title || project.status_body}</span>
+                <span className="muted"> · {plainText(project.status_detail || project.status_title || project.status_body)}</span>
               </li>
             ))}
           </ul>
@@ -582,7 +569,7 @@ export function InboxView() {
             {digests.map((project) => (
               <li key={project.slug}>
                 <Link to={`/projects/${encodeURIComponent(project.slug)}`}>{project.name}</Link> <HealthBadge state={project.status_state} />
-                <p className="clamp digest">{project.digest}</p>
+                <p className="clamp digest">{plainText(project.digest)}</p>
               </li>
             ))}
           </ul>
@@ -616,10 +603,10 @@ export function ProjectSummaryTable({ projects }: { projects: ProjectSummary[] }
               {project.needs_me && <p className="small needs-me clamp" title={project.needs_me}>Needs you: {project.needs_me}</p>}
             </div></td>
             <td data-label="This week"><div>
-              {project.digest ? <p className="clamp digest" title={project.digest}>{project.digest}</p> : !project.status_at && <span className="muted">No status yet</span>}
+              {project.digest ? <p className="clamp digest" title={plainText(project.digest)}>{plainText(project.digest)}</p> : !project.status_at && <span className="muted">No status yet</span>}
               {project.status_at && (
                 <p className={project.digest ? 'muted small latest-status' : 'status-text'}>
-                  {project.digest && 'Latest: '}<span className={project.digest ? undefined : 'clamp'}>{project.status_title || project.status_body}</span>
+                  {project.digest && 'Latest: '}<span className={project.digest ? undefined : 'clamp'}>{plainText(project.status_title || project.status_body)}</span>
                   <span className="muted small"> · <Timestamp iso={project.status_at} /> · {project.status_source}</span>
                 </p>
               )}
