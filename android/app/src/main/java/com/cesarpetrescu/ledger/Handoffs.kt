@@ -12,6 +12,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -52,7 +53,7 @@ fun Handoffs(model: LedgerModel) {
                 if (data.rows("handoffs").isEmpty()) item { Empty("No handoffs match this view.") }
                 items(data.rows("handoffs")) { h ->
                     SummaryCard(h.text("title"), h.text("project_name").ifBlank { "General" } + " · " + displayTime(h.text("updated_at")),
-                        "${h.optInt("ready_count")} ready · ${h.optInt("in_progress_count")} in progress · ${h.optInt("done_count")} done\n${h.text("description")}") { model.go("handoff/${h.text("id")}") }
+                        listOf(handoffProgress(h), h.text("description")).filter { it.isNotBlank() }.joinToString("\n")) { model.go("handoff/${h.text("id")}") }
                 }
                 item { Row {
                     if (before.isNotBlank()) TextButton(onClick = { before = "" }) { Text("Latest") }
@@ -78,15 +79,21 @@ fun HandoffDetail(model: LedgerModel, id: String) {
                 // The task's buttons live here: the brief is the oldest message and a long thread pages it out.
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     researchActions(research.text("state"), research.text("phase"), true).forEach { (action, name) ->
-                        Button(enabled = !model.busy, onClick = { model.act("$name applied") { it.request("POST", "/handoff-messages/${segment(research.text("message_id"))}/actions", json("action" to action)) } }) { Text(name) }
+                        val run: () -> Unit = { model.act("$name applied") { it.request("POST", "/handoff-messages/${segment(research.text("message_id"))}/actions", json("action" to action)) } }
+                        // Accept and Queue lead; Send back and the other moves are secondary.
+                        if (action == "complete" || action == "publish") Button(onClick = run, enabled = !model.busy) { Text(name) }
+                        else OutlinedButton(onClick = run, enabled = !model.busy) { Text(name) }
                     }
                 }
             }
             item {
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { model.go("message-new/$id") }, enabled = !model.busy) { Text("Add message") }
-                    OutlinedButton(onClick = { model.go("handoff-edit/$id") }, enabled = !model.busy) { Text("Edit details") }
-                    DownloadButton(model, "/handoffs/${segment(id)}/export", "handoff-$id.md", "Export", "text/markdown")
+                val export = rememberDownload(model, "/handoffs/${segment(id)}/export", "handoff-$id.md", "text/markdown")
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // A research thread takes the owner's feedback or answer; the run reads it on Send back or Resume.
+                    Button(onClick = { model.go(if (research != null) "message-new/$id/reply" else "message-new/$id") }, enabled = !model.busy) {
+                        Text(if (research != null) "Reply" else "Add message")
+                    }
+                    Overflow("More actions for this handoff", listOf(MenuAction("Edit details") { model.go("handoff-edit/$id") }, MenuAction("Export", run = export)), enabled = !model.busy)
                 }
             }
             item { MarkdownSwitch(markdown) }
@@ -105,8 +112,11 @@ private fun MessageCard(model: LedgerModel, message: JSONObject, markdown: Boole
     var retarget by remember { mutableStateOf(false) }
     var target by rememberSaveable { mutableStateOf(message.text("target")) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        MarkdownCard("${label(message.text("work_state"))} · ${label(message.text("delivery_state"))}",
-            "${displayTime(message.text("created_at"))} · ${message.text("source")}" + if (message.text("target").isNotBlank()) " → ${message.text("target")}" else "", message.text("body"), markdown)
+        val to = if (message.text("target").isNotBlank()) " → ${message.text("target")}" else ""
+        // A research thread is notes around one brief: who wrote each, not its delivery and work states.
+        if (research != null) MarkdownCard(writerName(message.text("source")), displayTime(message.text("created_at")) + to, message.text("body"), markdown)
+        else MarkdownCard("${label(message.text("work_state"))} · ${label(message.text("delivery_state"))}",
+            "${displayTime(message.text("created_at"))} · ${message.text("source")}$to", message.text("body"), markdown)
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             val actions = if (research != null) researchActions(message.text("work_state"), research.text("phase"), brief = false)
                 else messageActions(message.text("work_state"), message.text("delivery_state")).map { it to label(it) }
@@ -173,28 +183,32 @@ fun DraftSwitch(draft: Boolean, change: (Boolean) -> Unit) {
     }
 }
 
+/** A new message on a handoff; in a research thread, the owner's [reply] to the run, which has no target. */
 @Composable
-fun MessageEditor(model: LedgerModel, id: String) {
+fun MessageEditor(model: LedgerModel, id: String, reply: Boolean = false) {
     val markdown = rememberMarkdownPreview()
     var body by rememberSaveable { mutableStateOf("") }
     var target by rememberSaveable { mutableStateOf("") }
     var draft by rememberSaveable { mutableStateOf(true) }
     Page {
-        item { Text("Add a message", style = MaterialTheme.typography.headlineSmall) }
-        item { Field("Message", body, { body = it }, multiline = true, max = 100000) }
+        item { Text(if (reply) "Reply" else "Add a message", style = MaterialTheme.typography.headlineSmall) }
+        item { Field(if (reply) "Feedback or answer" else "Message", body, { body = it }, multiline = true, max = 100000) }
         item { MarkdownSwitch(markdown) }
         if (markdown.value) item { MarkdownPreviewBox(body) }
-        item { Field("Target (optional)", target, { target = it }, max = 100) }
+        if (!reply) item { Field("Target (optional)", target, { target = it }, max = 100) }
         item { DraftSwitch(draft) { draft = it } }
         item { Text("Messages are permanent. Add a correction as a new message.", style = MaterialTheme.typography.bodySmall) }
         item { Button(enabled = !model.busy && body.isNotBlank(), modifier = Modifier.fillMaxWidth(), onClick = {
-            model.act("Message added", after = model::back) { it.request("POST", "/handoffs/${segment(id)}/messages", json("body" to body.trim(), "target" to target.trim(), "draft" to draft)) }
-        }) { Text("Add message") } }
+            model.act(if (reply) "Reply added" else "Message added", after = model::back) {
+                it.request("POST", "/handoffs/${segment(id)}/messages", json("body" to body.trim(), "target" to if (reply) "" else target.trim(), "draft" to draft))
+            }
+        }) { Text(if (reply) "Add reply" else "Add message") } }
     }
 }
 
+/** Saves a server file to a document the owner picks; the returned action asks where. */
 @Composable
-fun DownloadButton(model: LedgerModel, path: String, filename: String, text: String = "Save file", mime: String = "application/octet-stream") {
+fun rememberDownload(model: LedgerModel, path: String, filename: String, mime: String = "application/octet-stream"): () -> Unit {
     val resolver = LocalContext.current.contentResolver
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(mime)) { uri ->
         if (uri != null) model.act("File saved") { api ->
@@ -202,7 +216,13 @@ fun DownloadButton(model: LedgerModel, path: String, filename: String, text: Str
             stream.use { api.download(path, it) }
         }
     }
-    OutlinedButton(onClick = { launcher.launch(filename.substringAfterLast('/').substringAfterLast('\\').take(200).ifBlank { "attachment" }) }, enabled = !model.busy) { Text(text) }
+    return { launcher.launch(filename.substringAfterLast('/').substringAfterLast('\\').take(200).ifBlank { "attachment" }) }
+}
+
+@Composable
+fun DownloadButton(model: LedgerModel, path: String, filename: String, text: String = "Save file", mime: String = "application/octet-stream") {
+    val download = rememberDownload(model, path, filename, mime)
+    OutlinedButton(onClick = download, enabled = !model.busy) { Text(text) }
 }
 
 @Composable

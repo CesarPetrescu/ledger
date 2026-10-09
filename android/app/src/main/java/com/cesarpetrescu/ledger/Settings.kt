@@ -116,7 +116,7 @@ fun Clients(model: LedgerModel) {
             items(data.rows("clients")) { client ->
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     SummaryCard(client.text("client_name").ifBlank { "Unnamed client" }, label(client.text("kind")),
-                        "${client.optInt("active_access_tokens")} access tokens · ${client.optInt("active_refresh_tokens")} refresh tokens\nLast used: ${displayTime(client.text("last_used_at")).ifBlank { "Never" }}\n${client.strings("redirect_uris").joinToString("\n")}")
+                        "${plural(client.optInt("active_access_tokens"), "access token")} · ${plural(client.optInt("active_refresh_tokens"), "refresh token")}\nLast used: ${displayTime(client.text("last_used_at")).ifBlank { "Never" }}\n${client.strings("redirect_uris").joinToString("\n")}")
                     ConfirmButton("Revoke access", "Revoke all access and refresh tokens for ${client.text("client_name")}? It will need to reconnect.", !model.busy) {
                         model.act("Client access revoked") { it.request("POST", "/oauth/revoke", json("client_id" to client.text("client_id"))) }
                     }

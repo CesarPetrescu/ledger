@@ -48,6 +48,30 @@ class ContractTest {
         assertEquals(listOf("reopen"), messageActions("done", "seen"))
     }
 
+    @Test fun handoffListShowsResearchStateInsteadOfMessageCounts() {
+        val research = org.json.JSONObject("""{"kind":"research","research_status":"review","ready_count":0,"in_progress_count":0,"done_count":0}""")
+        assertEquals("Research · Ready for review", handoffProgress(research))
+        // A server without research_status still marks the task as research.
+        assertEquals("Research", handoffProgress(research.put("research_status", org.json.JSONObject.NULL)))
+        assertEquals(listOf("Draft", "Queued", "Running", "Ready for review", "Question for you", "Stopped", "Accepted"),
+            listOf("draft", "queued", "running", "review", "question", "stopped", "accepted").map(::researchStatusLabel))
+        val general = org.json.JSONObject("""{"kind":"general","draft_count":0,"ready_count":2,"in_progress_count":1,"blocked_count":0,"done_count":0}""")
+        assertEquals("2 ready · 1 in progress", handoffProgress(general))
+    }
+
+    @Test fun countsArePluralizedCorrectly() {
+        assertEquals("1 open todo", plural(1, "open todo"))
+        assertEquals("3 open todos", plural(3, "open todo"))
+        assertEquals("1 needs you", plural(1, "needs you", "need you"))
+        assertEquals("0 entries", plural(0, "entry", "entries"))
+    }
+
+    @Test fun helpCoversCalendarResearchReposAndAccess() {
+        val help = helpSections.joinToString("\n") { "${it.first}\n${it.second}" }
+        listOf("More › Calendar", "Handoffs › Research", "Accept", "Send back", "Files travel both ways", "Repos", "GitHub sync", "API keys", "Settings › Connected apps")
+            .forEach { assertTrue(it, help.contains(it)) }
+    }
+
     @Test
     fun repoCardsShowRoleBranchAndSyncedActivity() {
         val synced = org.json.JSONObject("""{"repo":"acme/atlas-api","url":"https://github.com/acme/atlas-api","provider":"github","role":"backend","branch":"release","path":"api",

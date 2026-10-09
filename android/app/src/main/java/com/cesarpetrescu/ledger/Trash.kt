@@ -35,10 +35,10 @@ fun TrashScreen(model: LedgerModel) = Load(model, "trash", { it.request("GET", "
         if (data.rows("items").isEmpty()) item { Empty("Trash is empty.") }
         items(data.rows("items"), key = { it.text("id") }) { item ->
             val id = item.text("id")
-            val days = runCatching { ChronoUnit.DAYS.between(OffsetDateTime.now(), OffsetDateTime.parse(item.text("purge_at"))).coerceAtLeast(0) }.getOrDefault(0)
-            val what = if (item.text("kind") == "project") "Project · ${item.optInt("entry_count")} entries" else "Entry in ${item.text("project_slug")}"
+            val days = runCatching { ChronoUnit.DAYS.between(OffsetDateTime.now(), OffsetDateTime.parse(item.text("purge_at"))).coerceAtLeast(0) }.getOrDefault(0L)
+            val what = if (item.text("kind") == "project") "Project · ${plural(item.optInt("entry_count"), "entry", "entries")}" else "Entry in ${item.text("project_slug")}"
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SummaryCard(item.text("label"), what, "Deleted ${ago(item.text("deleted_at"))} · removed for good in $days days")
+                SummaryCard(item.text("label"), what, "Deleted ${ago(item.text("deleted_at"))} · removed for good in ${plural(days.toInt(), "day")}")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { model.act("Restored") { it.request("POST", "/trash/${segment(id)}/restore") } }, enabled = !model.busy) { Text("Restore") }
                     ConfirmButton("Delete forever", "Remove \"${item.text("label")}\" permanently? This cannot be undone.", !model.busy) {
@@ -52,25 +52,22 @@ fun TrashScreen(model: LedgerModel) = Load(model, "trash", { it.request("GET", "
 
 /** Moves a project to Trash once the owner types its slug. */
 @Composable
-fun DeleteProject(model: LedgerModel, slug: String) {
-    var open by remember { mutableStateOf(false) }
+fun DeleteProjectDialog(model: LedgerModel, slug: String, close: () -> Unit) {
     var typed by remember { mutableStateOf("") }
-    TextButton(onClick = { typed = ""; open = true }, enabled = !model.busy) { Text("Delete", color = MaterialTheme.colorScheme.error) }
-    if (!open) return
-    AlertDialog(onDismissRequest = { open = false }, title = { Text("Delete project?") }, text = {
+    AlertDialog(onDismissRequest = close, title = { Text("Delete project?") }, text = {
         Load(model, "deletion:$slug", { it.request("GET", "/projects/${segment(slug)}/deletion") }) { p ->
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("${p.text("name")} and its ${p.optInt("entries")} entries move to Trash. You can undo this or restore it for 30 days." +
-                    (if (p.optInt("handoffs") > 0) " ${p.optInt("handoffs")} handoffs stay, without the project link until restored." else ""))
+                Text("${p.text("name")} and its ${plural(p.optInt("entries"), "entry", "entries")} move to Trash. You can undo this or restore it for 30 days." +
+                    (if (p.optInt("handoffs") > 0) " ${plural(p.optInt("handoffs"), "handoff stays", "handoffs stay")}, without the project link until restored." else ""))
                 OutlinedTextField(typed, { typed = it.trim() }, label = { Text("Type $slug to confirm") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             }
         }
     }, confirmButton = {
         TextButton(enabled = typed == slug && !model.busy, onClick = {
-            open = false
+            close()
             model.undoable("Project moved to Trash", after = { model.tab("projects") }) { it.request("DELETE", "/projects/${segment(slug)}", json("confirm" to slug)) }
         }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
-    }, dismissButton = { TextButton(onClick = { open = false }) { Text("Cancel") } })
+    }, dismissButton = { TextButton(onClick = close) { Text("Cancel") } })
 }
 
 /** Light, dark, or follow the phone's setting. */

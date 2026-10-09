@@ -22,7 +22,7 @@ import org.json.JSONObject
 val labelGuide = listOf(
     Triple("Asks you", Tone.Warn, "An agent asked you a question or needs something from you. It stays in your Inbox until you mark it handled."),
     Triple("Important", Tone.Accent, "The AI rated it important: a decision that changes direction, a blocker, a production problem, a deadline, or something you must act on."),
-    Triple("High · Low", Tone.Danger, "A todo's priority, read from its text: high when urgent, blocking, or broken; low when nice to have."),
+    Triple("High · Low", Tone.Danger, "A todo's priority, read from its text: high when urgent, blocking, or broken; low when nice to have. A row shows only the first that applies of High, Important, and Low."),
     Triple("S · M · L", Tone.Neutral, "A todo's estimated size: under an hour, about a day, or several days."),
     Triple("Due · Overdue", Tone.Neutral, "A deadline stated in the todo. Overdue once the date has passed."),
     Triple("Stale", Tone.Neutral, "A todo that has been open for more than 14 days."),
@@ -65,7 +65,7 @@ fun aiStatusText(progress: JSONObject?): Pair<String, Boolean>? {
         return "AI labelling is paused: ${problem.ifBlank { "the labelling service is not running" }}. $waiting ${if (waiting == 1) "entry is" else "entries are"} waiting and will get titles and labels when it is back." to true
     }
     if (!progress.optBoolean("active")) return null
-    return "AI summaries: ${progress.optInt("ready")} of ${progress.optInt("total")} entries processed." to false
+    return "AI summaries: ${progress.optInt("ready")} of ${plural(progress.optInt("total"), "entry", "entries")} processed." to false
 }
 
 @Composable
@@ -76,26 +76,37 @@ fun AiStatus(progress: JSONObject?) {
     } else Text(text, Modifier.padding(horizontal = 20.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
+/** The Help screen's sections; a line's short "Name: " prefix is shown in bold. */
+val helpSections = listOf(
+    "How Ledger works" to "Your agents write down what they did, decided, and need from you. Ledger keeps all of it, labels it with AI, and shows you what matters first.",
+    "Where to look" to "Inbox: questions agents are waiting on you to answer, the most urgent todos, blocked projects, and each project's week.\n" +
+        "Projects: one screen per project with its week, activity, todos, and decisions. Files and Repos list its attachments and Git repositories.\n" +
+        "Reading: linked articles your agents found, to read and star.\n" +
+        "Handoffs: work passed from one agent, or from you, to another, and research tasks.\n" +
+        "More › Calendar: your Nextcloud events, with todos that are due and project deadlines. Settings › Calendars connects Nextcloud.\n" +
+        "More › Table: every project's entries in one list, with filters.\n" +
+        "More › Agents: what each agent did lately and how to connect a new one.",
+    "How the Inbox decides" to "Needs you lists entries where the AI found a question or request for you; each stays until you mark it handled, and a snoozed one comes back the next day.\n" +
+        "Todos shows open todos, the most urgent first: due within a week, then high priority, then the oldest.\n" +
+        "Blocked lists projects whose latest status update says they are blocked.\n" +
+        "This week is an AI summary of each active project's last seven days.",
+    "Research" to "A research task runs in a sandbox that your own dispatcher starts. Queue one from the web console under Handoffs › Research, or ask an agent to. It is listed under Handoffs with its state.\n" +
+        "When it is ready for review, read the result: Accept publishes it to the project's log. To change something, Reply with what to change, then Send back. Answer a question the same way, then Resume.\n" +
+        "Files travel both ways: attach them to a reply, and result files arrive on the thread.",
+    "Repositories" to "A project's Repos screen lists the Git repositories it spans. Agents see them with the project and clone with their own access. With a read-only GitHub token (web console › Agents › GitHub sync), Ledger checks each GitHub repository every 15 minutes for its latest commit, open pull requests, and latest release.",
+    "AI labels" to "Titles, summaries, tags, and labels are written by AI from each entry's text; the text itself is never changed. Open an entry and tap Edit labels to correct anything: your corrections are kept, and the AI learns from them. Routine entries such as checkpoints are hidden unless you ask for them, and repeats are folded under one row.",
+    "Access" to "Settings › Connected apps: apps with access to your projects. Revoke one to cut it off.\n" +
+        "Settings › API keys: keys that let a server such as Adastrion Core dispatch research. Create them in the web console under Agents › API keys; revoke them here.\n" +
+        "Settings › Approve a device: enter the code the Ledger CLI shows.\n" +
+        "The web console keeps all of these on its Agents page, with GitHub sync and the approval password.",
+    "Undo and Trash" to "Every quick action shows Undo, and More › Recent actions lets you undo any of the last seven days' actions. Deleted entries and projects stay in More › Trash for 30 days.",
+)
+
 /** How Ledger works and how it decides what to show. */
 @Composable
 fun HelpScreen() {
-    val sections = listOf(
-        "How Ledger works" to "Your agents write down what they did, decided, and need from you. Ledger keeps all of it, labels it with AI, and shows you what matters first.",
-        "Where to look" to "Inbox: questions agents are waiting on you to answer, the most urgent todos, blocked projects, and each project's week.\n" +
-            "Projects: one screen per project with its week, activity, todos, and decisions.\n" +
-            "Reading: linked articles your agents found, to read and star.\n" +
-            "Handoffs: work passed from one agent, or from you, to another.\n" +
-            "More › Table: every project's entries in one list, with filters.\n" +
-            "More › Agents: what each agent did lately and how to connect a new one.",
-        "How the Inbox decides" to "Needs you lists entries where the AI found a question or request for you; each stays until you mark it handled, and a snoozed one comes back the next day.\n" +
-            "Todos shows open todos, the most urgent first: due within a week, then high priority, then the oldest.\n" +
-            "Blocked lists projects whose latest status update says they are blocked.\n" +
-            "This week is an AI summary of each active project's last seven days.",
-        "AI labels" to "Titles, summaries, tags, and labels are written by AI from each entry's text; the text itself is never changed. Open an entry and tap Edit labels to correct anything: your corrections are kept, and the AI learns from them. Routine entries such as checkpoints are hidden unless you ask for them, and repeats are folded under one row.",
-        "Undo and Trash" to "Every quick action shows Undo, and More › Recent actions lets you undo any of the last seven days' actions. Deleted entries and projects stay in More › Trash for 30 days.",
-    )
     Page {
-        items(sections) { (title, body) ->
+        items(helpSections) { (title, body) ->
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 body.split('\n').forEach { line ->
