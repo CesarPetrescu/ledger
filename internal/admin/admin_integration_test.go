@@ -1642,6 +1642,98 @@ VALUES($1,'more','in_progress','codex','c',now(),'claude-code','c','claude-code'
 	}
 }
 
+func TestAgentsLatestPrefersRealWorkOverRoutine(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
+	_, s := login(t, server, "correct horse", "")
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	write := func(body, importance string) {
+		t.Helper()
+		e, err := db.AppendEntry(ctx, "atlas", "status", body, "codex", "c")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := db.SaveEntryMeta(ctx, e.ID, store.EntryMeta{Title: body, Importance: importance}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("Chose pgvector", "important")
+	for _, body := range []string{"Checkpoint 1", "Checkpoint 2", "Checkpoint 3"} {
+		write(body, "routine")
+	}
+	latest := func() []string {
+		t.Helper()
+		res := request(t, server, http.MethodGet, "/admin/api/agents", "", authed(s, false))
+		var out struct {
+			Agents []struct {
+				Latest []struct{ Body string }
+			}
+		}
+		if res.Code != http.StatusOK || json.Unmarshal(res.Body.Bytes(), &out) != nil || len(out.Agents) != 1 {
+			t.Fatalf("agents = %d %s", res.Code, res.Body.String())
+		}
+		bodies := []string{}
+		for _, entry := range out.Agents[0].Latest {
+			bodies = append(bodies, entry.Body)
+		}
+		return bodies
+	}
+	// Routine checkpoints only fill the places left, newest first, and never push the decision out.
+	if got := latest(); !reflect.DeepEqual(got, []string{"Checkpoint 3", "Checkpoint 2", "Chose pgvector"}) {
+		t.Fatalf("latest = %v", got)
+	}
+	for _, body := range []string{"Shipped search", "Fixed the export", "Wrote the docs"} {
+		write(body, "useful")
+	}
+	write("Checkpoint 4", "routine")
+	if got := latest(); !reflect.DeepEqual(got, []string{"Wrote the docs", "Fixed the export", "Shipped search"}) {
+		t.Fatalf("latest with enough real work = %v", got)
+	}
+}
+
+func TestHandoffListsCarryResearchStatus(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
+	_, s := login(t, server, "correct horse", "")
+	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
+		t.Fatal(err)
+	}
+	research := func(title string, draft bool) {
+		t.Helper()
+		if _, err := db.CreateResearchTask(ctx, store.NewResearchTask{ProjectSlug: "atlas", Title: title, Draft: draft, Source: writeSource, ClientID: "c",
+			Spec: store.ResearchSpec{Objective: "Compare vector databases", Acceptance: []string{"Three options"}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	research("Queued study", false)
+	research("Draft study", true)
+	if _, err := db.CreateHandoff(ctx, store.Handoff{ProjectSlug: "atlas", Title: "Plan", Description: "d", Scope: "s", Source: "codex", ClientID: "c"}, store.HandoffMessage{Body: "b", WorkState: "ready", Source: "codex", ClientID: "c"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/admin/api/handoffs", "/admin/api/handoffs?project=atlas"} {
+		res := request(t, server, http.MethodGet, path, "", authed(s, false))
+		var out struct {
+			Handoffs []map[string]any
+		}
+		if res.Code != http.StatusOK || json.Unmarshal(res.Body.Bytes(), &out) != nil || len(out.Handoffs) != 3 {
+			t.Fatalf("%s = %d %s", path, res.Code, res.Body.String())
+		}
+		statuses := map[string]any{}
+		for _, h := range out.Handoffs {
+			status, ok := h["research_status"]
+			if h["kind"] == "general" && ok {
+				t.Fatalf("%s: general handoff has a research status: %v", path, h)
+			}
+			statuses[h["title"].(string)] = status
+		}
+		if statuses["Queued study"] != "queued" || statuses["Draft study"] != "draft" || statuses["Plan"] != nil {
+			t.Fatalf("%s: research statuses = %v", path, statuses)
+		}
+	}
+}
+
 func TestLabellingStatusSaysWhyItIsPaused(t *testing.T) {
 	db, ctx := testdb.Open(t)
 	progress := func() store.MetaProgress {

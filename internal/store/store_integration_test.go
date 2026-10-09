@@ -43,3 +43,49 @@ func TestAppendEntryIsAppendOnlyAndQueuesNotification(t *testing.T) {
 		t.Fatalf("dirty row missing: %v", err)
 	}
 }
+
+func TestProjectHeadlineSkipsRoutineStatuses(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	for _, slug := range []string{"atlas", "beacon"} {
+		if _, err := db.UpsertProject(ctx, store.Project{Slug: slug, Name: slug, Tier: "focus"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	status := func(slug, body, importance string) {
+		t.Helper()
+		e, err := db.AppendEntry(ctx, slug, "status", body, "codex", "c")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if importance != "" {
+			if err := db.SaveEntryMeta(ctx, e.ID, store.EntryMeta{Title: body, Importance: importance}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	headlines := func() map[string]string {
+		t.Helper()
+		summaries, err := db.ProjectSummaries(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]string{}
+		for _, s := range summaries {
+			out[s.Slug] = s.StatusTitle + "|" + s.StatusBody
+		}
+		return out
+	}
+	status("atlas", "Shipped search", "important")
+	status("atlas", "Checkpoint: tests green", "routine")
+	status("beacon", "Heartbeat one", "routine")
+	status("beacon", "Heartbeat two", "routine")
+	// A newer routine checkpoint does not replace the real news; with only routine statuses, the newest leads.
+	if got := headlines(); got["atlas"] != "Shipped search|Shipped search" || got["beacon"] != "Heartbeat two|Heartbeat two" {
+		t.Fatalf("headlines = %v", got)
+	}
+	// A status not labelled yet is not known to be routine, so it leads.
+	status("atlas", "Started the export", "")
+	if got := headlines(); got["atlas"] != "|Started the export" {
+		t.Fatalf("headline with an unlabelled status = %v", got)
+	}
+}

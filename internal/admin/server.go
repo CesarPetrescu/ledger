@@ -8,6 +8,7 @@
 package admin
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -1129,10 +1130,30 @@ func (s *Server) agents(w http.ResponseWriter, r *http.Request) {
 	}
 	rows := make([]map[string]any, 0, len(agents))
 	for _, agent := range agents {
-		latest, err := s.db.ListEntries(r.Context(), store.EntryFilter{Source: agent.Name, Limit: agentLatest})
+		latest, err := s.db.ListEntries(r.Context(), store.EntryFilter{Source: agent.Name, Limit: agentLatest, HideRoutine: true})
 		if err != nil {
 			s.internalError(w, r, err)
 			return
+		}
+		// Routine bookkeeping only fills the places other work leaves empty. latest then holds every
+		// non-routine entry, so the newest entries add only routine ones it lacks.
+		if len(latest) < agentLatest {
+			newest, err := s.db.ListEntries(r.Context(), store.EntryFilter{Source: agent.Name, Limit: agentLatest})
+			if err != nil {
+				s.internalError(w, r, err)
+				return
+			}
+			for _, entry := range newest {
+				if len(latest) < agentLatest && !slices.ContainsFunc(latest, func(e store.EntryWithProject) bool { return e.ID == entry.ID }) {
+					latest = append(latest, entry)
+				}
+			}
+			slices.SortStableFunc(latest, func(a, b store.EntryWithProject) int {
+				if c := b.CreatedAt.Compare(a.CreatedAt); c != 0 {
+					return c
+				}
+				return cmp.Compare(b.ID, a.ID)
+			})
 		}
 		entries := make([]map[string]any, 0, len(latest))
 		for _, entry := range latest {

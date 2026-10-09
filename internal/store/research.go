@@ -896,6 +896,26 @@ var ResearchStatuses = []string{"draft", "queued", "running", "review", "questio
 const researchStatusSQL = `CASE m.work_state WHEN 'draft' THEN 'draft' WHEN 'ready' THEN 'queued' WHEN 'in_progress' THEN 'running' WHEN 'done' THEN 'accepted'
  ELSE CASE t.phase WHEN 'review' THEN 'review' WHEN 'question' THEN 'question' ELSE 'stopped' END END`
 
+// ResearchStatusOf returns the status of each research task among the handoff IDs, keyed by ID;
+// handoffs that are not research tasks are left out. It serves the console's lists, never an MCP output.
+func (db *DB) ResearchStatusOf(ctx context.Context, ids []int64) (map[int64]string, error) {
+	out := map[int64]string{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := db.Pool.Query(ctx, `SELECT t.handoff_id,`+researchStatusSQL+` FROM research_task t JOIN handoff_message m ON m.id=t.message_id WHERE t.handoff_id=ANY($1)`, ids)
+	if err != nil {
+		return nil, err
+	}
+	var id int64
+	var status string
+	_, err = pgx.ForEachRow(rows, []any{&id, &status}, func() error {
+		out[id] = status
+		return nil
+	})
+	return out, err
+}
+
 // ListResearchTasks lists tasks by status, newest activity first. status "" means every task that is
 // not a draft or accepted; "all" means every task.
 // viewer, when set, hides other clients' drafts: a draft belongs to its creator until it is queued.
