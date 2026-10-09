@@ -239,13 +239,16 @@ function MessageComposer({ handoffID, preview, research, onAppended }: { handoff
     }
   }
 
+  const filesField = <label className={research ? 'span-2' : undefined}>Files<input ref={fileInput} type="file" multiple onChange={(event) => setFiles(Array.from(event.target.files ?? []))} /></label>
   return (
     <form className="composer" aria-label={research ? 'Reply' : 'Append handoff message'} onSubmit={(event) => void submit(event)}>
       <h2>{research ? 'Reply' : 'Continue this handoff'}</h2>
+      {/* A handoff message names its target and files first; a reply has no target, so its text leads and Files follows. */}
       <div className="form-grid">
         {!research && <label>Target<input maxLength={100} value={target} onChange={(event) => setTarget(event.target.value)} placeholder="Optional agent or model" /></label>}
-        <label>Files<input ref={fileInput} type="file" multiple onChange={(event) => setFiles(Array.from(event.target.files ?? []))} /></label>
+        {!research && filesField}
         <label className="span-2">{research ? 'Feedback or answer' : 'Message'}<textarea required maxLength={100000} rows={6} value={body} onChange={(event) => setBody(event.target.value)} /></label>
+        {research && filesField}
         {preview && body.trim() && <MessagePreview body={body} />}
       </div>
       {error && <p className="field-error" role="alert">{error}</p>}
@@ -397,8 +400,10 @@ function HandoffThread({ id }: { id: string }) {
             <li key={message.id} className="handoff-message">
               <header>
                 <div className="handoff-message-meta"><strong>{message.source}</strong><Timestamp iso={message.created_at} />{message.target && <span>to {message.target}</span>}</div>
-                {/* A research thread's state is on its status panel; per-message Seen or Done would be noise. */}
-                {!research && <div className="handoff-message-states"><HandoffBadge value={message.delivery_state} kind="delivery" /><HandoffBadge value={message.work_state} kind="work" /></div>}
+                {/* A research thread's state is on its status panel; per-message Seen or Done would be noise. Only
+                    Draft stays, so an unpublished message says why it offers Publish. */}
+                {!research ? <div className="handoff-message-states"><HandoffBadge value={message.delivery_state} kind="delivery" /><HandoffBadge value={message.work_state} kind="work" /></div>
+                  : message.work_state === 'draft' && <div className="handoff-message-states"><HandoffBadge value="draft" kind="work" /></div>}
               </header>
               {markdown ? <div className="handoff-body handoff-body-md"><MarkdownText text={message.body} /></div> : <p className="handoff-body">{message.body}</p>}
               {message.files.length > 0 && <FileList files={message.files} removable={message.work_state === 'draft'} onRemoved={(fileID) => detail.update((current) => ({ ...current, messages: current.messages.map((item) => item.id === message.id ? { ...item, files: item.files.filter((file) => file.id !== fileID) } : item) }))} />}
@@ -531,7 +536,7 @@ export function HandoffsPage({ id, creating = false, initialProject = '' }: { id
   return (
     <div className="split handoffs" data-mode={mode}>
       <section className="pane pane-list" aria-label="Handoff inbox">
-        <header className="page-head"><h1>Handoffs</h1><div className="handoff-head-actions"><Link to="/handoffs/new?kind=research" className="btn btn-small"><Icon name="plus" /> Research</Link><Link to="/handoffs/new" className="btn btn-small btn-primary"><Icon name="plus" /> New</Link></div>
+        <header className="page-head"><h1>Handoffs</h1><div className="handoff-head-actions"><Link to="/handoffs/new?kind=research" className="btn"><Icon name="plus" /> Research</Link><Link to="/handoffs/new" className="btn btn-primary"><Icon name="plus" /> New</Link></div>
           <p className="muted small">Work passed from one agent, or from you, to another. Each handoff is a thread: an agent claims a message, reports progress, and marks it done.</p>
         </header>
         <div className="filters">

@@ -87,22 +87,30 @@ describe('handoff inbox', () => {
 
   it('keeps a research thread to the task: no per-message states, no empty sections, and a reply instead of a target', async () => {
     const reply = { ...research.messages[0]!, id: '24', body: 'Add pgvector numbers', source: 'owner', work_state: 'done' as const }
+    const draftReply = { ...research.messages[0]!, id: '25', body: 'Also cover Qdrant', source: 'owner', work_state: 'draft' as const }
     const { calls } = mockApi({
       'GET /admin/api/session': authenticatedSession,
       'GET /admin/api/handoffs': { body: { handoffs: [research.handoff] } },
       'GET /admin/api/projects': { body: { projects: [atlas] } },
-      'GET /admin/api/handoffs/9': { body: research },
+      'GET /admin/api/handoffs/9': { body: { ...research, messages: [...research.messages, draftReply] } },
       'POST /admin/api/handoffs/9/messages': { status: 201, body: reply },
     })
     renderApp('/admin/handoffs/9')
     const thread = await screen.findByRole('region', { name: /handoff messages/i })
-    expect(within(thread).getAllByRole('listitem')).toHaveLength(3)
+    const items = within(thread).getAllByRole('listitem')
+    expect(items).toHaveLength(4)
     expect(within(thread).queryByText(/^(unseen|seen|ready|blocked|done)$/i)).not.toBeInTheDocument()
+    // Only a draft keeps its marker, so its Publish button makes sense.
+    expect(within(items[3]!).getByText('Draft')).toBeInTheDocument()
+    expect(within(items[3]!).getByRole('button', { name: 'Publish' })).toBeInTheDocument()
+    expect(within(thread).getAllByText('Draft')).toHaveLength(1)
     expect(screen.getByText('Description').closest('dl')).toHaveTextContent('Compare vector databases')
     expect(screen.queryByText('Work scope')).not.toBeInTheDocument()
     const form = screen.getByRole('form', { name: 'Reply' })
     expect(within(form).getByRole('heading', { name: 'Reply' })).toBeInTheDocument()
     expect(within(form).queryByLabelText(/target/i)).not.toBeInTheDocument()
+    // The reply text leads; Files follows it.
+    expect(within(form).getByLabelText('Feedback or answer').compareDocumentPosition(within(form).getByLabelText('Files')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     const user = userEvent.setup()
     await user.type(within(form).getByLabelText('Feedback or answer'), 'Add pgvector numbers')
     await user.click(within(form).getByRole('button', { name: 'Add reply' }))
@@ -124,6 +132,7 @@ describe('handoff inbox', () => {
     const form = screen.getByRole('form', { name: /append handoff message/i })
     expect(within(form).getByRole('heading', { name: 'Continue this handoff' })).toBeInTheDocument()
     expect(within(form).getByLabelText(/target/i)).toBeInTheDocument()
+    expect(within(form).getByLabelText('Files').compareDocumentPosition(within(form).getByLabelText('Message')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('keeps the two create buttons together, beside the title', async () => {
@@ -137,6 +146,8 @@ describe('handoff inbox', () => {
     const group = screen.getByRole('link', { name: 'Research' }).parentElement
     expect(screen.getByRole('link', { name: 'New' }).parentElement).toBe(group)
     expect(title.nextElementSibling).toBe(group)
+    // Full-size, like the other create buttons.
+    for (const name of ['Research', 'New']) expect(screen.getByRole('link', { name })).not.toHaveClass('btn-small')
   })
 
 

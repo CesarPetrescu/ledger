@@ -224,6 +224,30 @@ describe('calendar view by screen size', () => {
     expect(screen.getByRole('radio', { name: 'Month' })).toBeChecked()
   })
 
+  it('leads the phone agenda with overdue todos, oldest first, since it starts today', async () => {
+    const day = (offset: number) => {
+      const date = new Date()
+      date.setDate(date.getDate() + offset)
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+    }
+    const todo = (id: string, title: string, due: string) => ({ id, slug: 'atlas', kind: 'todo', body: title, source: 'codex', client_id: 'c', created_at: new Date().toISOString(), project_name: 'Atlas',
+      owner: { read: false, starred: false, handled: false }, meta: { title, tags: [], refs: [], origin: 'model', due } })
+    screenWidth(true)
+    const { calls } = mockApi({
+      ...ledgerOnly,
+      'GET /admin/api/entries': (_init, url) => ({ body: { entries: url.searchParams.get('due_before') && !url.searchParams.get('due_from') ? [todo('2', 'File the taxes', day(-2)), todo('1', 'Renew the domain', day(-9))] : [], sources: [], tags: [] } }),
+    })
+    renderApp('/admin/calendar')
+    const group = (await screen.findByRole('heading', { name: 'Overdue' })).closest('section')!
+    expect(within(group).getAllByRole('button').map((button) => button.querySelector('.cal-item-title')?.textContent)).toEqual(['Renew the domain', 'File the taxes'])
+    expect(within(group).getAllByRole('button')[0]).toHaveAttribute('data-overdue', 'true')
+    expect(within(group).getAllByText(/^Due /)).toHaveLength(2)
+    // The 30 days themselves are still empty, and say so.
+    expect(screen.getByText('Nothing in these 30 days.')).toBeInTheDocument()
+    const overdue = calls.find((call) => call.path === '/admin/api/entries' && !call.url.searchParams.get('due_from') && call.url.searchParams.get('due_before'))!
+    expect(Object.fromEntries(overdue.url.searchParams)).toMatchObject({ kind: 'todo', status: 'open', due_before: day(0) })
+  })
+
   it('remembers a view the owner picked, even on a phone', async () => {
     screenWidth(true)
     mockApi(ledgerOnly)
