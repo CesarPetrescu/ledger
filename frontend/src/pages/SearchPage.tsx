@@ -5,9 +5,12 @@ import { useResource } from '../hooks/useResource'
 import { Link, navigate, useLocation } from '../router'
 
 const LIMIT = 20
-const DEGRADED: Record<string, string> = {
-  vector: 'Vector retrieval unavailable; showing lexical matches.',
-  rerank: 'Reranking unavailable; results use fused ranking only.',
+
+/** One plain sentence for what a degraded search left out; without meaning search, ranking needs no mention. */
+function degradedNotice(degraded: string[]): string {
+  if (degraded.includes('vector')) return 'Showing word matches only; meaning search is offline.'
+  if (degraded.includes('rerank')) return 'Relevance ranking is offline, so the best match may not be first.'
+  return degraded.map((mode) => `${mode} unavailable.`).join(' ')
 }
 
 type Scope = 'everything' | 'projects' | 'entries'
@@ -28,7 +31,8 @@ function highlighted(text: string, query: string): ReactNode {
   )
 }
 
-function ResultItem({ hit, query }: { hit: SearchHit; query: string }) {
+// The score is only a relevance estimate when the reranker produced it.
+function ResultItem({ hit, query, scored }: { hit: SearchHit; query: string; scored: boolean }) {
   const [headline = hit.snippet, ...detail] = hit.snippet.split('\n')
   const title = hit.kind === 'project' ? hit.project_name || hit.project_slug : headline
   const excerpt = hit.kind === 'project' ? hit.snippet : detail.join(' ')
@@ -42,7 +46,7 @@ function ResultItem({ hit, query }: { hit: SearchHit; query: string }) {
       <div className="result-meta">
         <span>{hit.project_name || hit.project_slug}</span>
         {hit.created_at && <Timestamp iso={hit.created_at} />}
-        <span className="result-score">{Math.round(hit.score * 100)}%</span>
+        {scored && <span className="result-score">{Math.round(hit.score * 100)}%</span>}
       </div>
     </li>
   )
@@ -57,11 +61,12 @@ function Results({ request }: { request: SearchRequest }) {
   const projects = new Set(hits.map((hit) => hit.project_slug).filter(Boolean)).size
   const best = hits.slice(0, 3)
   const more = hits.slice(3)
+  const scored = !degraded.includes('rerank')
   return (
     <section className="search-results" aria-label="Results">
       {degraded.length > 0 && (
         <p className="notice" role="status" aria-label="Degraded retrieval">
-          {degraded.map((mode) => DEGRADED[mode] ?? `${mode} unavailable.`).join(' ')}
+          {degradedNotice(degraded)}
         </p>
       )}
       {hits.length === 0 ? (
@@ -74,14 +79,14 @@ function Results({ request }: { request: SearchRequest }) {
           <section className="result-group" aria-labelledby="best-matches">
             <h2 id="best-matches">Best matches</h2>
             <ol className="results">
-              {best.map((hit) => <ResultItem key={hit.ref} hit={hit} query={request.q} />)}
+              {best.map((hit) => <ResultItem key={hit.ref} hit={hit} query={request.q} scored={scored} />)}
             </ol>
           </section>
           {more.length > 0 && (
             <section className="result-group" aria-labelledby="more-results">
               <h2 id="more-results">More results</h2>
               <ol className="results">
-                {more.map((hit) => <ResultItem key={hit.ref} hit={hit} query={request.q} />)}
+                {more.map((hit) => <ResultItem key={hit.ref} hit={hit} query={request.q} scored={scored} />)}
               </ol>
             </section>
           )}
@@ -92,8 +97,10 @@ function Results({ request }: { request: SearchRequest }) {
 }
 
 function SearchContent({ q, project, kind, projects }: { q: string; project: string; kind: string; projects: Project[] }) {
+  // Filters applied to the shown results, beyond the scope tabs.
+  const active = (project ? 1 : 0) + (['', 'project', 'entry'].includes(kind) ? 0 : 1)
   const [draft, setDraft] = useState({ q, project, kind })
-  const [filtersOpen, setFiltersOpen] = useState(project !== '' || !['', 'project', 'entry'].includes(kind))
+  const [filtersOpen, setFiltersOpen] = useState(active > 0)
   const [hint, setHint] = useState(false)
   const [nonce, setNonce] = useState(0)
 
@@ -126,26 +133,33 @@ function SearchContent({ q, project, kind, projects }: { q: string; project: str
   const scope = scopeFor(draft.kind)
 
   return (
-    <div className="search-page">
-      <form className="search-workspace" role="search" onSubmit={submit}>
-        <div className="search-command">
-          <h1 className="search-brand" aria-label="Search">Ledger / Search</h1>
-          <div className="search-query-row">
-            <label className="visually-hidden" htmlFor="search-q">Search memory</label>
-            <input id="search-q" type="search" placeholder="What do you need to recall?" value={draft.q} onChange={(event) => setDraft({ ...draft, q: event.target.value })} autoFocus autoComplete="off" />
-            <button type="submit" className="search-submit" aria-label="Search">
-              <Icon name="arrow" size={28} />
-            </button>
-          </div>
+    <>
+      <header className="page-head">
+        <div>
+          <p className="eyebrow">Every project's memory</p>
+          <h1>Search</h1>
         </div>
-        <div className="search-scopes" role="group" aria-label="Search scope">
+        <p className="muted">Find decisions, notes, todos, and statuses across all your projects, by meaning as well as exact words.</p>
+      </header>
+      <form role="search" onSubmit={submit}>
+        <div className="search-query-row">
+          <label className="visually-hidden" htmlFor="search-q">Search memory</label>
+          <input id="search-q" type="search" placeholder="What do you need to recall?" value={draft.q} onChange={(event) => setDraft({ ...draft, q: event.target.value })} autoFocus autoComplete="off" />
+          <button type="submit" className="btn btn-primary" aria-label="Search">
+            <Icon name="search" />
+            <span className="search-submit-label">Search</span>
+          </button>
+        </div>
+        <div className="view-tabs search-scopes" role="group" aria-label="Search scope">
           {(['everything', 'projects', 'entries'] as const).map((item) => (
             <button key={item} type="button" className="search-scope" aria-pressed={scope === item} onClick={() => selectScope(item)}>
               {item[0]!.toUpperCase() + item.slice(1)}
             </button>
           ))}
-          <button type="button" className="search-filter-toggle" aria-label="Filters" aria-expanded={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}>
-            <Icon name="filter" size={23} />
+          <button type="button" className="search-filter-toggle" aria-label={active ? `Filters, ${active} active` : 'Filters'} aria-expanded={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}>
+            <Icon name="filter" />
+            <span className="search-filter-label">Filters</span>
+            {active > 0 && <span className="count">{active}</span>}
           </button>
         </div>
         {filtersOpen && (
@@ -171,11 +185,9 @@ function SearchContent({ q, project, kind, projects }: { q: string; project: str
           </div>
         )}
       </form>
-      <div className="search-body">
-        {(hint || !request) && <p className="search-intro">Type a question or a few words. Search looks through every project's decisions, notes, todos, and statuses by meaning as well as exact words; use filters only to narrow the results.</p>}
-        {request && <Results key={`${JSON.stringify(request)}#${nonce}`} request={request} />}
-      </div>
-    </div>
+      {(hint || !request) && <p className="search-intro">Type a question or a few words, then press Enter. Use the tabs and filters only to narrow the results.</p>}
+      {request && <Results key={`${JSON.stringify(request)}#${nonce}`} request={request} />}
+    </>
   )
 }
 
