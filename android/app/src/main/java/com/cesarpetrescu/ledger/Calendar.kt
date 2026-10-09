@@ -274,7 +274,7 @@ private fun EventForm(model: LedgerModel, id: String, event: JSONObject, calenda
                 else api.request("PUT", "/calendar/events/${segment(id)}", payload.put("etag", etag))
             }
         }) { Text("Save event") } }
-        if (id.isNotBlank()) item { ConfirmButton("Delete event", "Delete this event from your calendar?", !model.busy && !recurring) {
+        if (id.isNotBlank()) item { ConfirmButton("Delete event", "Delete this event from your calendar?", !model.busy && !recurring, danger = true) {
             model.act("Event deleted", after = model::back) { it.request("DELETE", "/calendar/events/${segment(id)}", json("etag" to etag)) }
         } }
     }
@@ -322,7 +322,7 @@ fun CalendarSettings(model: LedgerModel) {
                         Text(calendar.text("name"))
                     }
                 }
-                item { ConfirmButton("Disconnect calendar", "Disconnect this calendar account from Ledger? Events remain with the provider.", !model.busy) {
+                item { ConfirmButton("Disconnect calendar", "Disconnect this calendar account from Ledger? Events remain with the provider.", !model.busy, danger = true) {
                     model.act("Calendar disconnected") { it.request("DELETE", "/calendar/connection") }
                 } }
             } else {

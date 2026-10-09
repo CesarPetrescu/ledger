@@ -396,7 +396,7 @@ private fun EntrySheet(model: LedgerModel, entry: JSONObject, repeats: List<JSON
             TextButton(onClick = { close(); model.go(projectRoute(entry.text("slug"))) }) { Text("Open project") }
             Overflow("More actions for this entry", listOf(MenuAction("Delete entry", danger = true) { deleting = true }), enabled = !model.busy)
         }
-        if (deleting) ConfirmDialog("Delete entry", "Move this entry to Trash? You can undo it or restore it from Trash for 30 days.", { deleting = false }) {
+        if (deleting) ConfirmDialog("Delete entry", "Move this entry to Trash? You can undo it or restore it from Trash for 30 days.", { deleting = false }, danger = true) {
             model.undoable("Entry moved to Trash", after = { afterDelete(); close() }) { it.request("DELETE", "/entries/${segment(id)}") }
         }
         entry.text("reply_to").takeIf { it.isNotBlank() }?.let { root ->

@@ -46,8 +46,8 @@ fun Settings(model: LedgerModel) {
         item { SummaryCard("Approve a device", body = "Enter the code shown by the Ledger CLI.") { model.go("device") } }
         item { SummaryCard("Calendars", body = "Connect Nextcloud and choose visible calendars.") { model.go("calendar-settings") } }
         item { OutlinedButton(onClick = { openBrowser(context, "https://github.com/CesarPetrescu/ledger/releases/latest", model) }) { Text("Check for updates") } }
-        item { ConfirmButton("Sign out", "Sign out and revoke this phone's owner session?", !model.busy, model::logout) }
-        item { ConfirmButton("Forget this phone", "Remove the saved session from this phone without contacting the server. Use this if the server is unreachable. The server session remains valid until it expires.", !model.busy, model::forget) }
+        item { ConfirmButton("Sign out", "Sign out and revoke this phone's owner session?", !model.busy, action = model::logout) }
+        item { ConfirmButton("Forget this phone", "Remove the saved session from this phone without contacting the server. Use this if the server is unreachable. The server session remains valid until it expires.", !model.busy, action = model::forget) }
     }
 }
 
@@ -117,7 +117,7 @@ fun Clients(model: LedgerModel) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     SummaryCard(client.text("client_name").ifBlank { "Unnamed client" }, label(client.text("kind")),
                         "${plural(client.optInt("active_access_tokens"), "access token")} · ${plural(client.optInt("active_refresh_tokens"), "refresh token")}\nLast used: ${displayTime(client.text("last_used_at")).ifBlank { "Never" }}\n${client.strings("redirect_uris").joinToString("\n")}")
-                    ConfirmButton("Revoke access", "Revoke all access and refresh tokens for ${client.text("client_name")}? It will need to reconnect.", !model.busy) {
+                    ConfirmButton("Revoke access", "Revoke all access and refresh tokens for ${client.text("client_name")}? It will need to reconnect.", !model.busy, danger = true) {
                         model.act("Client access revoked") { it.request("POST", "/oauth/revoke", json("client_id" to client.text("client_id"))) }
                     }
                 }
@@ -141,7 +141,7 @@ fun ApiKeys(model: LedgerModel) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     SummaryCard(key.text("name"), if (revoked) "Revoked ${displayTime(key.text("revoked_at"))}" else "Dispatch research",
                         "Key ${key.text("prefix")}…\nCreated: ${displayTime(key.text("created_at"))}\nLast used: ${displayTime(key.text("last_used_at")).ifBlank { "Never" }}")
-                    if (!revoked) ConfirmButton("Revoke key", "Revoke ${key.text("name")}? It stops working immediately.", !model.busy) {
+                    if (!revoked) ConfirmButton("Revoke key", "Revoke ${key.text("name")}? It stops working immediately.", !model.busy, danger = true) {
                         model.act("API key revoked") { it.request("DELETE", "/api-keys/${segment(key.text("id"))}") }
                     }
                 }
