@@ -221,9 +221,23 @@ class OwnerFlowTest {
             awaitText("Activity")
             scrollTo("Android verification note")
             ui.onNodeWithText("Android verification note").assertExists()
+            // Scrolling the list on slides the header away while the tabs stay; scrolling back brings it back.
+            ui.onNodeWithTag("page").performTouchInput { swipeUp() }
+            ui.waitForIdle()
+            ui.onNodeWithText("Add entry").assertIsNotDisplayed()
+            ui.onNodeWithText("Todos").assertIsDisplayed()
+            ui.onNodeWithTag("page").performTouchInput { swipeDown() }
+            ui.waitForIdle()
+            ui.onNodeWithText("Add entry").assertIsDisplayed()
             // The stat tiles lead to what they count: open todos switches to the Todos tab.
             tap("open todo")
             awaitText("Write the fixture todo")
+            // The question tile opens the Inbox on top of the project, so Back returns to the project, as on the web.
+            tap("question waits for you")
+            awaitText("Confirm the fixture pricing")
+            androidx.test.espresso.Espresso.pressBack()
+            awaitText("Write the fixture todo")
+            ui.onNodeWithText("question waits for you").assertIsDisplayed()
             // Details lists the project's fields; Handoffs lists its handoffs, each opening its thread.
             projectTab("Details")
             awaitText("Ship the next milestone")

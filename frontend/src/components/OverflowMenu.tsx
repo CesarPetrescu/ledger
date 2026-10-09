@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Icon } from './ui'
 
 export interface OverflowItem {
@@ -16,6 +16,13 @@ export function OverflowMenu({ label, items, text }: { label: string; items: Ove
   const [open, setOpen] = useState(false)
   const root = useRef<HTMLDivElement>(null)
   const button = useRef<HTMLButtonElement>(null)
+
+  // The list opens leftward from its button; a button near the left edge (a phone row's actions start there) would
+  // push it off screen, so it opens rightward instead. Measured before paint, on the list each opening mounts afresh.
+  useLayoutEffect(() => {
+    const list = root.current?.querySelector<HTMLElement>('.overflow-menu-list')
+    if (list && list.getBoundingClientRect().left < 8) list.dataset.align = 'start'
+  }, [open])
 
   useEffect(() => {
     if (!open) return

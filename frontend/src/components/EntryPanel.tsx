@@ -235,10 +235,18 @@ export function Snooze({ entry, owner }: { entry: TableEntry; owner: ReturnType<
   return <OverflowMenu label="Snooze" text="Snooze" items={SNOOZE_CHOICES.map(([days, label, done]) => ({ label, disabled: owner.busy, onSelect: () => void owner.act(entry.id, { snooze_days: days }, done) }))} />
 }
 
-/** Your answer, saved under the entry where the agent reads it; in the panel and inline under an Inbox row. */
+/** Your answer, saved under the entry where the agent reads it; in the panel and inline under an Inbox row. Each time
+ * [autoFocus] turns on (an Inbox row opening its box), the cursor goes in and the whole box, Send included, scrolls into view. */
 export function ReplyBox({ entry, asking, autoFocus = false }: { entry: TableEntry; asking: boolean; autoFocus?: boolean }) {
   // The panel and an Inbox row can both show a box for the same entry; ids must not collide.
   const id = useId()
+  const form = useRef<HTMLFormElement>(null)
+  useEffect(() => {
+    if (!autoFocus) return
+    form.current?.querySelector('textarea')?.focus({ preventScroll: true })
+    // Not every environment scrolls (tests run without layout).
+    form.current?.scrollIntoView?.({ block: 'nearest' })
+  }, [autoFocus])
   const [body, setBody] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -269,9 +277,9 @@ export function ReplyBox({ entry, asking, autoFocus = false }: { entry: TableEnt
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) void send()
   }
   return (
-    <form className="reply-box" data-asking={asking ? 'true' : undefined} onSubmit={(event) => void send(event)}>
+    <form ref={form} className="reply-box" data-asking={asking ? 'true' : undefined} onSubmit={(event) => void send(event)}>
       <label htmlFor={`${id}-reply`} className={asking ? 'reply-label' : 'visually-hidden'}>{asking ? `Answer ${agent}` : 'Reply'}</label>
-      <textarea id={`${id}-reply`} rows={asking ? 3 : 2} maxLength={4000} value={body} disabled={busy} autoFocus={autoFocus}
+      <textarea id={`${id}-reply`} rows={asking ? 3 : 2} maxLength={4000} value={body} disabled={busy}
         placeholder={asking ? 'Type your answer…' : agent ? `Add a note or instruction for ${agent}…` : 'Add a note…'}
         onChange={(event) => setBody(event.target.value)} onKeyDown={onKeyDown} aria-describedby={`${id}-hint`} />
       <div className="reply-box-foot">

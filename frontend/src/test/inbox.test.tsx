@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import type { TableEntry } from '../api'
@@ -33,6 +33,39 @@ describe('inbox actions', () => {
     const toast = (await screen.findByText('Reply saved; marked handled.')).closest('.toast') as HTMLElement
     expect(within(toast).getByRole('button', { name: 'Undo' })).toBeInTheDocument()
     expect(calls.find((call) => call.path === '/admin/api/entries/70/replies')?.body).toEqual({ body: 'Use the staging bucket' })
+  })
+
+  it('keeps a typed answer when its box is closed and opened again', async () => {
+    mockApi(base)
+    renderApp('/admin/')
+    const asks = await screen.findByRole('region', { name: 'Needs you' })
+    const answer = within(asks).getByRole('button', { name: 'Answer' })
+    const user = userEvent.setup()
+    await user.click(answer)
+    await user.type(within(asks).getByLabelText('Answer codex'), 'Half an answer')
+    await user.click(answer)
+    expect(answer).toHaveAttribute('aria-expanded', 'false')
+    expect(within(asks).getByLabelText('Answer codex')).not.toBeVisible()
+    await user.click(answer)
+    const box = within(asks).getByLabelText('Answer codex')
+    expect(box).toBeVisible()
+    expect(box).toHaveFocus()
+    expect(box).toHaveValue('Half an answer')
+  })
+
+  it('moves focus to the next row when the one you acted on leaves the list', async () => {
+    const second: TableEntry = { ...ask, id: '72', meta: { ...ask.meta!, title: 'Region question', ask: 'Which region should Atlas run in?' } }
+    mockApi({
+      ...base,
+      'GET /admin/api/inbox': [{ body: { needs_you: [ask, second], todos: [todo], todos_total: 1, projects: [] } }, { body: { needs_you: [second], todos: [todo], todos_total: 1, projects: [] } }],
+      'POST /admin/api/entries/70/owner': { body: { ...owner, handled: true, action_id: '908' } },
+    })
+    renderApp('/admin/')
+    const asks = await screen.findByRole('region', { name: 'Needs you' })
+    const user = userEvent.setup()
+    await user.click(within(asks).getAllByRole('button', { name: 'Handled' })[0]!)
+    await waitFor(() => expect(within(asks).queryByText('Which bucket should uploads use?')).not.toBeInTheDocument())
+    await waitFor(() => expect(within(asks).getByRole('button', { name: 'Which region should Atlas run in?' })).toHaveFocus())
   })
 
   it('snoozes a question and an open todo from their rows, with the same choices as the entry panel', async () => {

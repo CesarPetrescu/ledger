@@ -127,11 +127,20 @@ class TableTest {
         val now = java.time.OffsetDateTime.parse("2026-09-10T12:00:00Z")
         val busy = JSONObject().put("needs_you", 1).put("open_todos", 3).put("week_entries", 1).put("week_agents", org.json.JSONArray(listOf("codex", OWNER_SOURCE)))
         assertEquals(listOf(ProjectStat(1, "question waits for you", "inbox"), ProjectStat(3, "open todos", "todos"),
-            ProjectStat(1, "entry this week", "activity"), ProjectStat(2, "codex, You", "")), projectStats(busy, now))
+            ProjectStat(1, "entry this week", "activity"), ProjectStat(2, "codex, You", "names")), projectStats(busy, now))
         val quiet = JSONObject().put("needs_you", 0).put("open_todos", 1).put("week_entries", 0).put("week_agents", org.json.JSONArray()).put("last_entry_at", "2026-09-07T12:00:00Z")
         assertEquals(listOf(ProjectStat(0, "questions wait for you", "inbox"), ProjectStat(1, "open todo", "todos"),
             ProjectStat(0, "entries this week", "activity"), ProjectStat(0, "quiet; last entry 3d ago", "")), projectStats(quiet, now))
         assertEquals(ProjectStat(0, "agents active", ""), projectStats(JSONObject(), now).last())
+    }
+
+    @Test fun projectHeaderSlidesAwayAsTheListScrollsOnAndBackOnAnyScrollBack() {
+        // A list moving on (negative dy) hides the header first, never more than its height.
+        assertEquals(120f, slideHeader(0f, -120f, 400))
+        assertEquals(400f, slideHeader(300f, -250f, 400))
+        // Scrolling back shows it again from wherever the list is, never past fully shown.
+        assertEquals(350f, slideHeader(400f, 50f, 400))
+        assertEquals(0f, slideHeader(100f, 300f, 400))
     }
 
     @Test fun projectHeaderDropsTilesAndSummaryWithTheKeyboardUpOrOnAShortScreen() {

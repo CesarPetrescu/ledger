@@ -19,6 +19,12 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -26,6 +32,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -39,6 +46,7 @@ import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlin.math.roundToInt
 
 private val entryKinds = listOf("decision", "note", "todo", "status").map { it to label(it) }
 private val stateLabels = mapOf("done" to "Done", "in_progress" to "In progress", "blocked" to "Blocked")
@@ -767,7 +775,8 @@ fun projectScreenArgs(route: String): Triple<String, String, String> {
         if (parts.first() == "project") parts.getOrElse(3) { "" } else "")
 }
 
-/** One of a project's stat tiles: a count, what it counts, and what a tap [opens] ("inbox", a tab, or "" for nothing). */
+/** One of a project's stat tiles: a count, what it counts, and what a tap [opens] ("inbox", a tab, "names" to show every
+ * agent's name when two lines cut them off, or "" for nothing). */
 data class ProjectStat(val count: Int, val label: String, val opens: String)
 
 /** The web's stat tiles: questions waiting for you, open todos, entries this week, and the agents who wrote them. */
@@ -784,7 +793,7 @@ fun projectStats(p: JSONObject, now: OffsetDateTime = OffsetDateTime.now()): Lis
             agents.isNotEmpty() -> agents.joinToString(", ", transform = ::writerName)
             p.text("last_entry_at").isNotBlank() -> "quiet; last entry ${ago(p.text("last_entry_at"), now)} ago"
             else -> "agents active"
-        }, ""),
+        }, if (agents.isNotEmpty()) "names" else ""),
     )
 }
 
@@ -792,20 +801,26 @@ fun projectStats(p: JSONObject, now: OffsetDateTime = OffsetDateTime.now()): Lis
  * screen they would leave a tab's list, such as the Repos link form, almost no room, so only Add entry and the tabs stay. */
 fun roomyProjectHeader(imeVisible: Boolean, screenHeightDp: Int) = !imeVisible && screenHeightDp >= 480
 
-/** The stat tiles in one compact row, so the tabs stay in sight on a small phone; a question waiting for you is amber, like the web. */
+/** The stat tiles in one compact row, so the tabs stay in sight on a small phone; a question waiting for you is amber, like the web.
+ * The agents tile shows two lines of names; a tap shows them all, as the web does, and another folds them again. */
 @Composable
 private fun ProjectStatTiles(stats: List<ProjectStat>, open: (String) -> Unit) {
+    var allNames by rememberSaveable { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         stats.forEach { stat ->
             val ask = stat.opens == "inbox" && stat.count > 0
+            val names = stat.opens == "names"
             val (background, accent) = if (ask) toneColors(Tone.Warn) else MaterialTheme.colorScheme.background to MaterialTheme.colorScheme.onSurface
             Surface(Modifier.weight(1f).fillMaxHeight(), shape = MaterialTheme.shapes.small, color = background,
                 border = BorderStroke(1.dp, if (ask) accent else MaterialTheme.colorScheme.outlineVariant)) {
-                Column(Modifier.fillMaxSize().then(if (stat.opens.isBlank()) Modifier else Modifier.clickable { open(stat.opens) })
-                    .padding(horizontal = 8.dp, vertical = 6.dp)) {
+                Column(Modifier.fillMaxSize().then(when {
+                    stat.opens.isBlank() -> Modifier
+                    names -> Modifier.clickable(onClickLabel = if (allNames) "Fold the names" else "Show every name") { allNames = !allNames }
+                    else -> Modifier.clickable { open(stat.opens) }
+                }).padding(horizontal = 8.dp, vertical = 6.dp)) {
                     Text("${stat.count}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = accent)
                     Text(stat.label, style = MaterialTheme.typography.labelSmall, color = if (ask) accent else MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        maxLines = if (names && allNames) Int.MAX_VALUE else 2, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
@@ -822,12 +837,17 @@ fun ProjectScreen(model: LedgerModel, slug: String, initialTab: String = "activi
     Load(model, "project-summary:$slug", { api -> api.request("GET", "/table/projects").rows("projects").firstOrNull { it.text("slug") == slug } ?: throw ApiError(404, "Project not found.") }) { p ->
         // The top bar names the project; the header says how it is doing and offers one main action.
         LaunchedEffect(p) { model.knowProjects(listOf(p)) }
-        Column {
-            Column(Modifier.padding(start = 20.dp, end = 8.dp, top = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        // Above the tabs, the header slides away as a tab's list scrolls on and returns on any scroll back, so a small
+        // phone keeps most of its height for the list; a new tab starts with it shown.
+        val header = remember { SlidingHeader() }
+        LaunchedEffect(tab) { header.show() }
+        Column(Modifier.nestedScroll(header)) {
+            Column(header.modifier.padding(start = 20.dp, end = 8.dp, top = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 val roomy = roomyProjectHeader(WindowInsets.isImeVisible, LocalConfiguration.current.screenHeightDp)
                 // The tiles keep a 20dp margin on both sides; the column's narrower end is for the ⋯ button's own padding.
                 if (roomy) Box(Modifier.padding(end = 12.dp, bottom = 4.dp)) {
-                    ProjectStatTiles(projectStats(p)) { target -> if (target == "inbox") model.tab("inbox") else { tab = target; if (target == "todos") todoState = "open" } }
+                    // The Inbox opens on top of the project, so Back returns here, as it does on the web.
+                    ProjectStatTiles(projectStats(p)) { target -> if (target == "inbox") model.go("inbox") else { tab = target; if (target == "todos") todoState = "open" } }
                 }
                 HealthTag(p.text("status_state"))
                 // Tap the summary to read it all, including what the project needs from you.
@@ -883,6 +903,28 @@ fun ProjectScreen(model: LedgerModel, slug: String, initialTab: String = "activi
         }
     }
 }
+
+/** A header that a list below it scrolls out of sight first and brings back on any scroll the other way, like Material's
+ * enterAlways top app bar. Its [modifier] clips the header to the part still shown. */
+class SlidingHeader : NestedScrollConnection {
+    private var height = 0
+    private var hidden by mutableFloatStateOf(0f)
+    fun show() { hidden = 0f }
+    override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+        val before = hidden
+        hidden = slideHeader(hidden, available.y, height)
+        return Offset(0f, before - hidden)
+    }
+    val modifier = Modifier.clipToBounds().layout { measurable, constraints ->
+        val placeable = measurable.measure(constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity))
+        height = placeable.height
+        val shown = (placeable.height - hidden.roundToInt()).coerceAtLeast(0)
+        layout(placeable.width, shown) { placeable.place(0, shown - placeable.height) }
+    }
+}
+
+/** How much of a [height]-pixel header is hidden after a scroll of [dy] (negative as the list moves on). */
+fun slideHeader(hidden: Float, dy: Float, height: Int) = (hidden - dy).coerceIn(0f, height.toFloat())
 
 private fun priorityRank(entry: JSONObject) = when (entry.optJSONObject("meta")?.text("priority")) { "high" -> 0; "low" -> 2; else -> 1 }
 
