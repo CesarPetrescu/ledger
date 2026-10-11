@@ -1,6 +1,8 @@
 // Same-origin JSON client for /admin/api. The session cookie is HttpOnly and sent
 // by the browser; the CSRF token lives only in module memory for the page lifetime.
 
+import type { CredentialJSON } from './webauthn'
+
 export type Tier = 'focus' | 'maintain' | 'park'
 export type EntryKind = 'decision' | 'note' | 'todo' | 'status'
 
@@ -554,6 +556,38 @@ export interface ResearchCreated {
 export interface Session {
   csrf_token: string
   expires_at: string
+  /** A remembered session lasts 30 days from its last use (90 at most); otherwise 12 hours. */
+  remember?: boolean
+}
+
+export type SignInMethod = 'password' | 'passkey' | 'password+passkey'
+
+/** The password was right and a passkey is registered: sign-in finishes with a passkey assertion. */
+export interface PasskeyRequired {
+  passkey_required: true
+  /** Single use, valid for five minutes, and only with a passkey assertion. */
+  pending: string
+  options: PublicKeyCredentialRequestOptionsJSON
+}
+
+export interface Passkey {
+  id: string
+  name: string
+  provider: string
+  created_at: string
+  last_used_at?: string
+}
+
+/** A signed-in browser or app. */
+export interface DeviceSession {
+  id: string
+  label: string
+  method: SignInMethod
+  remember: boolean
+  created_at: string
+  last_seen_at: string
+  expires_at: string
+  current: boolean
 }
 
 export class ApiError extends Error {
@@ -587,7 +621,7 @@ export function onUnauthorized(listener: () => void): () => void {
   return () => unauthorizedListeners.delete(listener)
 }
 
-async function request<T>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body?: unknown): Promise<T> {
+async function request<T>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' }
   if (body !== undefined && !(body instanceof FormData)) {
     headers['Content-Type'] = 'application/json'
@@ -636,8 +670,20 @@ export const api = {
   changeApprovalPassword: (current_password: string, new_password: string) => request<void>('PUT', '/oauth/password', { current_password, new_password }),
   lookupDevice: (user_code: string) => request<DeviceRequest>('POST', '/oauth/device', { user_code, action: 'lookup' }),
   decideDevice: (user_code: string, action: 'approve' | 'deny') => request<void>('POST', '/oauth/device', { user_code, action }),
-  getSession: () => request<Session & { authenticated: boolean }>('GET', '/session'),
-  login: (password: string) => request<Session>('POST', '/login', { password }),
+  getSession: () => request<Session & { authenticated: boolean; method?: SignInMethod; session_id?: string }>('GET', '/session'),
+  login: (password: string, remember: boolean) => request<Session | PasskeyRequired>('POST', '/login', { password, remember }),
+  passkeyLoginOptions: () => request<{ challenge_id: string; options: PublicKeyCredentialRequestOptionsJSON }>('POST', '/login/passkey/options', {}),
+  /** challenge_id signs in with the passkey alone; pending finishes a password sign-in. */
+  loginWithPasskey: (proof: { challenge_id: string } | { pending: string }, credential: CredentialJSON, remember: boolean) =>
+    request<Session>('POST', '/login/passkey', { ...proof, credential, remember }),
+  listPasskeys: () => request<{ passkeys: Passkey[]; required: boolean }>('GET', '/passkeys'),
+  passkeyOptions: (password: string) => request<{ challenge_id: string; options: PublicKeyCredentialCreationOptionsJSON }>('POST', '/passkeys/options', { password }),
+  addPasskey: (challenge_id: string, credential: CredentialJSON) => request<{ passkey: Passkey }>('POST', '/passkeys', { challenge_id, credential }).then((response) => response.passkey),
+  renamePasskey: (id: string, name: string) => request<{ passkey: Passkey }>('PATCH', `/passkeys/${encodeURIComponent(id)}`, { name }).then((response) => response.passkey),
+  removePasskey: (id: string, password: string) => request<void>('DELETE', `/passkeys/${encodeURIComponent(id)}`, { password }),
+  listSessions: () => request<{ sessions: DeviceSession[] }>('GET', '/sessions').then((response) => response.sessions),
+  endSession: (id: string) => request<void>('DELETE', `/sessions/${encodeURIComponent(id)}`),
+  endOtherSessions: () => request<{ revoked: number }>('POST', '/sessions/revoke-others'),
   logout: () => request<void>('POST', '/logout'),
   getOverview: () => request<Overview>('GET', '/overview'),
   listProjects: (tier?: Tier) => request<{ projects: Project[] }>('GET', tier ? `/projects?tier=${encodeURIComponent(tier)}` : '/projects').then((r) => r.projects),

@@ -132,7 +132,7 @@ describe('access', () => {
     renderApp('/admin/clients')
     expect(await screen.findByRole('heading', { name: 'Access', level: 1 })).toBeInTheDocument()
     expect(window.location.pathname).toBe('/admin/access')
-    for (const section of ['Connect an agent', 'Connected apps and access', 'API keys', 'GitHub sync', 'Approval password']) {
+    for (const section of ['Passkeys', 'Signed-in devices', 'Connect an agent', 'Connected apps and access', 'API keys', 'GitHub sync', 'Approval password']) {
       expect(screen.getByRole('region', { name: section })).toBeInTheDocument()
     }
     expect(screen.getAllByRole('link', { name: 'Connect a machine' })[0]).toHaveAttribute('href', '/admin/connect')

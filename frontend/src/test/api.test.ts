@@ -43,7 +43,7 @@ describe('api client', () => {
 
   it('never stores authentication material in web storage', async () => {
     mockApi({ 'POST /admin/api/login': { body: { csrf_token: 'csrf-login', expires_at: '2026-09-04T20:00:00Z' } } })
-    await api.login('secret')
+    await api.login('secret', true)
     expect(Object.keys(window.localStorage)).toHaveLength(0)
     expect(Object.keys(window.sessionStorage)).toHaveLength(0)
     expect(document.cookie).toBe('')

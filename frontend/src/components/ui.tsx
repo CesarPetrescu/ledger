@@ -12,6 +12,7 @@ import {
   IconDeviceDesktop,
   IconEye,
   IconEyeOff,
+  IconFingerprint,
   IconFolder,
   IconExternalLink,
   IconHelp,
@@ -35,7 +36,7 @@ import {
   type IconProps,
 } from '@tabler/icons-react'
 
-export type IconName = 'eye' | 'eye-off' | 'menu' | 'close' | 'search' | 'arrow' | 'filter' | 'logout' | 'plus' | 'alert' | 'back' | 'refresh' | 'book' | 'home' | 'inbox' | 'help' | 'agents' | 'projects' | 'calendar' | 'handoffs' | 'copy' | 'paperclip' | 'clients' | 'external' | 'trash' | 'live' | 'offline' | 'table' | 'system' | 'light' | 'dark' | 'dots'
+export type IconName = 'eye' | 'eye-off' | 'menu' | 'close' | 'search' | 'arrow' | 'filter' | 'logout' | 'plus' | 'alert' | 'back' | 'refresh' | 'book' | 'home' | 'inbox' | 'help' | 'agents' | 'projects' | 'calendar' | 'handoffs' | 'copy' | 'paperclip' | 'clients' | 'external' | 'trash' | 'live' | 'offline' | 'table' | 'system' | 'light' | 'dark' | 'dots' | 'passkey'
 
 const icons: Record<IconName, ComponentType<IconProps>> = {
   eye: IconEye,
@@ -70,6 +71,7 @@ const icons: Record<IconName, ComponentType<IconProps>> = {
   light: IconSun,
   dark: IconMoon,
   dots: IconDots,
+  passkey: IconFingerprint,
 }
 
 export function Icon({ name, ...props }: { name: IconName } & IconProps) {
