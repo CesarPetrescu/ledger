@@ -573,9 +573,11 @@ export interface PasskeyRequired {
 export interface Passkey {
   id: string
   name: string
+  /** Empty when Ledger does not know the authenticator. */
   provider: string
   created_at: string
-  last_used_at?: string
+  /** Null until the passkey first signs in. */
+  last_used_at: string | null
 }
 
 /** A signed-in browser or app. */

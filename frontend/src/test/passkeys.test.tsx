@@ -5,7 +5,8 @@ import type { DeviceSession, Passkey } from '../api'
 import { authenticatedSession, futureSessionExpiry, homeRoutes, mockApi, renderApp, stubPasskeys } from './helpers'
 
 const bitwarden: Passkey = { id: 'pk-1', name: 'Bitwarden', provider: 'Bitwarden', created_at: '2026-10-01T10:00:00Z', last_used_at: '2026-10-10T10:00:00Z' }
-const pixel: Passkey = { id: 'pk-2', name: 'Pixel', provider: 'Google Password Manager', created_at: '2026-10-02T10:00:00Z' }
+// As the server sends a passkey whose provider it does not know and that was never used.
+const pixel: Passkey = { id: 'pk-2', name: 'Pixel', provider: '', created_at: '2026-10-02T10:00:00Z', last_used_at: null }
 
 const creationOptionsJSON = {
   challenge: 'Y2hhbGxlbmdl',
@@ -122,7 +123,7 @@ describe('passkeys on Access', () => {
     const table = await within(section).findByRole('table', { name: 'Passkeys' })
     const [first, second] = within(table).getAllByRole('row').slice(1)
     expect(first).toHaveTextContent('Bitwarden')
-    expect(second).toHaveTextContent('Google Password Manager')
+    expect(second!.querySelector('[data-label="Provider"]')).toHaveTextContent('Unknown')
     expect(second!.querySelector('[data-label="Last used"]')).toHaveTextContent('never')
 
     const user = userEvent.setup()

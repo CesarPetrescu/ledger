@@ -422,7 +422,7 @@ function PasskeyRow({ passkey, onChanged, onRemove }: { passkey: Passkey; onChan
         <button type="button" className="btn btn-small" onClick={() => setName(null)} disabled={busy}>Cancel</button>
       </form>
     )}</td>
-    <td data-label="Provider">{passkey.provider}</td>
+    <td data-label="Provider">{passkey.provider || <span className="muted">Unknown</span>}</td>
     <td data-label="Added"><Timestamp iso={passkey.created_at} /></td>
     <td data-label="Last used">{passkey.last_used_at ? <Timestamp iso={passkey.last_used_at} /> : <span className="muted">never</span>}</td>
     <td data-label="Actions" className="actions">{name === null && <span className="row-actions">
