@@ -259,6 +259,8 @@ func TestPasskeysReplacePasswordOnlySignIn(t *testing.T) {
 	if registered.Code != http.StatusCreated || view.Passkey.Name != "Bitwarden" || view.Passkey.Provider != "Bitwarden" || view.Passkey.LastUsedAt != nil || view.Passkey.ID == "" {
 		t.Fatalf("register = %d %s", registered.Code, registered.Body.String())
 	}
+	// The password-only session that added it now has a new cookie and CSRF token.
+	owner, _ = cookieSession(registered)
 	if replay := finishRegistration(t, server, owner, started.ChallengeID, credential); replay.Code != http.StatusBadRequest {
 		t.Fatalf("replayed registration = %d %s", replay.Code, replay.Body.String())
 	}
@@ -492,9 +494,11 @@ func TestRegistrationChallengeBelongsToItsSession(t *testing.T) {
 	if res := finishRegistration(t, server, first, again.ChallengeID, unverified.create(again.Options)); res.Code != http.StatusBadRequest {
 		t.Fatalf("unverified registration = %d %s", res.Code, res.Body.String())
 	}
-	if res := finishRegistration(t, server, first, started.ChallengeID, credential); res.Code != http.StatusCreated {
+	res := finishRegistration(t, server, first, started.ChallengeID, credential)
+	if res.Code != http.StatusCreated {
 		t.Fatalf("owning session = %d %s", res.Code, res.Body.String())
 	}
+	first, _ = cookieSession(res)
 	// Signing out deletes the session's unfinished registrations with it.
 	registrationOptions(t, server, first)
 	if res := request(t, server, http.MethodPost, "/admin/api/logout", "", authed(first, true)); res.Code != http.StatusNoContent {
@@ -516,16 +520,29 @@ func TestAddingAPasskeySignsOutPasswordOnlySessions(t *testing.T) {
 	stale, _ := cookieSession(request(t, server, http.MethodPost, "/admin/api/login", `{"password":"correct horse","remember":true}`, signInHeaders("198.51.100.60")))
 	p := newSoftPasskey(t)
 	started := registrationOptions(t, server, owner)
-	if res := finishRegistration(t, server, owner, started.ChallengeID, p.create(started.Options)); res.Code != http.StatusCreated || !strings.Contains(res.Body.String(), `"revoked":1`) {
-		t.Fatalf("first passkey = %d %s", res.Code, res.Body.String())
+	added := finishRegistration(t, server, owner, started.ChallengeID, p.create(started.Options))
+	if added.Code != http.StatusCreated || !strings.Contains(added.Body.String(), `"revoked":1`) {
+		t.Fatalf("first passkey = %d %s", added.Code, added.Body.String())
 	}
 	if res := request(t, server, http.MethodPost, "/admin/api/passkeys/options", `{"password":"correct horse"}`, authed(stale, true)); res.Code != http.StatusUnauthorized {
 		t.Fatalf("password-only session after the first passkey = %d %s", res.Code, res.Body.String())
 	}
-	// The session that added the passkey stays: it has just proved the password and the passkey.
-	if res := request(t, server, http.MethodGet, "/admin/api/session", "", authed(owner, false)); res.Code != http.StatusOK {
-		t.Fatalf("registering session = %d", res.Code)
+	// The session that added the passkey stays signed in, under a new cookie and CSRF token: a copy
+	// of its old cookie, taken while it had only proved the password, stops working.
+	rotated, cookie := cookieSession(added)
+	if cookie == nil || rotated.csrf == "" || rotated.cookie == owner.cookie || rotated.csrf == owner.csrf {
+		t.Fatalf("registering session not rotated: %s", added.Body.String())
 	}
+	if res := request(t, server, http.MethodGet, "/admin/api/session", "", authed(owner, false)); res.Code != http.StatusUnauthorized {
+		t.Fatalf("old cookie of the registering session = %d", res.Code)
+	}
+	if res := request(t, server, http.MethodGet, "/admin/api/session", "", authed(rotated, false)); res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"method":"password+passkey"`) {
+		t.Fatalf("registering session = %d %s", res.Code, res.Body.String())
+	}
+	if res := request(t, server, http.MethodPost, "/admin/api/passkeys/options", `{"password":"correct horse"}`, authed(owner, true)); res.Code != http.StatusUnauthorized {
+		t.Fatalf("old cookie can still add a passkey: %d", res.Code)
+	}
+	owner = rotated
 	// A session that signed in with a passkey is not signed out by the next one.
 	ip := "198.51.100.61"
 	discoverable := passkeyOptions(t, server, ip)

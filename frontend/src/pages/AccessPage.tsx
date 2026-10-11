@@ -1,6 +1,6 @@
 import { Link } from '../router'
 import { useEffect, useRef, useState, type FormEvent, type RefObject } from 'react'
-import { api, describeError, type ApiKey, type Client, type DeviceSession, type Passkey, type SignInMethod } from '../api'
+import { api, describeError, setCsrfToken, type ApiKey, type Client, type DeviceSession, type Passkey, type SignInMethod } from '../api'
 import { useAuth } from '../auth'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { useToast } from '../components/Toast'
@@ -462,7 +462,9 @@ function AddPasskey({ first, onAdded }: { first: boolean; onAdded: () => void })
     setError('')
     try {
       const { challenge_id, options } = await api.passkeyOptions(password)
-      const { passkey, revoked } = await api.addPasskey(challenge_id, await createPasskey(options))
+      const { passkey, revoked, csrf_token } = await api.addPasskey(challenge_id, await createPasskey(options))
+      // A session that had only proved the password was given a new cookie (by the browser) and this token.
+      if (csrf_token) setCsrfToken(csrf_token)
       setPasskeyUsedHere(true)
       setPassword('')
       setOpen(false)

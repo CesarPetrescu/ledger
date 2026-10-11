@@ -46,8 +46,9 @@ describe('passkeys on Access', () => {
       'POST /admin/api/passkeys/options': [
         { status: 403, body: { error: 'Password not accepted.' } },
         { body: { challenge_id: 'reg-1', options: creationOptionsJSON } },
+        { body: { challenge_id: 'reg-2', options: creationOptionsJSON } },
       ],
-      'POST /admin/api/passkeys': { status: 201, body: { passkey: bitwarden, revoked: 2 } },
+      'POST /admin/api/passkeys': { status: 201, body: { passkey: bitwarden, revoked: 2, csrf_token: 'csrf-rotated' } },
     })
     renderApp('/admin/access')
     const section = await screen.findByRole('region', { name: 'Passkeys' })
@@ -82,6 +83,12 @@ describe('passkeys on Access', () => {
     expect(options.map((call) => call.body)).toEqual([{ password: 'wrong' }, { password: 'correct horse' }])
     expect(new Headers(options[1]?.init.headers).get('X-CSRF-Token')).toBe('csrf-123')
     expect(calls.find((call) => call.method === 'POST' && call.path === '/admin/api/passkeys')?.body).toEqual({ challenge_id: 'reg-1', credential: passkeys.attestation })
+    // The password-only session was rotated: later requests carry the new CSRF token.
+    await user.click(await within(section).findByRole('button', { name: 'Add a passkey' }))
+    await user.type(within(section).getByLabelText('Confirm your owner password'), 'correct horse')
+    await user.click(within(section).getByRole('button', { name: 'Continue' }))
+    await waitFor(() => expect(calls.filter((call) => call.path === '/admin/api/passkeys/options')).toHaveLength(3))
+    expect(new Headers(calls.filter((call) => call.path === '/admin/api/passkeys/options')[2]?.init.headers).get('X-CSRF-Token')).toBe('csrf-rotated')
   })
 
   it('keeps the password ready when the passkey prompt is cancelled', async () => {

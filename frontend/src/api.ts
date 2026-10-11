@@ -688,7 +688,8 @@ export const api = {
   listPasskeys: () => request<{ passkeys: Passkey[]; required: boolean }>('GET', '/passkeys'),
   passkeyOptions: (password: string) => request<{ challenge_id: string; options: PublicKeyCredentialCreationOptionsJSON }>('POST', '/passkeys/options', { password }),
   /** revoked counts the other devices signed out because they had signed in with only the password. */
-  addPasskey: (challenge_id: string, credential: CredentialJSON) => request<{ passkey: Passkey; revoked: number }>('POST', '/passkeys', { challenge_id, credential }),
+  /** csrf_token comes back when this session had only proved the password: it now has a new cookie and token. */
+  addPasskey: (challenge_id: string, credential: CredentialJSON) => request<{ passkey: Passkey; revoked: number; csrf_token?: string }>('POST', '/passkeys', { challenge_id, credential }),
   renamePasskey: (id: string, name: string) => request<{ passkey: Passkey }>('PATCH', `/passkeys/${encodeURIComponent(id)}`, { name }).then((response) => response.passkey),
   removePasskey: (id: string, password: string) => request<void>('DELETE', `/passkeys/${encodeURIComponent(id)}`, { password }),
   listSessions: () => request<{ sessions: DeviceSession[] }>('GET', '/sessions').then((response) => response.sessions),

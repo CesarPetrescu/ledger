@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -116,38 +117,100 @@ func (db *DB) OwnerHasPasskeys(ctx context.Context) (bool, error) {
 // ErrPasskeyExists means the credential is already registered.
 var ErrPasskeyExists = errors.New("passkey already registered")
 
-// AddOwnerPasskey registers a passkey and, in the same transaction, signs out every other session
-// that signed in with the password alone: once a passkey exists the password must not be enough,
-// including in a session opened before the passkey existed. keep is the raw identifier of the
-// session registering it, which has just proved the password and the passkey. It reports how many
-// live sessions were signed out.
-func (db *DB) AddOwnerPasskey(ctx context.Context, p OwnerPasskey, keep string) (OwnerPasskey, int64, error) {
+// Registration is the ceremony a passkey comes from: the raw identifiers of its challenge and of
+// the session that asked for it. Callers outside a WebAuthn ceremony, such as tests, pass none.
+type Registration struct {
+	ChallengeID string
+	Session     string
+}
+
+// ErrRegistrationGone means the registration's challenge was used, expired, or cleared by
+// reset-passkeys before the passkey could be saved.
+var ErrRegistrationGone = fmt.Errorf("passkey registration is gone: %w", pgx.ErrNoRows)
+
+// AddOwnerPasskey registers a passkey under PasskeyLock and, in the same transaction:
+//   - uses up the registration's challenge, so a challenge works once and reset-passkeys (which
+//     takes the same lock) cancels a registration still in flight;
+//   - signs out every other session that signed in with the password alone, since once a passkey
+//     exists the password must not be enough, even in a session opened before it existed;
+//   - gives the registering session a new identifier and CSRF token when it had only proved the
+//     password, so a copy of its old cookie stops working; it becomes a password+passkey session.
+//
+// It reports how many live sessions were signed out and the rotated session, if any, whose new
+// identifier the caller must hand back as the cookie.
+func (db *DB) AddOwnerPasskey(ctx context.Context, p OwnerPasskey, reg Registration) (OwnerPasskey, int64, *AdminSession, error) {
 	if p.Transports == nil {
 		p.Transports = []string{}
 	}
 	tx, err := db.Pool.Begin(ctx)
 	if err != nil {
-		return OwnerPasskey{}, 0, err
+		return OwnerPasskey{}, 0, nil, err
 	}
 	defer tx.Rollback(ctx)
 	if err := lockPasskeys(ctx, tx, false); err != nil {
-		return OwnerPasskey{}, 0, err
+		return OwnerPasskey{}, 0, nil, err
+	}
+	if reg.ChallengeID != "" {
+		hash := sha256.Sum256([]byte(reg.ChallengeID))
+		result, err := tx.Exec(ctx, `DELETE FROM owner_webauthn_challenge WHERE hash=$1 AND purpose=$2 AND admin_session IS NOT DISTINCT FROM $3 AND expires_at>now()`,
+			hash[:], ChallengeRegister, sessionHash(reg.Session))
+		if err != nil {
+			return OwnerPasskey{}, 0, nil, err
+		}
+		if result.RowsAffected() == 0 {
+			return OwnerPasskey{}, 0, nil, ErrRegistrationGone
+		}
 	}
 	saved, err := scanOwnerPasskey(tx.QueryRow(ctx, `INSERT INTO owner_passkey(credential_id,public_key,sign_count,aaguid,name,transports,attestation_format,backup_eligible,backup_state)
 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING `+ownerPasskeyColumns,
 		p.CredentialID, p.PublicKey, int64(p.SignCount), p.AAGUID, p.Name, p.Transports, p.AttestationFormat, p.BackupEligible, p.BackupState))
 	if pgErrorCode(err) == "23505" {
-		return OwnerPasskey{}, 0, ErrPasskeyExists
+		return OwnerPasskey{}, 0, nil, ErrPasskeyExists
 	}
 	if err != nil {
-		return OwnerPasskey{}, 0, err
+		return OwnerPasskey{}, 0, nil, err
 	}
-	hash := sha256.Sum256([]byte(keep))
+	keep := sha256.Sum256([]byte(reg.Session))
+	var rotated *AdminSession
+	if reg.Session != "" {
+		id, err := randomToken()
+		if err != nil {
+			return OwnerPasskey{}, 0, nil, err
+		}
+		csrf, err := randomToken()
+		if err != nil {
+			return OwnerPasskey{}, 0, nil, err
+		}
+		fresh := sha256.Sum256([]byte(id))
+		session := AdminSession{ID: id}
+		// Its other unfinished registrations belong to the old identifier and go with it.
+		if _, err := tx.Exec(ctx, `DELETE FROM owner_webauthn_challenge WHERE admin_session=$1 AND EXISTS(SELECT 1 FROM admin_session WHERE hash=$1 AND method=$2)`, keep[:], MethodPassword); err != nil {
+			return OwnerPasskey{}, 0, nil, err
+		}
+		err = scanAdminSession(tx.QueryRow(ctx, `UPDATE admin_session SET hash=$2,csrf_token=$3,method=$4 WHERE hash=$1 AND method=$5 RETURNING `+adminSessionColumns,
+			keep[:], fresh[:], csrf, MethodPasswordPasskey, MethodPassword), &session)
+		switch {
+		case err == nil:
+			rotated, keep = &session, fresh
+		case !errors.Is(err, pgx.ErrNoRows): // no row: the session had already proved a passkey
+			return OwnerPasskey{}, 0, nil, err
+		}
+	}
 	var revoked int64
-	if err := tx.QueryRow(ctx, revokeOtherAdminSessions, hash[:], MethodPassword).Scan(&revoked); err != nil {
-		return OwnerPasskey{}, 0, err
+	if err := tx.QueryRow(ctx, revokeOtherAdminSessions, keep[:], MethodPassword).Scan(&revoked); err != nil {
+		return OwnerPasskey{}, 0, nil, err
 	}
-	return saved, revoked, tx.Commit(ctx)
+	return saved, revoked, rotated, tx.Commit(ctx)
+}
+
+// PeekWebAuthnChallenge reads a registration's session data without using it up: AddOwnerPasskey
+// uses it up when it saves the passkey.
+func (db *DB) PeekWebAuthnChallenge(ctx context.Context, id, purpose, adminSession string) ([]byte, error) {
+	hash := sha256.Sum256([]byte(id))
+	var data []byte
+	err := db.Pool.QueryRow(ctx, `SELECT session_data FROM owner_webauthn_challenge WHERE hash=$1 AND purpose=$2 AND admin_session IS NOT DISTINCT FROM $3 AND expires_at>now()`,
+		hash[:], purpose, sessionHash(adminSession)).Scan(&data)
+	return data, err
 }
 
 func (db *DB) RenameOwnerPasskey(ctx context.Context, id int64, name string) (OwnerPasskey, error) {
@@ -183,6 +246,10 @@ func (db *DB) ResetOwnerPasskeys(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 	defer tx.Rollback(ctx)
+	// Waits for a registration in progress; one that starts later finds its challenge gone.
+	if err := lockPasskeys(ctx, tx, false); err != nil {
+		return 0, err
+	}
 	if _, err := tx.Exec(ctx, `DELETE FROM owner_webauthn_challenge`); err != nil {
 		return 0, err
 	}

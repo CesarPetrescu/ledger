@@ -116,6 +116,15 @@ class Api(val origin: String, val cookie: String = "", val csrf: String = "") {
         throw if (e.status == 401) ApiError(401, "Passkey not accepted. Use a passkey saved for this Ledger server.") else e
     }
 
+    /**
+     * Adds a passkey and reports how many password-only sessions were signed out. When this session had
+     * only proved the password the server gives it a new cookie and CSRF token: the returned Api carries them.
+     */
+    fun addPasskey(challengeId: String, credential: JSONObject): Pair<Int, Api?> {
+        val (data, headers) = exchange("POST", "/passkeys", json("challenge_id" to challengeId, "credential" to credential))
+        return data.optInt("revoked") to (if (data.has("csrf_token")) session(data, headers) else null)
+    }
+
     private fun session(data: JSONObject, headers: Map<String?, List<String>>): Api {
         val token = data.getString("csrf_token")
         require(token.matches(Regex("[A-Za-z0-9_-]{43}"))) { "Invalid session response." }

@@ -55,6 +55,12 @@ class LedgerModel(application: Application) : AndroidViewModel(application) {
     fun back() { if (!busy && stack.size > 1) stack = stack.dropLast(1) }
     fun refresh() { revision++ }
     fun clearNotice() { notice = null; undoId = null }
+
+    /** Takes over a session the server rotated, such as after adding the first passkey, and keeps it on the phone. */
+    fun adopt(fresh: Api) {
+        sessions.save(fresh)
+        api = fresh
+    }
     fun chooseTheme(value: String) { themes.save(value); theme = value }
 
     /** The password, then a passkey when the server asks for one (once the owner has added any). */

@@ -359,9 +359,7 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request, input stor
 		s.internalError(w, r, err)
 		return
 	}
-	// A remembered cookie lives until the absolute cap; the server enforces the idle expiry.
-	limit := session.Cap()
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: session.ID, Path: "/admin", HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode, Expires: limit, MaxAge: int(time.Until(limit).Seconds())})
+	setSessionCookie(w, session)
 	writeJSON(w, http.StatusOK, map[string]any{"csrf_token": session.CSRFToken, "expires_at": session.ExpiresAt, "remember": session.Remember})
 }
 
@@ -410,6 +408,13 @@ func (s *Server) verifyOwnerPassword(w http.ResponseWriter, r *http.Request, pas
 		return false
 	}
 	return true
+}
+
+// setSessionCookie hands a session to the browser. A remembered cookie lives until the absolute
+// cap; the server enforces the idle expiry.
+func setSessionCookie(w http.ResponseWriter, session store.AdminSession) {
+	limit := session.Cap()
+	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: session.ID, Path: "/admin", HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode, Expires: limit, MaxAge: int(time.Until(limit).Seconds())})
 }
 
 func clearSessionCookie(w http.ResponseWriter) {

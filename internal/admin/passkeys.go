@@ -275,7 +275,9 @@ func (s *Server) registerPasskey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	data, _, err := s.db.ConsumeWebAuthnChallenge(ctx, input.ChallengeID, store.ChallengeRegister, sessionFrom(r).ID)
+	// Read, not used up: AddOwnerPasskey uses the challenge up when it saves the passkey, under the
+	// lock reset-passkeys also takes.
+	data, err := s.db.PeekWebAuthnChallenge(ctx, input.ChallengeID, store.ChallengeRegister, sessionFrom(r).ID)
 	if store.IsNotFound(err) {
 		writeError(w, http.StatusBadRequest, "passkey registration expired; start again")
 		return
@@ -307,13 +309,17 @@ func (s *Server) registerPasskey(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		name = passkey.DefaultName(credential.Authenticator.AAGUID)
 	}
-	saved, revoked, err := s.db.AddOwnerPasskey(ctx, store.OwnerPasskey{
+	saved, revoked, rotated, err := s.db.AddOwnerPasskey(ctx, store.OwnerPasskey{
 		CredentialID: credential.ID, PublicKey: credential.PublicKey, SignCount: credential.Authenticator.SignCount,
 		AAGUID: credential.Authenticator.AAGUID, Name: name, Transports: passkey.Transports(credential.Transport),
 		AttestationFormat: credential.AttestationFormat, BackupEligible: credential.Flags.BackupEligible, BackupState: credential.Flags.BackupState,
-	}, sessionFrom(r).ID)
+	}, store.Registration{ChallengeID: input.ChallengeID, Session: sessionFrom(r).ID})
 	if errors.Is(err, store.ErrPasskeyExists) {
 		writeError(w, http.StatusConflict, "this passkey is already registered")
+		return
+	}
+	if store.IsNotFound(err) {
+		writeError(w, http.StatusBadRequest, "passkey registration expired; start again")
 		return
 	}
 	if err != nil {
@@ -321,7 +327,13 @@ func (s *Server) registerPasskey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// revoked counts the other sessions signed out because they had only proved the password.
-	writeJSON(w, http.StatusCreated, map[string]any{"passkey": passkeyResponse(saved), "revoked": revoked})
+	response := map[string]any{"passkey": passkeyResponse(saved), "revoked": revoked}
+	if rotated != nil {
+		// This session had only proved the password: it now has a new cookie and CSRF token.
+		setSessionCookie(w, *rotated)
+		response["csrf_token"] = rotated.CSRFToken
+	}
+	writeJSON(w, http.StatusCreated, response)
 }
 
 // passkeyName trims a passkey name and reports whether it is 1 to 60 characters on one line.

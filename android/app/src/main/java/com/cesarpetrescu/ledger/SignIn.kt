@@ -175,7 +175,10 @@ fun PasskeysScreen(model: LedgerModel) {
             var revoked = 0
             model.act(after = { adding = false; model.notice = passkeyAdded(first, revoked) }, failure = failed) { client ->
                 val start = client.request("POST", "/passkeys/options", json("password" to password))
-                revoked = client.request("POST", "/passkeys", json("challenge_id" to start.getString("challenge_id"), "credential" to passkeys.create(start.getJSONObject("options")))).optInt("revoked")
+                val (count, rotated) = client.addPasskey(start.getString("challenge_id"), passkeys.create(start.getJSONObject("options")))
+                revoked = count
+                // A session that had only proved the password was given a new cookie and CSRF token.
+                rotated?.let(model::adopt)
             }
         }
         removing?.let { passkey ->
