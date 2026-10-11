@@ -396,7 +396,7 @@ func TestDraftResearchStaysWithItsCreator(t *testing.T) {
 	if peek, err := other.CallTool(ctx, &mcp.CallToolParams{Name: "get_research_task", Arguments: map[string]any{"id": draft.ID}}); err != nil || !peek.IsError {
 		t.Fatalf("another client reads the draft: %#v, %v", peek, err)
 	}
-	_, key, err := db.CreateAPIKey(ctx, "Dispatcher", []string{store.ScopeResearchDispatch})
+	_, key, err := db.CreateAPIKey(ctx, "Dispatcher", []string{store.ScopeResearchDispatch}, false)
 	if err != nil {
 		t.Fatal(err)
 	}

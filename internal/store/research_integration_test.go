@@ -393,10 +393,10 @@ func TestConcurrentDispatchersNeverShareATask(t *testing.T) {
 
 func TestAPIKeysAreHashedRevocableAndScoped(t *testing.T) {
 	db, ctx := testdb.Open(t)
-	if _, _, err := db.CreateAPIKey(ctx, "Bad", []string{"ledger:write"}); err == nil {
+	if _, _, err := db.CreateAPIKey(ctx, "Bad", []string{"ledger:write"}, false); err == nil {
 		t.Fatal("a key with another scope was created")
 	}
-	key, secret, err := db.CreateAPIKey(ctx, "Adastrion Core", []string{store.ScopeResearchDispatch})
+	key, secret, err := db.CreateAPIKey(ctx, "Adastrion Core", []string{store.ScopeResearchDispatch}, false)
 	if err != nil || !strings.HasPrefix(secret, "ledger_") || key.Prefix != secret[:14] || key.LastUsedAt != nil {
 		t.Fatalf("created = %#v %q, %v", key, secret, err)
 	}
@@ -548,7 +548,7 @@ func TestResearchOverviewAndSharedProjectContext(t *testing.T) {
 // without a failure, their tokens die, and no further claim succeeds with a revoked key.
 func TestRevokingADispatcherStopsItsRuns(t *testing.T) {
 	db, ctx := researchDB(t)
-	key, _, err := db.CreateAPIKey(ctx, "Adastrion Core", []string{store.ScopeResearchDispatch})
+	key, _, err := db.CreateAPIKey(ctx, "Adastrion Core", []string{store.ScopeResearchDispatch}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -624,7 +624,7 @@ func TestOAuthClaimsHoldTheirAccessToken(t *testing.T) {
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO oauth_token(hash,kind,client_id,scope,family,expires_at) VALUES(sha256('access-1'::bytea),'access','oauth-dispatcher','research:dispatch','00000000-0000-4000-8000-000000000009',now()+interval '15 minutes')`); err != nil {
 		t.Fatal(err)
 	}
-	key, _, _ := db.CreateAPIKey(ctx, "Keyed dispatcher", []string{store.ScopeResearchDispatch})
+	key, _, _ := db.CreateAPIKey(ctx, "Keyed dispatcher", []string{store.ScopeResearchDispatch}, false)
 	newResearch(t, db, ctx, "By OAuth", 3)
 	keyed := newResearch(t, db, ctx, "By key", 3)
 	if c, err := db.ClaimResearchTaskWithAccess(ctx, "access-1", 60, "Dispatcher", "oauth-dispatcher"); err != nil || c == nil {

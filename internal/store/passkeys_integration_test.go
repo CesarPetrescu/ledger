@@ -201,6 +201,13 @@ func TestPasswordOnlyDeviceApprovalAndRegistrationStartRespectPasskeys(t *testin
 	if err := db.DecideDevice(ctx, user, true, false); err != nil {
 		t.Fatalf("passkey device approval = %v", err)
 	}
+	// Nor may it create an API key, another credential.
+	if _, _, err := db.CreateAPIKey(ctx, "Late", []string{store.ScopeResearchDispatch}, true); !errors.Is(err, store.ErrPasskeyRequired) {
+		t.Fatalf("password-only API key with a passkey = %v", err)
+	}
+	if _, _, err := db.CreateAPIKey(ctx, "Owner", []string{store.ScopeResearchDispatch}, false); err != nil {
+		t.Fatalf("passkey API key = %v", err)
+	}
 	// A registration for a session that no longer exists is refused cleanly, not with a broken link.
 	if _, err := db.CreateWebAuthnChallenge(ctx, store.ChallengeRegister, []byte(`{}`), "no-such-session", false); !store.IsNotFound(err) {
 		t.Fatalf("registration for a missing session = %v", err)
