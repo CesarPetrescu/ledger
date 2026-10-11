@@ -270,6 +270,23 @@ describe('passkey sign-in', () => {
     expect(calls.some((call) => call.path === '/admin/api/login/passkey')).toBe(false)
   })
 
+  it('hides the session-ended notice while a passkey prompt is open', async () => {
+    const passkeys = stubPasskeys()
+    hangUntilAborted(passkeys)
+    mockApi({
+      'GET /admin/api/session': authenticatedSession,
+      'GET /admin/api/inbox': { status: 401, body: { error: 'unauthenticated' } },
+      'GET /admin/api/table/projects': { status: 401, body: { error: 'unauthenticated' } },
+      'POST /admin/api/login/passkey/options': { body: { challenge_id: 'ch-1', options: requestOptionsJSON } },
+    })
+    renderApp()
+    const user = userEvent.setup()
+    expect(await screen.findByText('Your session ended. Sign in again.')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /sign in with a passkey/i }))
+    expect(await screen.findByRole('button', { name: /^cancel$/i })).toBeInTheDocument()
+    expect(screen.queryByText('Your session ended. Sign in again.')).not.toBeInTheDocument()
+  })
+
   it('goes back to the password while the passkey step is still waiting', async () => {
     const passkeys = stubPasskeys()
     localStorage.setItem(usedHere, 'yes')

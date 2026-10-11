@@ -201,7 +201,8 @@ export function LoginPage({ notice }: { notice?: AuthNotice | undefined }) {
           </> : <>
             <h2 id="login-title">Welcome back</h2>
             <p className="muted login-intro">Sign in with a passkey or your owner password to reach your projects, inbox, and agents.</p>
-            {notice && !error && <p className={notice === 'expired' ? 'notice' : 'notice notice-info'}>{NOTICES[notice]}</p>}
+            {/* Gone once the owner tries to sign in, which also keeps the passkey prompt's Cancel row on a small screen. */}
+            {notice && !error && !busy && <p className={notice === 'expired' ? 'notice' : 'notice notice-info'}>{NOTICES[notice]}</p>}
             {/* Above both ways in: it applies to the passkey as much as to the password. */}
             <label className="check login-remember">
               <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} disabled={busy !== ''} />
