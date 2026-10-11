@@ -65,6 +65,10 @@ dependencies {
     implementation(libs.commonmark.tables)
     implementation(libs.commonmark.strikethrough)
     implementation(libs.commonmark.tasks)
+    // Passkeys through Android's Credential Manager: Bitwarden and other providers on Android 14+,
+    // Google Password Manager through Play services on older versions.
+    implementation(libs.androidx.credentials)
+    implementation(libs.androidx.credentials.play.services.auth)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     testImplementation(libs.junit)

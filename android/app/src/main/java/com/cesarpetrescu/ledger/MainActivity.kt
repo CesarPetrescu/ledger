@@ -134,6 +134,7 @@ fun LedgerApp(model: LedgerModel = viewModel(), opened: MutableState<Pair<String
     LaunchedEffect(model.busy) { if (model.busy) focus.clearFocus() }
     val session = model.api
     val route = model.route
+    val passkeys = rememberPasskeys()
     if (model.reauthRequired && session != null) {
         var password by remember { mutableStateOf("") }
         AlertDialog(onDismissRequest = {}, title = { Text("Session expired") }, text = {
@@ -142,8 +143,9 @@ fun LedgerApp(model: LedgerModel = viewModel(), opened: MutableState<Pair<String
                 OutlinedTextField(password, { password = it }, label = { Text("Owner password") }, singleLine = true,
                     enabled = !model.busy, visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
+                OutlinedButton(enabled = !model.busy, onClick = { model.passkeyLogin(session.origin, passkeys) }) { Text("Use a passkey instead") }
             }
-        }, confirmButton = { TextButton(enabled = !model.busy && password.isNotBlank(), onClick = { model.login(session.origin, password) }) { Text("Sign in again") } },
+        }, confirmButton = { TextButton(enabled = !model.busy && password.isNotBlank(), onClick = { model.login(session.origin, password, passkeys) }) { Text("Sign in again") } },
             dismissButton = { TextButton(enabled = !model.busy, onClick = model::forget) { Text("Discard draft and sign out") } })
     }
     val tabs = listOf("inbox" to "Inbox", "projects" to "Projects", "reading" to "Reading", "handoffs" to "Handoffs", "more" to "More")
@@ -210,6 +212,8 @@ fun LedgerApp(model: LedgerModel = viewModel(), opened: MutableState<Pair<String
                             "connect" -> ConnectScreen(model)
                             "api-keys" -> ApiKeys(model)
                             "device" -> Device(model)
+                            "passkeys" -> PasskeysScreen(model)
+                            "devices" -> SignedInDevices(model)
                             "settings" -> Settings(model, atAccess = route == "settings/access")
                             else -> Settings(model)
                         }
@@ -226,6 +230,7 @@ fun Login(model: LedgerModel) {
     var origin by rememberSaveable { mutableStateOf("") }
     // The owner password is deliberately excluded from saved state and persistent storage.
     var password by remember { mutableStateOf("") }
+    val passkeys = rememberPasskeys()
     Page {
         item {
             Spacer(Modifier.height(44.dp))
@@ -241,8 +246,10 @@ fun Login(model: LedgerModel) {
         item { OutlinedTextField(password, { password = it }, label = { Text("Owner password") }, singleLine = true,
             visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             modifier = Modifier.fillMaxWidth(), enabled = !model.busy) }
-        item { Button(onClick = { model.login(origin, password) }, enabled = !model.busy && origin.isNotBlank() && password.isNotEmpty(), modifier = Modifier.fillMaxWidth()) { Text("Sign in") } }
-        item { Text("Use the same owner password as the web console. Your password stays off disk.", style = MaterialTheme.typography.bodySmall) }
+        item { Button(onClick = { model.login(origin, password, passkeys) }, enabled = !model.busy && origin.isNotBlank() && password.isNotEmpty(), modifier = Modifier.fillMaxWidth()) { Text("Sign in") } }
+        // A passkey alone is enough: its provider's unlock is the second factor.
+        item { OutlinedButton(onClick = { model.passkeyLogin(origin, passkeys) }, enabled = !model.busy && origin.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Sign in with a passkey") } }
+        item { Text("Use the same owner password as the web console; once you have added a passkey, it is asked for next. Your password stays off disk.", style = MaterialTheme.typography.bodySmall) }
     }
 }
 
@@ -269,6 +276,8 @@ fun screenTitle(route: String, projectNames: Map<String, String> = emptyMap()): 
         "agents" -> "Agents"
         "help" -> "Help"
         "device" -> "Approve a device"
+        "passkeys" -> "Passkeys"
+        "devices" -> "Signed-in devices"
         "more" -> "More"
         "table" -> "Table"
         "entry-view" -> "Entry"

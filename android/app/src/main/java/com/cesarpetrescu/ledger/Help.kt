@@ -99,6 +99,8 @@ val helpSections = listOf(
         "Settings › Access › Connected apps: apps with access to your projects. Revoke one to cut it off.\n" +
         "Settings › Access › API keys: keys that let a server such as Adastrion Core dispatch research. Create them in the web console under Access › API keys; revoke them here.\n" +
         "Settings › Access › Approve a device: enter the code the Ledger CLI shows.\n" +
+        "Settings › Access › Passkeys: sign in with a passkey from Bitwarden or Google Password Manager (Android 14 or newer). Once you have one, the password alone no longer signs in here, on the web, or when approving an app. Adding or removing one asks for the password. Locked out? Run ledger-admin reset-passkeys on the server.\n" +
+        "Settings › Access › Signed-in devices: every browser and phone signed in to the console. Sign out one, or everywhere else. This phone stays signed in for 30 days after its last use, 90 days at most.\n" +
         "The web console keeps all of these on its Access page, with GitHub sync and the approval password.",
     "Undo and Trash" to "Every quick action shows Undo, and More › Recent actions lets you undo any of the last seven days' actions. Delete an entry or a project from its ⋯ menu; it stays in More › Trash for 30 days.",
 )
