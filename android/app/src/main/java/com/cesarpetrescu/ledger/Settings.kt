@@ -63,6 +63,8 @@ fun Settings(model: LedgerModel, atAccess: Boolean = false) {
         item { SummaryCard("Connected apps", body = "Review ChatGPT, Claude, CLI, and other apps. Revoke access when needed.") { model.go("clients") } }
         item { SummaryCard("API keys", body = "Keys that let a server such as Adastrion Core pick up research. Create them in the web console; revoke them here.") { model.go("api-keys") } }
         item { SummaryCard("Approve a device", body = "Enter the code shown by the Ledger CLI.") { model.go("device") } }
+        item { SummaryCard("Passkeys", body = "Sign in with Bitwarden or Google Password Manager. Once you add one, the password alone no longer signs in.") { model.go("passkeys") } }
+        item { SummaryCard("Signed-in devices", body = "Browsers and phones signed in to this console. Sign out any you do not recognise.") { model.go("devices") } }
         item { SummaryCard("Calendars", body = "Connect Nextcloud and choose visible calendars.") { model.go("calendar-settings") } }
         // Ends the Access section: updates and sign-out are about this phone, not who can reach your projects.
         item { Text("This phone", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }

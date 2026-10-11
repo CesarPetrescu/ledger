@@ -1,6 +1,14 @@
 # Ledger for Android
 
-Native Kotlin / Jetpack Compose owner console for Android 9 and newer. Connect it to an existing Ledger HTTPS server with the **owner password** used by the web console. The OAuth approval password is a separate credential.
+Native Kotlin / Jetpack Compose owner console for Android 9 and newer. Connect it to an existing Ledger HTTPS server with the **owner password** used by the web console, or with a **passkey**. The OAuth approval password is a separate credential.
+
+## Passkeys
+
+Settings › Access › Passkeys adds, renames, and removes the owner's passkeys through Android's Credential Manager; adding or removing one asks for the owner password. Passkeys need Android 14 or newer with Bitwarden or Google Password Manager turned on as a passkey provider (Google Password Manager also works on older versions through Google Play services). Once a passkey exists, the password alone no longer signs in: **Sign in** continues to the passkey, and **Sign in with a passkey** needs no password. If every passkey is lost, `ledger-admin reset-passkeys` on the server returns to password-only sign-in.
+
+Android only lets an app use a server's passkeys when the server vouches for it in `https://<host>/.well-known/assetlinks.json`. Ledger serves that file for each app in `LEDGER_ANDROID_APPS` (`package:SHA256HEX` entries). The default lists the release app (`com.cesarpetrescu.ledger`, signed with the release key). A debug build (`com.cesarpetrescu.ledger.debug`, debug key) can use passkeys only on a server that adds its package and signing certificate there.
+
+Settings › Access › Signed-in devices lists every browser and phone with an owner session, marks this one, and signs out one or all of the others. The app always asks to be remembered: it stays signed in for 30 days after its last use, 90 days at most. It names itself `LedgerAndroid/<version> (Android <release>; <model>)` so the list can show "Ledger app on Android".
 
 Install `ledger-android-vX.Y.Z.apk` from [GitHub Releases](https://github.com/CesarPetrescu/ledger/releases/latest). Android may ask you to allow installations from the browser or file manager. Future release APKs update the same app and retain its session. The Settings screen links to the latest release; installation remains under Android's control.
 
