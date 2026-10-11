@@ -4,7 +4,9 @@ package store_test
 
 import (
 	"bytes"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/cesarpetrescu/ledger/internal/store"
 	"github.com/cesarpetrescu/ledger/internal/testdb"
@@ -21,7 +23,7 @@ func TestResetPasskeysDeletesPasskeysAndPendingLoginsButKeepsTheOwnerHandle(t *t
 			t.Fatal(err)
 		}
 	}
-	session, err := db.CreateAdminSession(ctx, store.NewAdminSession{})
+	session, err := db.CreateAdminSession(ctx, store.NewAdminSession{Method: store.MethodPasskey})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,5 +57,64 @@ func TestResetPasskeysDeletesPasskeysAndPendingLoginsButKeepsTheOwnerHandle(t *t
 	}
 	if again, err := db.OwnerHandle(ctx); err != nil || !bytes.Equal(again, handle) {
 		t.Fatal("reset changed the owner handle")
+	}
+}
+
+// A password-only sign-in or approval racing the first passkey's registration must not slip through:
+// while registration holds PasskeyLock, both wait, and once it commits they are refused.
+func TestPasswordOnlyPathsWaitForAPasskeyBeingRegistered(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	const clientID, redirect = "race-client", "http://127.0.0.1/callback"
+	if _, err := db.PutClient(ctx, store.OAuthClient{ClientID: clientID, Kind: "dcr", Name: "Race", RedirectURIs: []string{redirect}}); err != nil {
+		t.Fatal(err)
+	}
+	// With no passkey the password alone still works.
+	if _, err := db.CreateAdminSession(ctx, store.NewAdminSession{Method: store.MethodPassword}); err != nil {
+		t.Fatalf("password session before any passkey: %v", err)
+	}
+	if err := db.CreateCode(ctx, "before", clientID, redirect, "challenge", []string{"ledger:read"}, true); err != nil {
+		t.Fatalf("password approval before any passkey: %v", err)
+	}
+	// A registration in progress: the lock is held and the passkey written but not committed.
+	registering, err := db.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registering.Rollback(ctx)
+	if _, err := registering.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, store.PasskeyLock); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registering.Exec(ctx, `INSERT INTO owner_passkey(credential_id,public_key,aaguid,name,backup_eligible,backup_state) VALUES('race','cose','','Passkey',true,true)`); err != nil {
+		t.Fatal(err)
+	}
+	results := make(chan error, 2)
+	go func() {
+		_, err := db.CreateAdminSession(ctx, store.NewAdminSession{Method: store.MethodPassword})
+		results <- err
+	}()
+	go func() {
+		results <- db.CreateCode(ctx, "during", clientID, redirect, "challenge", []string{"ledger:read"}, true)
+	}()
+	select {
+	case err := <-results:
+		t.Fatalf("a password-only path finished while a passkey was being registered: %v", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	if err := registering.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		select {
+		case err := <-results:
+			if !errors.Is(err, store.ErrPasskeyRequired) {
+				t.Fatalf("after the passkey committed = %v, want ErrPasskeyRequired", err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("a password-only path never finished")
+		}
+	}
+	// A passkey sign-in is not affected.
+	if _, err := db.CreateAdminSession(ctx, store.NewAdminSession{Method: store.MethodPasskey}); err != nil {
+		t.Fatalf("passkey session = %v", err)
 	}
 }

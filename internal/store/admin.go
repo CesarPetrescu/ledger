@@ -84,9 +84,22 @@ func (db *DB) CreateAdminSession(ctx context.Context, input NewAdminSession) (Ad
 	}
 	hash := sha256.Sum256([]byte(id))
 	session := AdminSession{ID: id}
-	err = scanAdminSession(db.Pool.QueryRow(ctx, `INSERT INTO admin_session(hash,csrf_token,expires_at,remember,method,label) VALUES($1,$2,now()+$3::interval,$4,$5,$6) RETURNING `+adminSessionColumns,
-		hash[:], csrf, ttl.String(), input.Remember, input.Method, input.Label), &session)
-	return session, err
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return AdminSession{}, err
+	}
+	defer tx.Rollback(ctx)
+	// A password-only session may only open while no passkey exists, checked under PasskeyLock.
+	if input.Method == MethodPassword {
+		if err := noPasskeyYet(ctx, tx); err != nil {
+			return AdminSession{}, err
+		}
+	}
+	if err := scanAdminSession(tx.QueryRow(ctx, `INSERT INTO admin_session(hash,csrf_token,expires_at,remember,method,label) VALUES($1,$2,now()+$3::interval,$4,$5,$6) RETURNING `+adminSessionColumns,
+		hash[:], csrf, ttl.String(), input.Remember, input.Method, input.Label), &session); err != nil {
+		return AdminSession{}, err
+	}
+	return session, tx.Commit(ctx)
 }
 
 // LookupAdminSession resolves a live session by its raw identifier and records activity. A

@@ -73,6 +73,39 @@ func (db *DB) ListOwnerPasskeys(ctx context.Context) ([]OwnerPasskey, error) {
 	return out, rows.Err()
 }
 
+// PasskeyLock serializes registering a passkey against password-only sign-ins and approvals.
+// Registration holds it exclusively; a password-only path shares it while it checks that no passkey
+// exists and writes, so a passkey registered meanwhile either waits for that write (and then signs
+// the new session out) or commits first (and the password path sees it).
+const PasskeyLock = 7103380
+
+// ErrPasskeyRequired means a passkey exists, so the password alone may not sign in or approve.
+var ErrPasskeyRequired = errors.New("a passkey is required")
+
+func lockPasskeys(ctx context.Context, tx pgx.Tx, shared bool) error {
+	query := `SELECT pg_advisory_xact_lock($1)`
+	if shared {
+		query = `SELECT pg_advisory_xact_lock_shared($1)`
+	}
+	_, err := tx.Exec(ctx, query, PasskeyLock)
+	return err
+}
+
+// noPasskeyYet takes the shared lock and fails with ErrPasskeyRequired once a passkey exists.
+func noPasskeyYet(ctx context.Context, tx pgx.Tx) error {
+	if err := lockPasskeys(ctx, tx, true); err != nil {
+		return err
+	}
+	var exists bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM owner_passkey)`).Scan(&exists); err != nil {
+		return err
+	}
+	if exists {
+		return ErrPasskeyRequired
+	}
+	return nil
+}
+
 // OwnerHasPasskeys reports whether a passkey is registered, which turns password-only sign-in off.
 func (db *DB) OwnerHasPasskeys(ctx context.Context) (bool, error) {
 	var exists bool
@@ -97,6 +130,9 @@ func (db *DB) AddOwnerPasskey(ctx context.Context, p OwnerPasskey, keep string) 
 		return OwnerPasskey{}, 0, err
 	}
 	defer tx.Rollback(ctx)
+	if err := lockPasskeys(ctx, tx, false); err != nil {
+		return OwnerPasskey{}, 0, err
+	}
 	saved, err := scanOwnerPasskey(tx.QueryRow(ctx, `INSERT INTO owner_passkey(credential_id,public_key,sign_count,aaguid,name,transports,attestation_format,backup_eligible,backup_state)
 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING `+ownerPasskeyColumns,
 		p.CredentialID, p.PublicKey, int64(p.SignCount), p.AAGUID, p.Name, p.Transports, p.AttestationFormat, p.BackupEligible, p.BackupState))

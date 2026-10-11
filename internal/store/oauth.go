@@ -155,7 +155,9 @@ WHERE t.expires_at < now()
 	return count, tx.Commit(ctx)
 }
 
-func (db *DB) CreateCode(ctx context.Context, raw, clientID, redirectURI, challenge string, scopes []string) error {
+// CreateCode issues an authorization code. passwordOnly marks an approval made with the approval
+// password alone, which is refused with ErrPasskeyRequired once a passkey exists.
+func (db *DB) CreateCode(ctx context.Context, raw, clientID, redirectURI, challenge string, scopes []string, passwordOnly bool) error {
 	tx, err := db.Pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -163,6 +165,11 @@ func (db *DB) CreateCode(ctx context.Context, raw, clientID, redirectURI, challe
 	defer tx.Rollback(ctx)
 	if err := lockOAuthIssuance(ctx, tx); err != nil {
 		return err
+	}
+	if passwordOnly {
+		if err := noPasskeyYet(ctx, tx); err != nil {
+			return err
+		}
 	}
 	hash := sha256.Sum256([]byte(raw))
 	if _, err := tx.Exec(ctx, `INSERT INTO oauth_code(hash,client_id,redirect_uri,code_challenge,scope,expires_at) VALUES($1,$2,$3,$4,$5,now()+interval '60 seconds')`, hash[:], clientID, redirectURI, challenge, strings.Join(scopes, " ")); err != nil {

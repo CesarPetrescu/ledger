@@ -305,7 +305,7 @@ func (s *Server) authorizePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if passkeyOnly {
-		localErrorStatus(w, http.StatusForbidden, "This Ledger signs in with a passkey, so the approval password is turned off. Go back and choose Continue with Ledger owner login to approve with your passkey.")
+		localErrorStatus(w, http.StatusForbidden, passkeyOnlyApproval)
 		return
 	}
 	passwordHash, err := s.db.OAuthPasswordHash(r.Context(), s.config.PasswordHash)
@@ -322,7 +322,12 @@ func (s *Server) authorizePost(w http.ResponseWriter, r *http.Request) {
 		localErrorStatus(w, http.StatusUnauthorized, "That approval password was not accepted. Return to the client and try again.")
 		return
 	}
-	destination, err := s.authorizationRedirect(r.Context(), request, client, scopes, true)
+	destination, err := s.authorizationRedirect(r.Context(), request, client, scopes, true, true)
+	if errors.Is(err, store.ErrPasskeyRequired) {
+		// A passkey was registered after the check above.
+		localErrorStatus(w, http.StatusForbidden, passkeyOnlyApproval)
+		return
+	}
 	if err != nil {
 		localErrorStatus(w, http.StatusInternalServerError, "Ledger could not complete this authorization. Please try again.")
 		return
@@ -331,6 +336,8 @@ func (s *Server) authorizePost(w http.ResponseWriter, r *http.Request) {
 }
 
 var ErrInvalidAuthorization = errors.New("invalid authorization request")
+
+const passkeyOnlyApproval = "This Ledger signs in with a passkey, so the approval password is turned off. Go back and choose Continue with Ledger owner login to approve with your passkey."
 
 type AuthorizationReview struct {
 	Name   string   `json:"client_name"`
@@ -353,17 +360,19 @@ func (s *Server) DecideAuthorization(ctx context.Context, values url.Values, app
 	if problem != "" {
 		return "", fmt.Errorf("%w: %s", ErrInvalidAuthorization, problem)
 	}
-	return s.authorizationRedirect(ctx, request, client, scopes, approve)
+	return s.authorizationRedirect(ctx, request, client, scopes, approve, false)
 }
 
-func (s *Server) authorizationRedirect(ctx context.Context, request authorizationRequest, client store.OAuthClient, scopes []string, approve bool) (string, error) {
+// authorizationRedirect builds the redirect back to the client; passwordOnly marks an approval made
+// with the approval password, which CreateCode refuses once a passkey exists.
+func (s *Server) authorizationRedirect(ctx context.Context, request authorizationRequest, client store.OAuthClient, scopes []string, approve, passwordOnly bool) (string, error) {
 	values := map[string]string{"state": request.State, "iss": s.config.PublicURL}
 	if approve {
 		code, err := randomOpaque()
 		if err != nil {
 			return "", err
 		}
-		if err := s.db.CreateCode(ctx, code, client.ClientID, request.RedirectURI, request.Challenge, scopes); err != nil {
+		if err := s.db.CreateCode(ctx, code, client.ClientID, request.RedirectURI, request.Challenge, scopes, passwordOnly); err != nil {
 			return "", err
 		}
 		values["code"] = code

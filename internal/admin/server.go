@@ -350,6 +350,11 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request, input stor
 	}
 	input.Label = sessionLabel(r.UserAgent())
 	session, err := s.db.CreateAdminSession(ctx, input)
+	if errors.Is(err, store.ErrPasskeyRequired) {
+		// The first passkey was registered after the password was checked: ask for it now.
+		s.beginPasskeyLogin(w, r, store.ChallengePasswordLogin, input.Remember)
+		return
+	}
 	if err != nil {
 		s.internalError(w, r, err)
 		return

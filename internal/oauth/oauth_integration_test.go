@@ -99,7 +99,7 @@ func TestConcurrentRefreshReplayRevokesNewFamilyCredentials(t *testing.T) {
 	if _, err := db.PutClient(ctx, store.OAuthClient{ClientID: clientID, Kind: "dcr", Name: "Concurrent replay", RedirectURIs: []string{redirectURI}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.CreateCode(ctx, "concurrent-code", clientID, redirectURI, "challenge", []string{ScopeRead}); err != nil {
+	if err := db.CreateCode(ctx, "concurrent-code", clientID, redirectURI, "challenge", []string{ScopeRead}, false); err != nil {
 		t.Fatal(err)
 	}
 	pair1, err := db.ExchangeCode(ctx, "concurrent-code", clientID, redirectURI, "verifier", func(string, string) bool { return true })
@@ -168,7 +168,7 @@ func TestGCPreservesAuthorizationCodeReplayTombstoneWhileFamilyIsLive(t *testing
 	server := NewServer(Config{PublicURL: "https://ledger.example.com"}, db)
 	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	code := "gc-code"
-	if err := db.CreateCode(ctx, code, client.ClientID, client.RedirectURIs[0], PKCEChallenge(verifier), []string{ScopeRead}); err != nil {
+	if err := db.CreateCode(ctx, code, client.ClientID, client.RedirectURIs[0], PKCEChallenge(verifier), []string{ScopeRead}, false); err != nil {
 		t.Fatal(err)
 	}
 	codeGrant := url.Values{"grant_type": {"authorization_code"}, "client_id": {client.ClientID}, "code": {code}, "redirect_uri": {client.RedirectURIs[0]}, "code_verifier": {verifier}}
@@ -206,7 +206,7 @@ func TestGCPreservesRotatedRefreshReplayTombstoneWhileFamilyIsLive(t *testing.T)
 	}
 	server := NewServer(Config{PublicURL: "https://ledger.example.com"}, db)
 	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
-	if err := db.CreateCode(ctx, "gc-refresh-code", client.ClientID, client.RedirectURIs[0], PKCEChallenge(verifier), []string{ScopeRead}); err != nil {
+	if err := db.CreateCode(ctx, "gc-refresh-code", client.ClientID, client.RedirectURIs[0], PKCEChallenge(verifier), []string{ScopeRead}, false); err != nil {
 		t.Fatal(err)
 	}
 	pair1 := exchange(t, server, url.Values{"grant_type": {"authorization_code"}, "client_id": {client.ClientID}, "code": {"gc-refresh-code"}, "redirect_uri": {client.RedirectURIs[0]}, "code_verifier": {verifier}}, http.StatusOK)
