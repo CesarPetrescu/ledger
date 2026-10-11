@@ -269,12 +269,31 @@ func (db *DB) CreateWebAuthnChallenge(ctx context.Context, purpose string, sessi
 		return "", err
 	}
 	hash := sha256.Sum256([]byte(id))
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback(ctx)
+	// A registration is tied to its session, which AddOwnerPasskey may be renaming under PasskeyLock:
+	// wait for that, and report pgx.ErrNoRows when the session is gone rather than break the link.
+	if purpose == ChallengeRegister {
+		if err := lockPasskeys(ctx, tx, true); err != nil {
+			return "", err
+		}
+	}
 	// ponytail: unauthenticated sign-in ceremonies are bounded only by the per-address rate limit and
 	// the five-minute expiry; add a global cap if the table ever grows under attack.
-	_, err = db.Pool.Exec(ctx, `WITH expired AS (DELETE FROM owner_webauthn_challenge WHERE expires_at<=now())
-INSERT INTO owner_webauthn_challenge(hash,purpose,session_data,admin_session,remember,expires_at) VALUES($1,$2,$3,$4,$5,now()+$6::interval)`,
+	result, err := tx.Exec(ctx, `WITH expired AS (DELETE FROM owner_webauthn_challenge WHERE expires_at<=now())
+INSERT INTO owner_webauthn_challenge(hash,purpose,session_data,admin_session,remember,expires_at)
+SELECT $1,$2,$3,$4,$5,now()+$6::interval WHERE $4::bytea IS NULL OR EXISTS(SELECT 1 FROM admin_session WHERE hash=$4)`,
 		hash[:], purpose, sessionData, sessionHash(adminSession), remember, WebAuthnChallengeTTL.String())
-	return id, err
+	if err != nil {
+		return "", err
+	}
+	if result.RowsAffected() == 0 {
+		return "", pgx.ErrNoRows
+	}
+	return id, tx.Commit(ctx)
 }
 
 // ConsumeWebAuthnChallenge deletes and returns a live ceremony issued for purpose (and, for a

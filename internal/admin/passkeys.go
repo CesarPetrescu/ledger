@@ -249,6 +249,11 @@ func (s *Server) passkeyRegistrationOptions(w http.ResponseWriter, r *http.Reque
 	if err == nil {
 		id, err = s.db.CreateWebAuthnChallenge(ctx, store.ChallengeRegister, sessionData, sessionFrom(r).ID, false)
 	}
+	if store.IsNotFound(err) {
+		// This session was signed out or renamed (by a passkey added in another tab) meanwhile.
+		writeError(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
 	if err != nil {
 		s.internalError(w, r, err)
 		return

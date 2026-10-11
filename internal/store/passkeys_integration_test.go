@@ -179,3 +179,64 @@ func TestResetPasskeysCancelsARegistrationInFlight(t *testing.T) {
 		t.Fatal("reset never finished")
 	}
 }
+
+// Approving a device code from a session that proved only the password is refused once a passkey
+// exists, and a registration cannot start for a session that is gone (renamed or signed out by a
+// passkey added in another tab) nor in the middle of that rename.
+func TestPasswordOnlyDeviceApprovalAndRegistrationStartRespectPasskeys(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	if _, err := db.PutClient(ctx, store.OAuthClient{ClientID: "cli", Kind: "device", Name: "CLI", RedirectURIs: []string{}}); err != nil {
+		t.Fatal(err)
+	}
+	_, user, err := db.CreateDevice(ctx, "cli", []string{"ledger:read"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := db.AddOwnerPasskey(ctx, store.OwnerPasskey{CredentialID: []byte("key"), PublicKey: []byte("cose"), AAGUID: []byte{}, Name: "Passkey", BackupEligible: true, BackupState: true}, store.Registration{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DecideDevice(ctx, user, true, true); !errors.Is(err, store.ErrPasskeyRequired) {
+		t.Fatalf("password-only device approval with a passkey = %v", err)
+	}
+	if err := db.DecideDevice(ctx, user, true, false); err != nil {
+		t.Fatalf("passkey device approval = %v", err)
+	}
+	// A registration for a session that no longer exists is refused cleanly, not with a broken link.
+	if _, err := db.CreateWebAuthnChallenge(ctx, store.ChallengeRegister, []byte(`{}`), "no-such-session", false); !store.IsNotFound(err) {
+		t.Fatalf("registration for a missing session = %v", err)
+	}
+	session, err := db.CreateAdminSession(ctx, store.NewAdminSession{Method: store.MethodPasskey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// It waits while a passkey is being added (which may rename the session), then goes ahead.
+	registering, err := db.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registering.Rollback(ctx)
+	if _, err := registering.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, store.PasskeyLock); err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan error, 1)
+	go func() {
+		_, err := db.CreateWebAuthnChallenge(ctx, store.ChallengeRegister, []byte(`{}`), session.ID, false)
+		started <- err
+	}()
+	select {
+	case err := <-started:
+		t.Fatalf("a registration started while a passkey was being added: %v", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	if err := registering.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-started:
+		if err != nil {
+			t.Fatalf("registration after the lock was released = %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("registration never started")
+	}
+}

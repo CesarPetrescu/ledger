@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"net/http"
@@ -573,12 +574,20 @@ func TestApprovalPasswordIsOffWhileTheOwnerHasPasskeys(t *testing.T) {
 	if res := post("deny", ""); res.Code != http.StatusFound || !strings.Contains(res.Header().Get("Location"), "error=access_denied") {
 		t.Fatalf("deny with a passkey = %d %s", res.Code, res.Header().Get("Location"))
 	}
+	// The console's owner approval: a session that proved only the password (one being signed out by
+	// the passkey just added) cannot approve; a session that proved the passkey can.
+	if _, err := server.DecideAuthorization(ctx, form, true, true); !errors.Is(err, store.ErrPasskeyRequired) || codes() != 1 {
+		t.Fatalf("password-only console approval with a passkey = %v, codes=%d", err, codes())
+	}
+	if _, err := server.DecideAuthorization(ctx, form, true, false); err != nil || codes() != 2 {
+		t.Fatalf("passkey console approval = %v, codes=%d", err, codes())
+	}
 
 	// reset-passkeys returns approval to the password.
 	if count, err := db.ResetOwnerPasskeys(ctx); err != nil || count != 1 {
 		t.Fatalf("reset = %d, %v", count, err)
 	}
-	if res := post("approve", "secret"); res.Code != http.StatusFound || codes() != 2 {
+	if res := post("approve", "secret"); res.Code != http.StatusFound || codes() != 3 {
 		t.Fatalf("password approval after reset = %d", res.Code)
 	}
 }

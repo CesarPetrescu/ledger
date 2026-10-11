@@ -354,13 +354,16 @@ func (s *Server) ReviewAuthorization(ctx context.Context, values url.Values) (Au
 }
 
 // DecideAuthorization must only be called after owner session, Origin and CSRF checks.
-func (s *Server) DecideAuthorization(ctx context.Context, values url.Values, approve bool) (string, error) {
+// DecideAuthorization records the owner's decision from the console. passwordOnly marks a console
+// session that has proved only the password: its approval is refused once a passkey exists, under
+// the same lock as registering one, so a session being signed out by a new passkey cannot approve.
+func (s *Server) DecideAuthorization(ctx context.Context, values url.Values, approve, passwordOnly bool) (string, error) {
 	request := authRequest(values)
 	client, scopes, problem := s.validateAuthorization(ctx, request)
 	if problem != "" {
 		return "", fmt.Errorf("%w: %s", ErrInvalidAuthorization, problem)
 	}
-	return s.authorizationRedirect(ctx, request, client, scopes, approve, false)
+	return s.authorizationRedirect(ctx, request, client, scopes, approve, passwordOnly)
 }
 
 // authorizationRedirect builds the redirect back to the client; passwordOnly marks an approval made

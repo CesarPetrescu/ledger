@@ -137,7 +137,7 @@ func TestDeviceLoginApprovalRevocationAndProtocol(t *testing.T) {
 		t.Fatal("logout failed to revoke rotated family")
 	}
 	code, user = create()
-	if err := db.DecideDevice(ctx, user, false); err != nil {
+	if err := db.DecideDevice(ctx, user, false, false); err != nil {
 		t.Fatal(err)
 	}
 	wantError(poll(code, client.ClientID), "access_denied")
@@ -150,7 +150,7 @@ func TestDeviceLoginApprovalRevocationAndProtocol(t *testing.T) {
 	if _, err := db.Revoke(ctx, client.ClientID, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.DecideDevice(ctx, user, true); err != store.ErrInvalidGrant {
+	if err := db.DecideDevice(ctx, user, true, false); err != store.ErrInvalidGrant {
 		t.Fatalf("revoked request approved: %v", err)
 	}
 	wantError(poll(code, client.ClientID), "invalid_grant")

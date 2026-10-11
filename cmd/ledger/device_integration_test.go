@@ -33,7 +33,7 @@ func TestCLIConnectRefreshAndReconnectAgainstLedger(t *testing.T) {
 		}
 		if err := json.Unmarshal(res.Body.Bytes(), &d); err != nil || res.Code != 200 {
 			t.Error("device issuance failed")
-		} else if err = db.DecideDevice(r.Context(), d.User, true); err != nil {
+		} else if err = db.DecideDevice(r.Context(), d.User, true, false); err != nil {
 			t.Error(err)
 		}
 		for k, v := range res.Header() {
