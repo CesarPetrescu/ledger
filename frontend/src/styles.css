@@ -690,7 +690,8 @@ label > textarea {
   .login-foot { margin-top: 8px; }
 }
 @media (max-width: 600px) and (max-height: 700px) { .login-card > .login-intro { display: none; } }
-@media (max-width: 600px) and (max-height: 620px) { .login-pitch { display: none; } }
+/* A small phone (320x568) also drops the eyebrow, so the passkey prompt's Cancel row and a two-line error fit. */
+@media (max-width: 600px) and (max-height: 620px) { .login-pitch, .login-card .eyebrow { display: none; } }
 /* A phone on its side: brand and form side by side, both compact. */
 @media (max-height: 500px) and (min-width: 560px) {
   .login { grid-template-columns: minmax(0, 1fr) minmax(300px, 1.1fr); grid-template-rows: none; }
