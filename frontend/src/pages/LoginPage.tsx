@@ -5,7 +5,8 @@ import { BrandMark, Icon } from '../components/ui'
 import { getPasskey, passkeyCancelled, passkeysSupported, passkeyUsedHere, setPasskeyUsedHere } from '../webauthn'
 
 const NOTICES: Record<AuthNotice, string> = {
-  expired: 'Your session expired. Sign in again.',
+  // Also shown after another device signed this one out: the server answers 401 either way.
+  expired: 'Your session ended. Sign in again.',
   'signed-out': 'Signed out.',
 }
 

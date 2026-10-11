@@ -55,7 +55,7 @@ describe('authenticated shell and routing', () => {
     })
     renderApp()
     expect(await screen.findByRole('heading', { name: /welcome back/i })).toBeInTheDocument()
-    expect(screen.getByText(/session expired/i)).toBeInTheDocument()
+    expect(screen.getByText('Your session ended. Sign in again.')).toBeInTheDocument()
   })
 
   it('shows the sign-in panel for deep links without a session and returns there after sign-in', async () => {
