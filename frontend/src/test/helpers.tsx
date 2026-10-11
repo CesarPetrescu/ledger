@@ -1,5 +1,5 @@
 import { render } from '@testing-library/react'
-import { vi } from 'vitest'
+import { onTestFinished, vi } from 'vitest'
 import App from '../App'
 import type { Client, Entry, Overview, Project, ProjectDetail, RecentEntry, SearchResponse } from '../api'
 
@@ -36,6 +36,30 @@ export function mockApi(routes: Record<string, Reply | Reply[]>) {
   vi.stubGlobal('fetch', fetchMock)
   return { calls, fetchMock }
 }
+
+/**
+ * Gives this test a browser with passkey support (jsdom has none). The browser's JSON helpers tag
+ * what they parse, and get/create resolve with credentials whose toJSON() returns the JSON below.
+ */
+export function stubPasskeys() {
+  const assertion = { id: 'cred-1', rawId: 'cred-1', type: 'public-key', response: { clientDataJSON: 'Y2Rq', authenticatorData: 'YWQ', signature: 'c2ln', userHandle: 'b3duZXI' }, clientExtensionResults: {} }
+  const attestation = { id: 'cred-2', rawId: 'cred-2', type: 'public-key', response: { clientDataJSON: 'Y2Rq', attestationObject: 'YW8', transports: ['internal', 'hybrid'] }, clientExtensionResults: {} }
+  const get = vi.fn<(options: CredentialRequestOptions) => Promise<unknown>>(async () => ({ toJSON: () => assertion }))
+  const create = vi.fn<(options: CredentialCreationOptions) => Promise<unknown>>(async () => ({ toJSON: () => attestation }))
+  class FakePublicKeyCredential {
+    static parseRequestOptionsFromJSON = (json: object) => ({ ...json, parsed: 'request' })
+    static parseCreationOptionsFromJSON = (json: object) => ({ ...json, parsed: 'creation' })
+  }
+  vi.stubGlobal('PublicKeyCredential', FakePublicKeyCredential)
+  Object.defineProperty(navigator, 'credentials', { value: { get, create }, configurable: true })
+  onTestFinished(() => {
+    Reflect.deleteProperty(navigator, 'credentials')
+  })
+  return { get, create, assertion, attestation }
+}
+
+/** Request options as the server sends them (WebAuthn JSON). */
+export const requestOptionsJSON = { challenge: 'Y2hhbGxlbmdl', rpId: 'ledger.example.com', allowCredentials: [], userVerification: 'required', timeout: 300000 }
 
 export function renderApp(path = '/admin/') {
   window.history.replaceState(null, '', path)

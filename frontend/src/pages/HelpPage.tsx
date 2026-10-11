@@ -22,7 +22,7 @@ export function HelpPage() {
           <div><dt><Link to="/calendar">Calendar</Link></dt><dd>Todos that are due, project deadlines, and the day snoozed items come back. Connect Nextcloud to see your own events too; agents see only the calendars you select.</dd></div>
           <div><dt><Link to="/handoffs">Handoffs</Link></dt><dd>Work passed from one agent, or from you, to another, as a thread per task. Research tasks live here too.</dd></div>
           <div><dt><Link to="/agents">Agents</Link></dt><dd>What each agent did lately and what it is waiting on you for.</dd></div>
-          <div><dt><Link to="/access">Access</Link></dt><dd>How to connect a new agent, the apps that can read or write your projects, API keys, GitHub sync, and the approval password.</dd></div>
+          <div><dt><Link to="/access">Access</Link></dt><dd>Your passkeys and signed-in devices, how to connect a new agent, the apps that can read or write your projects, API keys, GitHub sync, and the approval password.</dd></div>
           <div><dt><Link to="/search">Search</Link></dt><dd>Finds entries and projects by meaning as well as exact words.</dd></div>
         </dl>
       </section>
@@ -59,13 +59,24 @@ export function HelpPage() {
         </ul>
       </section>
 
+      <section aria-labelledby="help-sign-in">
+        <h2 id="help-sign-in" className="section-title">Signing in</h2>
+        <ul className="help-points">
+          <li>A <strong>passkey</strong> signs you in with Bitwarden, your phone, or your computer's screen lock. Add one on <Link to="/access">Access</Link>; Ledger asks for your password first. Bitwarden stores it and syncs it to your other devices, so it also works in the Ledger app on Android.</li>
+          <li>Once you have a passkey, your password alone no longer signs in: sign in with the passkey, or with your password and then the passkey. Approving an app then takes your Ledger owner login; the approval password stops working. Remove your last passkey to go back to password-only sign-in.</li>
+          <li><strong>Remember this device</strong> keeps you signed in until 30 days after you last used Ledger, and 90 days at most. Without it, a sign-in lasts 12 hours. Uncheck it on a shared computer.</li>
+          <li><strong>Signed-in devices</strong> on Access lists every browser and Ledger app signed in as you. Sign one out, or sign out everywhere else, and it is out on its next request.</li>
+          <li>Lost every passkey? On the server, <code>ledger-admin reset-passkeys</code> removes them all, and your password alone signs in again.</li>
+        </ul>
+      </section>
+
       <section aria-labelledby="help-access">
         <h2 id="help-access" className="section-title">Repos and access</h2>
         <ul className="help-points">
           <li>A project's <strong>Repos</strong> tab lists the Git repositories it spans, so agents know where its code lives. Agents clone with their own Git access; a link never carries a password or token.</li>
           <li><strong>GitHub sync</strong> uses a read-only GitHub token to refresh each linked GitHub repository every 15 minutes: its latest commit, open pull requests, and latest release. Turning it off forgets the token and what it synced; the links stay.</li>
           <li><strong>API keys</strong> let a server, such as a research dispatcher, use Ledger without signing in. A key is shown once and can only dispatch research.</li>
-          <li>Access settings are on <Link to="/access">Access</Link>: connecting an agent, connected apps (revoke one to cut its access at once), API keys, GitHub sync, and the approval password.</li>
+          <li>Access settings are on <Link to="/access">Access</Link>: passkeys, signed-in devices, connecting an agent, connected apps (revoke one to cut its access at once), API keys, GitHub sync, and the approval password.</li>
         </ul>
       </section>
 
