@@ -91,9 +91,9 @@ function cancelled(): DOMException {
   return new DOMException('The passkey prompt closed.', 'NotAllowedError')
 }
 
-/** Asks the browser (or Bitwarden) for a passkey assertion. */
-export async function getPasskey(options: PublicKeyCredentialRequestOptionsJSON): Promise<CredentialJSON> {
-  const credential = await navigator.credentials.get({ publicKey: requestOptions(options) })
+/** Asks the browser (or Bitwarden) for a passkey assertion. Aborting [signal] closes a prompt left open. */
+export async function getPasskey(options: PublicKeyCredentialRequestOptionsJSON, signal?: AbortSignal): Promise<CredentialJSON> {
+  const credential = await navigator.credentials.get(signal ? { publicKey: requestOptions(options), signal } : { publicKey: requestOptions(options) })
   if (!credential) throw cancelled()
   return credentialToJSON(credential as PublicKeyCredential)
 }

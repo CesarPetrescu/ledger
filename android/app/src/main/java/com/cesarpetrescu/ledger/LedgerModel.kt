@@ -93,8 +93,11 @@ class LedgerModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Runs [block] off the main thread; it may suspend, as adding a passkey does while the provider's sheet is open. */
-    fun act(success: String = "Saved", after: () -> Unit = {}, block: suspend (Api) -> Unit) {
+    /**
+     * Runs [block] off the main thread; it may suspend, as adding a passkey does while the provider's sheet is open.
+     * [failure], when given, receives the error message in place of the notice, for a dialog that shows it itself.
+     */
+    fun act(success: String = "Saved", after: () -> Unit = {}, failure: ((String) -> Unit)? = null, block: suspend (Api) -> Unit) {
         val client = api ?: return
         if (reauthRequired) return
         if (busy) return
@@ -108,7 +111,7 @@ class LedgerModel(application: Application) : AndroidViewModel(application) {
                 after()
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
-                failed(e, client)
+                failed(e, client, failure)
             } finally { busy = false }
         }
     }
@@ -121,12 +124,13 @@ class LedgerModel(application: Application) : AndroidViewModel(application) {
 
     fun undo(id: String) = act("Undone") { it.request("POST", "/actions/${segment(id)}/undo") }
 
-    suspend fun failed(error: Exception, client: Api) {
+    suspend fun failed(error: Exception, client: Api, failure: ((String) -> Unit)? = null) {
         if (error is ApiError && error.status == 401 && api === client) {
             withContext(Dispatchers.IO) { sessions.clear() }
             reauthRequired = true
         }
-        notice = errorMessage(error)
+        // An expired session goes to the sign-in dialog's notice either way.
+        if (failure != null && !reauthRequired) failure(errorMessage(error)) else notice = errorMessage(error)
     }
 
     fun logout() = act("Signed out", after = { api = null; home() }) { client ->

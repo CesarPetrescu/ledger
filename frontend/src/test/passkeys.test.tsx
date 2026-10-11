@@ -51,13 +51,17 @@ describe('passkeys on Access', () => {
     })
     renderApp('/admin/access')
     const section = await screen.findByRole('region', { name: 'Passkeys' })
-    expect(section).toHaveTextContent(/your password alone stops working/i)
+    expect(section).toHaveTextContent('After you add one, your password alone no longer signs in (here or in the Ledger app) and no longer approves apps.')
     expect(section).toHaveTextContent(/Bitwarden can store it/i)
     const user = userEvent.setup()
     await user.click(await within(section).findByRole('button', { name: 'Add a passkey' }))
     await user.type(within(section).getByLabelText('Confirm your owner password'), 'wrong')
     await user.click(within(section).getByRole('button', { name: 'Continue' }))
     expect(await within(section).findByRole('alert')).toHaveTextContent('Password not accepted.')
+    // Focus comes back to the field, with the wrong password selected to retype.
+    const field = within(section).getByLabelText<HTMLInputElement>('Confirm your owner password')
+    await waitFor(() => expect(field).toHaveFocus())
+    expect([field.selectionStart, field.selectionEnd]).toEqual([0, 'wrong'.length])
     // A wrong password does not end the session.
     expect(screen.getByRole('heading', { name: 'Access', level: 1 })).toBeInTheDocument()
     expect(passkeys.create).not.toHaveBeenCalled()
@@ -68,7 +72,7 @@ describe('passkeys on Access', () => {
     const table = await within(section).findByRole('table', { name: 'Passkeys' })
     expect(table).toHaveTextContent('Bitwarden')
     // The server signed out the devices that had only proved the password.
-    expect(notifications()).toHaveTextContent('Added Bitwarden. Your password alone no longer signs in. Signed out 2 other devices that used only the password.')
+    expect(notifications()).toHaveTextContent('Added passkey “Bitwarden”. Your password alone no longer signs in. Signed out 2 other devices that used only the password.')
     // This browser now leads with the passkey on the sign-in page.
     expect(localStorage.getItem('ledger.passkey-used')).toBe('yes')
     localStorage.removeItem('ledger.passkey-used')
@@ -121,7 +125,7 @@ describe('passkeys on Access', () => {
         { body: { passkeys: [renamed], required: true } },
       ],
       'PATCH /admin/api/passkeys/pk-1': { body: { passkey: renamed } },
-      'DELETE /admin/api/passkeys/pk-2': { status: 204 },
+      'DELETE /admin/api/passkeys/pk-2': [{ status: 403, body: { error: 'Password not accepted.' } }, { status: 204 }],
     })
     renderApp('/admin/access')
     const section = await screen.findByRole('region', { name: 'Passkeys' })
@@ -140,25 +144,35 @@ describe('passkeys on Access', () => {
     await user.click(within(first!).getByRole('button', { name: 'Save' }))
     expect(await within(table).findByText('Laptop vault')).toBeInTheDocument()
     expect(calls.find((call) => call.method === 'PATCH')?.body).toEqual({ name: 'Laptop vault' })
+    expect(notifications()).toHaveTextContent('Renamed passkey to “Laptop vault”.')
 
     await user.click(within(within(table).getAllByRole('row')[2]!).getByRole('button', { name: 'Remove' }))
-    let dialog = await screen.findByRole('dialog', { name: 'Remove Pixel?' })
+    let dialog = await screen.findByRole('dialog', { name: 'Remove passkey “Pixel”?' })
     expect(dialog).not.toHaveTextContent(/only passkey/i)
     expect(within(dialog).getByRole('button', { name: 'Remove passkey' })).toBeDisabled()
-    await user.type(within(dialog).getByLabelText('Owner password'), 'correct horse')
+    const password = within(dialog).getByLabelText<HTMLInputElement>('Owner password')
+    await user.type(password, 'wrong')
+    await user.click(within(dialog).getByRole('button', { name: 'Remove passkey' }))
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Password not accepted.')
+    // Focus stays in the dialog, on the field, with the wrong password selected to retype.
+    await waitFor(() => expect(password).toHaveFocus())
+    expect([password.selectionStart, password.selectionEnd]).toEqual([0, 'wrong'.length])
+    // Typing straight away replaces it.
+    await user.keyboard('correct horse')
     await user.click(within(dialog).getByRole('button', { name: 'Remove passkey' }))
     await waitFor(() => expect(within(table).queryByText('Pixel')).not.toBeInTheDocument())
-    expect(calls.find((call) => call.method === 'DELETE')?.body).toEqual({ password: 'correct horse' })
+    expect(notifications()).toHaveTextContent('Removed passkey “Pixel”.')
+    expect(calls.filter((call) => call.method === 'DELETE').map((call) => call.body)).toEqual([{ password: 'wrong' }, { password: 'correct horse' }])
 
     await user.click(within(table).getByRole('button', { name: 'Remove' }))
-    dialog = await screen.findByRole('dialog', { name: 'Remove Laptop vault?' })
+    dialog = await screen.findByRole('dialog', { name: 'Remove passkey “Laptop vault”?' })
     expect(dialog).toHaveTextContent(/this is your only passkey/i)
     expect(dialog).toHaveTextContent(/password-only sign-in/i)
     // The password typed for the previous removal is not kept.
     expect(within(dialog).getByLabelText('Owner password')).toHaveValue('')
     await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    expect(calls.filter((call) => call.method === 'DELETE')).toHaveLength(1)
+    expect(calls.filter((call) => call.method === 'DELETE')).toHaveLength(2)
   })
 })
 
@@ -191,6 +205,9 @@ describe('signed-in devices on Access', () => {
     expect(rows[0]!.querySelector('[data-label="Expires"]')).toHaveTextContent(/^Remembered · /)
     expect(rows[2]).toHaveTextContent('Password')
     expect(rows[2]!.querySelector('[data-label="Expires"]')).not.toHaveTextContent('Remembered')
+    // A password-only session listed under passkeys is one from before the first passkey.
+    expect(rows[2]).toHaveTextContent('Signed in before you added a passkey')
+    expect(rows[0]).not.toHaveTextContent('before you added a passkey')
 
     const user = userEvent.setup()
     await user.click(within(rows[1]!).getByRole('button', { name: 'Sign out' }))
@@ -213,8 +230,21 @@ describe('signed-in devices on Access', () => {
     dialog = await screen.findByRole('dialog', { name: 'Sign out this device?' })
     await user.click(within(dialog).getByRole('button', { name: 'Sign out' }))
     expect(await screen.findByRole('heading', { name: /welcome back/i })).toBeInTheDocument()
-    expect(screen.getByText('Signed out.')).toBeInTheDocument()
+    // An expected event, not a warning.
+    expect(screen.getByText('Signed out.')).toHaveClass('notice-info')
     expect(calls.some((call) => call.path === '/admin/api/logout')).toBe(true)
+  })
+
+  it('says nothing about passkeys on password sessions while there are none', async () => {
+    mockApi({
+      ...accessRoutes,
+      'GET /admin/api/passkeys': { body: { passkeys: [], required: false } },
+      'GET /admin/api/sessions': { body: { sessions: [{ ...here, method: 'password' }, office] } },
+    })
+    renderApp('/admin/access')
+    const table = await within(await screen.findByRole('region', { name: 'Signed-in devices' })).findByRole('table', { name: 'Signed-in devices' })
+    expect(table).toHaveTextContent('Chrome on Windows')
+    expect(table).not.toHaveTextContent('before you added a passkey')
   })
 })
 

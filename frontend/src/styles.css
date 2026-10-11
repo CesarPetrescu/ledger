@@ -559,6 +559,8 @@ label > textarea {
 }
 
 .notice-stale { margin-bottom: 18px; }
+/* An expected event (signed out) or a suggestion: no warning colour. */
+.notice-info { border-left-color: var(--accent); background: var(--surface-accent); color: var(--text); }
 
 .state {
   display: flex;
@@ -1307,6 +1309,9 @@ label > textarea {
 .dialog form { display: flex; flex-direction: column; gap: 16px; padding: 24px; }
 .dialog h2 { font-size: 1.2rem; }
 .dialog-body { color: var(--text-muted); }
+.dialog-body > * + * { margin-top: 12px; }
+/* A warning inside a dialog reads at the dialog's size, not the smaller page-notice size. */
+.dialog-body > .notice { font-size: inherit; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; }
 
 @media (max-width: 1100px) {
@@ -1383,6 +1388,8 @@ label > textarea {
   .table td::before { content: attr(data-label); color: var(--text-faint); font-size: 0.67rem; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; }
   .table td.num,
   .table td.actions { text-align: left; }
+  /* No label over nothing, such as a row's actions while it is being renamed. */
+  .table td.actions:empty { display: none; }
   .detail-title { flex-basis: 100%; }
   .detail-actions { flex-basis: 100%; }
   .detail-actions .btn { flex: 1; }
@@ -1802,11 +1809,17 @@ label > textarea {
 .inline-form label { flex-basis: 100%; }
 .inline-form input { flex: 1 1 220px; min-width: 0; }
 .connected-apps > .add-passkey, .connected-apps > .sign-out-others { justify-self: start; }
+.passkey-form input { max-width: 360px; }
+/* Phones: the field on its own row, Continue and Cancel together under it. */
+@media (max-width: 620px) { .passkey-form input { flex-basis: 100%; max-width: none; } }
+/* Row text lines up with the row's buttons. */
+.table.rows-middle td { vertical-align: middle; }
+.cell-hint { display: block; margin-top: 2px; }
 .rename-form { flex-wrap: nowrap; margin: 0; }
 .rename-form input { flex-basis: 12rem; min-height: 32px; padding: 5px 9px; }
 /* Phones: the value column beside the cell label is narrow, so Save and Cancel go under the name. */
 @media (max-width: 620px) { .rename-form { flex-wrap: wrap; } .rename-form input { flex-basis: 100%; } }
 .badge[data-current] { margin-left: 4px; background: var(--tone-green-bg); color: var(--tone-green); text-transform: none; }
 .row-actions { display: inline-flex; flex-wrap: wrap; gap: 6px; }
-.passkey-nudge { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; margin: 0 0 18px; border-left-color: var(--accent); background: var(--surface-accent); color: var(--text); }
+.passkey-nudge { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; margin: 0 0 18px; }
 .passkey-nudge p { flex: 1 1 22rem; margin: 0; }

@@ -124,8 +124,9 @@ fun LedgerApp(model: LedgerModel = viewModel(), opened: MutableState<Pair<String
     LaunchedEffect(model.notice, model.undoId) {
         val message = model.notice ?: return@LaunchedEffect
         val undo = model.undoId
-        val result = snackbar.showSnackbar(message, actionLabel = undo?.let { "Undo" }, withDismissAction = undo != null,
-            duration = if (undo != null) SnackbarDuration.Long else SnackbarDuration.Short)
+        val long = longNotice(message, undo != null)
+        val result = snackbar.showSnackbar(message, actionLabel = undo?.let { "Undo" }, withDismissAction = long,
+            duration = if (long) SnackbarDuration.Long else SnackbarDuration.Short)
         model.clearNotice()
         if (result == SnackbarResult.ActionPerformed && undo != null) model.undo(undo)
     }
@@ -248,10 +249,14 @@ fun Login(model: LedgerModel) {
             modifier = Modifier.fillMaxWidth(), enabled = !model.busy) }
         item { Button(onClick = { model.login(origin, password, passkeys) }, enabled = !model.busy && origin.isNotBlank() && password.isNotEmpty(), modifier = Modifier.fillMaxWidth()) { Text("Sign in") } }
         // A passkey alone is enough: its provider's unlock is the second factor.
-        item { OutlinedButton(onClick = { model.passkeyLogin(origin, passkeys) }, enabled = !model.busy && origin.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Sign in with a passkey") } }
+        // Enabled before an address is typed, so it is plain to see; tapping it then asks for the address.
+        item { OutlinedButton(onClick = { model.passkeyLogin(origin, passkeys) }, enabled = !model.busy, modifier = Modifier.fillMaxWidth()) { Text("Sign in with a passkey") } }
         item { Text("Use the same owner password as the web console; once you have added a passkey, it is asked for next. Your password stays off disk.", style = MaterialTheme.typography.bodySmall) }
     }
 }
+
+/** Whether a notice stays about 10 s with a close button instead of about 4 s: one with Undo, or one too long to read in 4 s (most errors, such as a missing passkey provider). */
+fun longNotice(message: String, undoable: Boolean) = undoable || message.length > 60
 
 /** The top bar's title. A project and its screens carry the project's name, once a list has loaded it. */
 fun screenTitle(route: String, projectNames: Map<String, String> = emptyMap()): String {

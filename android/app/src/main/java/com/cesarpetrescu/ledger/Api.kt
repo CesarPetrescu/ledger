@@ -10,6 +10,8 @@ import java.net.URLEncoder
 import javax.net.ssl.HttpsURLConnection
 
 fun serverOrigin(input: String): String {
+    // The passkey button works before an address is typed, so a blank one gets its own plain message.
+    require(input.isNotBlank()) { "Enter the server address first." }
     val uri = try { URI(input.trim()) } catch (_: Exception) { throw IllegalArgumentException("Enter a valid HTTPS server address.") }
     require(uri.scheme.equals("https", ignoreCase = true) && !uri.host.isNullOrBlank() &&
         uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null &&

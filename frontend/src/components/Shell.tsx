@@ -56,6 +56,7 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
   }, [])
 
   const expires = state.status === 'authenticated' ? state.expiresAt : ''
+  const remembered = state.status === 'authenticated' && state.remember
   const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
   const handleSignOut = async () => {
     setSigningOut(true)
@@ -118,7 +119,8 @@ export function Shell({ title, children }: { title: string; children: ReactNode 
           ))}
         </nav>
         <div className="sidebar-foot">
-          {expires && (
+          {/* A remembered session slides forward with each use, so it has no fixed end worth showing. */}
+          {remembered ? <p className="muted small">Remembered: signed out after 30 days without use</p> : expires && (
             <p className="muted small">
               Session ends <time dateTime={expires}>{formatRelative(expires)}</time>
             </p>

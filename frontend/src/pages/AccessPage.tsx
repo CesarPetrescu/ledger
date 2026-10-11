@@ -1,11 +1,11 @@
 import { Link } from '../router'
-import { useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type RefObject } from 'react'
 import { api, describeError, type ApiKey, type Client, type DeviceSession, type Passkey, type SignInMethod } from '../api'
 import { useAuth } from '../auth'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { useToast } from '../components/Toast'
 import { EmptyState, ErrorState, Icon, Loading, StaleNotice, Timestamp } from '../components/ui'
-import { useResource } from '../hooks/useResource'
+import { useResource, type Resource } from '../hooks/useResource'
 import { createPasskey, passkeyCancelled, passkeysSupported, setPasskeyUsedHere } from '../webauthn'
 
 const KIND_LABEL: Record<Client['kind'], string> = { dcr: 'Dynamic registration', cimd: 'Client ID metadata', device: 'Connected machine' }
@@ -13,6 +13,8 @@ const PAGE_SIZE = 50
 
 /** Access: how you sign in, how to connect an agent, and everything that can reach Ledger without you signing in. */
 export function AccessPage() {
+  // Shared with Signed-in devices, which explains the password-only session that added the first passkey.
+  const passkeys = useResource(api.listPasskeys, 'passkeys', 'owner_passkey')
   return (
     <>
       <header className="page-head">
@@ -23,8 +25,8 @@ export function AccessPage() {
         <Link to="/connect" className="btn">Connect a machine</Link>
         <p className="muted">Manage your passkeys and signed-in devices, connect an agent, see the apps that can read or write your projects and cut their access, and manage API keys, GitHub sync, and the approval password.</p>
       </header>
-      <Passkeys />
-      <SignedInDevices />
+      <Passkeys list={passkeys} />
+      <SignedInDevices passkeysRequired={passkeys.data?.required === true} />
       <ConnectGuide />
       <ConnectedApps />
       <ApiKeys />
@@ -370,20 +372,29 @@ function describePasskeyFailure(error: unknown): string {
   return describeError(error)
 }
 
+/** A wrong password disables the field while it is checked, which drops focus to the page: put it back, selected, to retype. */
+function useRefocusOnError(field: RefObject<HTMLInputElement | null>, error: string, busy: boolean) {
+  useEffect(() => {
+    if (error && !busy) {
+      field.current?.focus()
+      field.current?.select()
+    }
+  }, [field, error, busy])
+}
+
 /** Passkeys: once one exists, the password alone signs in nowhere, and approving apps needs the owner login. */
-function Passkeys() {
-  const list = useResource(api.listPasskeys, 'passkeys', 'owner_passkey')
+function Passkeys({ list }: { list: Resource<{ passkeys: Passkey[]; required: boolean }> }) {
   const [removing, setRemoving] = useState<Passkey | null>(null)
   const passkeys = list.data?.passkeys
   return <section className="connected-apps" aria-labelledby="passkeys-title">
     <h2 id="passkeys-title" className="section-title">Passkeys</h2>
     {passkeys && passkeys.length > 0
       ? <p className="muted small">Signing in takes one of these passkeys, on its own or after your password, in the console and in the Ledger app. Your password alone no longer signs in or approves apps.</p>
-      : <p className="muted small">A passkey signs you in with Bitwarden, your phone, or this computer's screen lock, with nothing to type. Once you add one, your password alone stops working: signing in, here and in the Ledger app, and approving apps also need the passkey. Bitwarden can store it and sync it to your other devices.</p>}
+      : <p className="muted small">A passkey signs you in with Bitwarden, your phone, or this computer's screen lock, with nothing to type. After you add one, your password alone no longer signs in (here or in the Ledger app) and no longer approves apps. Both then need the passkey too. Bitwarden can store it and sync it to your other devices.</p>}
     {list.loading && <Loading label="Loading passkeys…" />}
     {!list.loading && !list.data && <ErrorState message="Couldn't load passkeys." onRetry={list.reload} />}
     {passkeys && passkeys.length > 0 && (
-      <table className="table clients">
+      <table className="table clients rows-middle">
         <caption className="visually-hidden">Passkeys</caption>
         <thead><tr><th scope="col">Name</th><th scope="col">Provider</th><th scope="col">Added</th><th scope="col">Last used</th><th scope="col"><span className="visually-hidden">Actions</span></th></tr></thead>
         <tbody>{passkeys.map((passkey) => <PasskeyRow key={passkey.id} passkey={passkey} onChanged={list.reload} onRemove={() => setRemoving(passkey)} />)}</tbody>
@@ -408,7 +419,7 @@ function PasskeyRow({ passkey, onChanged, onRemove }: { passkey: Passkey; onChan
     try {
       await api.renamePasskey(passkey.id, next)
       setName(null)
-      toast('Passkey renamed.')
+      toast(`Renamed passkey to “${next}”.`)
       onChanged()
     } catch (failure) { toast(describeError(failure), 'error') }
     finally { setBusy(false) }
@@ -426,8 +437,8 @@ function PasskeyRow({ passkey, onChanged, onRemove }: { passkey: Passkey; onChan
     <td data-label="Added"><Timestamp iso={passkey.created_at} /></td>
     <td data-label="Last used">{passkey.last_used_at ? <Timestamp iso={passkey.last_used_at} /> : <span className="muted">never</span>}</td>
     <td data-label="Actions" className="actions">{name === null && <span className="row-actions">
-      <button type="button" className="btn" onClick={() => setName(passkey.name)}>Rename</button>
-      <button type="button" className="btn btn-danger-quiet" onClick={onRemove}>Remove</button>
+      <button type="button" className="btn btn-small" onClick={() => setName(passkey.name)}>Rename</button>
+      <button type="button" className="btn btn-small btn-danger-quiet" onClick={onRemove}>Remove</button>
     </span>}</td>
   </tr>
 }
@@ -438,7 +449,9 @@ function AddPasskey({ first, onAdded }: { first: boolean; onAdded: () => void })
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const field = useRef<HTMLInputElement>(null)
   const toast = useToast()
+  useRefocusOnError(field, error, busy)
 
   if (!passkeysSupported()) return <p className="muted small">This browser cannot create passkeys. Add one from a current browser or from the Ledger app.</p>
 
@@ -455,7 +468,7 @@ function AddPasskey({ first, onAdded }: { first: boolean; onAdded: () => void })
       setOpen(false)
       // The server signs out the other devices that had signed in with only the password.
       const signedOut = revoked > 0 ? ` Signed out ${revoked === 1 ? '1 other device' : `${revoked} other devices`} that used only the password.` : ''
-      toast(`Added ${passkey.name}.${first ? ' Your password alone no longer signs in.' : ''}${signedOut}`)
+      toast(`Added passkey “${passkey.name}”.${first ? ' Your password alone no longer signs in.' : ''}${signedOut}`)
       onAdded()
     } catch (failure) { setError(describePasskeyFailure(failure)) }
     finally { setBusy(false) }
@@ -469,14 +482,14 @@ function AddPasskey({ first, onAdded }: { first: boolean; onAdded: () => void })
 
   if (!open) return <button type="button" className={first ? 'btn btn-primary add-passkey' : 'btn add-passkey'} onClick={() => setOpen(true)}><Icon name="passkey" /> Add a passkey</button>
   return <>
-    <form className="inline-form" onSubmit={(event) => void add(event)}>
+    <p className="muted small">Ledger asks for your password so that someone holding only your session cannot add a passkey of their own. Your browser, or Bitwarden, then asks where to save the passkey.</p>
+    <form className="inline-form passkey-form" onSubmit={(event) => void add(event)}>
       <label htmlFor="passkey-password">Confirm your owner password</label>
-      <input id="passkey-password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required maxLength={4096} disabled={busy} autoFocus />
+      <input ref={field} id="passkey-password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required maxLength={4096} disabled={busy} autoFocus />
       <button className="btn btn-primary" disabled={busy || !password}>{busy ? 'Waiting for your passkey…' : 'Continue'}</button>
       <button type="button" className="btn" onClick={cancel} disabled={busy}>Cancel</button>
     </form>
     {error && <p className="field-error" role="alert">{error}</p>}
-    <p className="muted small">Ledger asks for your password so that someone holding only your session cannot add a passkey of their own. Your browser, or Bitwarden, then asks where to save the passkey.</p>
   </>
 }
 
@@ -484,7 +497,9 @@ function RemovePasskey({ passkey, last, onClose, onRemoved }: { passkey: Passkey
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const field = useRef<HTMLInputElement>(null)
   const toast = useToast()
+  useRefocusOnError(field, error, busy)
 
   function close() {
     setPassword('')
@@ -498,18 +513,18 @@ function RemovePasskey({ passkey, last, onClose, onRemoved }: { passkey: Passkey
     setError('')
     try {
       await api.removePasskey(passkey.id, password)
-      toast(last ? `Removed ${passkey.name}. Your password alone signs in again.` : `Removed ${passkey.name}.`)
+      toast(`Removed passkey “${passkey.name}”.${last ? ' Your password alone signs in again.' : ''}`)
       close()
       onRemoved()
     } catch (failure) { setError(describeError(failure)) }
     finally { setBusy(false) }
   }
 
-  return <ConfirmDialog open={passkey !== null} title={`Remove ${passkey?.name ?? ''}?`} confirmLabel="Remove passkey" busy={busy} confirmDisabled={!password} onCancel={close} onConfirm={() => void remove()}>
-    {last && <p className="notice notice-danger">This is your only passkey. Removing it returns Ledger to password-only sign-in: your password alone signs in and approves apps again.</p>}
+  return <ConfirmDialog open={passkey !== null} title={`Remove passkey “${passkey?.name ?? ''}”?`} confirmLabel="Remove passkey" busy={busy} confirmDisabled={!password} onCancel={close} onConfirm={() => void remove()}>
     <p>This passkey stops working for Ledger. Delete it from Bitwarden or your device as well.</p>
+    {last && <p className="notice notice-danger">This is your only passkey. Removing it returns Ledger to password-only sign-in: your password alone signs in and approves apps again.</p>}
     <label>Owner password
-      <input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} maxLength={4096} disabled={busy} autoFocus />
+      <input ref={field} type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} maxLength={4096} disabled={busy} autoFocus />
     </label>
     {error && <p className="field-error" role="alert">{error}</p>}
   </ConfirmDialog>
@@ -518,7 +533,7 @@ function RemovePasskey({ passkey, last, onClose, onRemoved }: { passkey: Passkey
 const METHOD_LABEL: Record<SignInMethod, string> = { password: 'Password', passkey: 'Passkey', 'password+passkey': 'Password and passkey' }
 
 /** Every browser and app signed in to the console, each of which can be signed out from here. */
-function SignedInDevices() {
+function SignedInDevices({ passkeysRequired }: { passkeysRequired: boolean }) {
   const sessions = useResource(api.listSessions, 'sessions', 'admin_session')
   const { signOut } = useAuth()
   const [target, setTarget] = useState<DeviceSession | 'others' | null>(null)
@@ -556,18 +571,20 @@ function SignedInDevices() {
     {sessions.loading && <Loading label="Loading signed-in devices…" />}
     {!sessions.loading && !list && <ErrorState message="Couldn't load signed-in devices." onRetry={sessions.reload} />}
     {list && list.length > 0 && (
-      <table className="table clients">
+      <table className="table clients rows-middle">
         <caption className="visually-hidden">Signed-in devices</caption>
         <thead><tr><th scope="col">Device</th><th scope="col">Signed in with</th><th scope="col">Signed in</th><th scope="col">Last active</th><th scope="col">Expires</th><th scope="col"><span className="visually-hidden">Actions</span></th></tr></thead>
         <tbody>
           {list.map((session) => (
             <tr key={session.id}>
               <td data-label="Device"><span>{session.label || 'Unknown device'}{session.current && <> <span className="badge" data-current="">This device</span></>}</span></td>
-              <td data-label="Signed in with">{METHOD_LABEL[session.method] ?? session.method}</td>
+              <td data-label="Signed in with">{METHOD_LABEL[session.method] ?? session.method}
+                {/* Adding a passkey keeps the session that added it (other password-only ones are signed out). */}
+                {passkeysRequired && session.method === 'password' && <span className="hint cell-hint">Signed in before you added a passkey</span>}</td>
               <td data-label="Signed in"><Timestamp iso={session.created_at} /></td>
               <td data-label="Last active"><Timestamp iso={session.last_seen_at} /></td>
               <td data-label="Expires"><span>{session.remember && 'Remembered · '}<Timestamp iso={session.expires_at} /></span></td>
-              <td data-label="Actions" className="actions"><button type="button" className="btn btn-danger-quiet" onClick={() => setTarget(session)}>Sign out</button></td>
+              <td data-label="Actions" className="actions"><button type="button" className="btn btn-small btn-danger-quiet" onClick={() => setTarget(session)}>Sign out</button></td>
             </tr>
           ))}
         </tbody>
@@ -601,7 +618,7 @@ export function PasskeyNudge() {
 function PasskeyNudgeCard({ onDismiss }: { onDismiss: () => void }) {
   const list = useResource(api.listPasskeys, 'passkeys', 'owner_passkey')
   if (!list.data || list.data.passkeys.length > 0) return null
-  return <aside className="notice passkey-nudge" aria-label="Add a passkey">
+  return <aside className="notice notice-info passkey-nudge" aria-label="Add a passkey">
     <p><strong>Add a passkey.</strong> Sign in with Bitwarden or your device's screen lock, and a leaked password alone no longer gets anyone in.</p>
     <div className="form-actions">
       <Link to="/access" className="btn btn-small btn-primary">Add a passkey</Link>

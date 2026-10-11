@@ -69,17 +69,26 @@ class SignInTest {
         assertEquals("Passkey added. Signing in now needs it. Signed out 2 other devices that used only the password.", passkeyAdded(first = true, revoked = 2))
         assertEquals("Passkey added. Signed out 1 other device that used only the password.", passkeyAdded(first = false, revoked = 1))
         assertEquals("Passkey added", passkeyAdded(first = false, revoked = 0))
+        // A passkey still named after its provider does not repeat it as the subtitle.
+        assertEquals("", passkeyProvider(unused))
+        assertEquals("Bitwarden", passkeyProvider(JSONObject("""{"name":"Laptop vault","provider":"Bitwarden"}""")))
+        assertEquals("", passkeyProvider(JSONObject("""{"name":"Passkey","provider":""}""")))
         assertEquals("Passkeys", screenTitle("passkeys"))
         assertEquals("Signed-in devices", screenTitle("devices"))
     }
 
     @Test fun passkeyProviderErrorsSayWhatToDo() {
-        // No provider: turn on Google Password Manager (any supported Android, through Play services) or,
-        // on Android 14+, Bitwarden. Passkeys as a whole do not need Android 14.
-        listOf("Android 14", "Bitwarden", "Google Password Manager").forEach { assertTrue(it, NO_PASSKEY_PROVIDER.contains(it)) }
-        assertFalse(NO_PASSKEY_PROVIDER.contains("need Android 14"))
-        listOf(GetCredentialProviderConfigurationException(), GetCredentialUnsupportedException(), CreateCredentialNoCreateOptionException())
-            .forEach { assertEquals(NO_PASSKEY_PROVIDER, passkeyProblem(it)) }
+        // No provider. Android 14+ has the provider setting, where Bitwarden or Google Password Manager is turned on.
+        val modern = noPasskeyProvider(34)
+        listOf("Bitwarden", "Google Password Manager", "Android's settings").forEach { assertTrue(it, modern.contains(it)) }
+        // Older Androids have no such setting: passkeys go through Play services and Google Password Manager only.
+        val older = noPasskeyProvider(33)
+        listOf("Google Play services", "Google Password Manager", "Bitwarden passkeys need Android 14").forEach { assertTrue(it, older.contains(it)) }
+        assertFalse(older.contains("settings"))
+        listOf(GetCredentialProviderConfigurationException(), GetCredentialUnsupportedException(), CreateCredentialNoCreateOptionException()).forEach {
+            assertEquals(modern, passkeyProblem(it, sdk = 35))
+            assertEquals(older, passkeyProblem(it, sdk = 28))
+        }
         assertEquals("Passkey request cancelled.", passkeyProblem(GetCredentialCancellationException()))
         assertEquals("Passkey request cancelled.", passkeyProblem(CreateCredentialCancellationException()))
         assertTrue(passkeyProblem(NoCredentialException()).startsWith("No passkey for this Ledger server"))
@@ -87,5 +96,20 @@ class SignInTest {
         assertTrue(passkeyProblem(GetPublicKeyCredentialDomException(SecurityError())).contains("assetlinks.json"))
         assertTrue(passkeyProblem(CreatePublicKeyCredentialDomException(SecurityError())).contains("LEDGER_ANDROID_APPS"))
         assertTrue(passkeyProblem(CreatePublicKeyCredentialDomException(InvalidStateError())).contains("already holds a Ledger passkey"))
+    }
+
+    @Test fun longNoticesStayLongEnoughToRead() {
+        // Errors such as the missing-provider one are too long to read in a 4-second snackbar.
+        assertTrue(longNotice(noPasskeyProvider(34), undoable = false))
+        assertTrue(longNotice(noPasskeyProvider(28), undoable = false))
+        assertTrue(longNotice("Archived", undoable = true))
+        assertFalse(longNotice("Saved", undoable = false))
+        assertFalse(longNotice("Signed out 1 other device", undoable = false))
+    }
+
+    @Test fun aBlankServerAddressAsksForOne() {
+        listOf("", "   ").forEach {
+            assertEquals("Enter the server address first.", assertThrows(IllegalArgumentException::class.java) { serverOrigin(it) }.message)
+        }
     }
 }

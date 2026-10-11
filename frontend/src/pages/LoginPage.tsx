@@ -35,6 +35,8 @@ export function LoginPage({ notice }: { notice?: AuthNotice | undefined }) {
   const [busy, setBusy] = useState<'' | 'password' | 'passkey'>('')
   // Shown next to the control that failed.
   const [error, setError] = useState<{ text: string; at: 'password' | 'passkey' } | null>(null)
+  // The control to try next, focused once nothing is waiting; a new object each time, so the same target refocuses.
+  const [refocus, setRefocus] = useState<{ on: 'password' | 'passkey' } | null>(null)
   const [capsLock, setCapsLock] = useState(false)
   // Set once the password was right but a passkey is registered: sign-in ends with a passkey.
   const [pending, setPending] = useState<PasskeyRequired | null>(null)
@@ -44,37 +46,56 @@ export function LoginPage({ notice }: { notice?: AuthNotice | undefined }) {
   const [passkeyFirst, setPasskeyFirst] = useState(() => canPasskey && passkeyUsedHere())
   const passwordInput = useRef<HTMLInputElement>(null)
   const passkeyButton = useRef<HTMLButtonElement>(null)
+  // The open passkey prompt, so Cancel and Back to password can close it.
+  const prompt = useRef<AbortController | null>(null)
 
-  // Every control is disabled while waiting, which drops focus to the page. After a failure, put it
-  // back on the control that failed so Enter retries.
+  // Every control is disabled while waiting, which drops focus to the page. Afterwards, put it on the
+  // control to try next so Enter retries.
   useEffect(() => {
-    if (error && !busy) (error.at === 'passkey' ? passkeyButton : passwordInput).current?.focus()
-  }, [error, busy])
+    if (refocus && !busy) (refocus.on === 'passkey' ? passkeyButton : passwordInput).current?.focus()
+  }, [refocus, busy])
 
   const fail = (failure: unknown, at: 'password' | 'passkey', passkey = at === 'passkey') => {
-    if (failure instanceof ApiError && failure.status === 409) {
+    // No passkey on the server yet: the message stays by the passkey button, but the password is the way in.
+    const none = failure instanceof ApiError && failure.status === 409
+    if (none) {
       setPasskeyUsedHere(false)
       setPasskeyFirst(false)
     }
     setError({ text: describeFailure(failure, passkey), at })
+    setRefocus({ on: none ? 'password' : at })
     setBusy('')
+  }
+
+  const openPrompt = () => {
+    prompt.current = new AbortController()
+    return prompt.current.signal
+  }
+  const closePrompt = (then: 'password' | 'passkey') => {
+    prompt.current?.abort()
+    prompt.current = null
+    setBusy('')
+    setRefocus({ on: then })
   }
 
   const confirmPasskey = async (step: PasskeyRequired) => {
     setBusy('passkey')
     setError(null)
+    const signal = openPrompt()
     let credential
     try {
-      credential = await getPasskey(step.options)
+      credential = await getPasskey(step.options, signal)
     } catch (failure) {
       // Nothing reached the server, so the pending sign-in still holds: retry from here.
-      fail(failure, 'passkey')
+      if (!signal.aborted) fail(failure, 'passkey')
       return
     }
+    if (signal.aborted) return
     try {
       await signInWithPasskey({ pending: step.pending }, credential, remember)
       setPasskeyUsedHere(true)
     } catch (failure) {
+      if (signal.aborted) return
       // The pending sign-in is single use (and short-lived): start again from the password.
       setPending(null)
       fail(failure, 'password', true)
@@ -103,17 +124,20 @@ export function LoginPage({ notice }: { notice?: AuthNotice | undefined }) {
     if (busy) return
     setBusy('passkey')
     setError(null)
+    const signal = openPrompt()
     try {
       const { challenge_id, options } = await api.passkeyLoginOptions()
-      const credential = await getPasskey(options)
+      const credential = await getPasskey(options, signal)
+      if (signal.aborted) return
       await signInWithPasskey({ challenge_id }, credential, remember)
       setPasskeyUsedHere(true)
     } catch (failure) {
-      fail(failure, 'passkey')
+      if (!signal.aborted) fail(failure, 'passkey')
     }
   }
 
   const backToPassword = () => {
+    closePrompt('password')
     setPending(null)
     setError(null)
   }
@@ -161,31 +185,39 @@ export function LoginPage({ notice }: { notice?: AuthNotice | undefined }) {
       <section className="login-side">
         <form className="login-card" onSubmit={(event) => void submit(event)} aria-labelledby="login-title">
           <div className="login-card-brand"><BrandMark size={44} /></div>
-          <p className="eyebrow">Operator sign-in</p>
+          <p className="eyebrow">Owner sign-in</p>
           {pending ? <>
             <h2 id="login-title">Confirm with your passkey</h2>
             <p className="muted">Your password is right. Approve the passkey prompt from Bitwarden, your phone, or this device to finish signing in.</p>
-            {errorAt('passkey')}
             <button ref={passkeyButton} type="submit" className="btn btn-primary login-submit" disabled={busy !== ''} autoFocus>
               {busy ? waiting : <><Icon name="passkey" /> Use passkey</>}
             </button>
-            <button type="button" className="btn login-submit login-back" onClick={backToPassword} disabled={busy !== ''}>
+            {errorAt('passkey')}
+            {/* Stays enabled while waiting: it closes a prompt that never answers. */}
+            <button type="button" className="btn login-submit login-back" onClick={backToPassword}>
               <Icon name="back" /> Back to password
             </button>
           </> : <>
             <h2 id="login-title">Welcome back</h2>
             <p className="muted login-intro">Sign in with a passkey or your owner password to reach your projects, inbox, and agents.</p>
-            {notice && !error && <p className="notice">{NOTICES[notice]}</p>}
+            {notice && !error && <p className={notice === 'expired' ? 'notice' : 'notice notice-info'}>{NOTICES[notice]}</p>}
+            {/* Above both ways in: it applies to the passkey as much as to the password. */}
+            <label className="check login-remember">
+              <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} disabled={busy !== ''} />
+              <span>Remember this device for 30 days <span className="hint">Applies however you sign in. Uncheck on a shared computer.</span></span>
+            </label>
             {canPasskey && <>
-              <button ref={passkeyButton} type="button" className={passkeyFirst ? 'btn btn-primary login-submit' : 'btn login-submit'} onClick={() => void signInWithPasskeyOnly()} disabled={busy !== ''}>
+              <button ref={passkeyButton} type="button" className={passkeyFirst ? 'btn btn-primary login-submit' : 'btn login-submit'} onClick={() => void signInWithPasskeyOnly()} disabled={busy !== ''}
+                autoFocus={passkeyFirst}>
                 {busy === 'passkey' ? waiting : <><Icon name="passkey" /> Sign in with a passkey</>}
               </button>
+              {busy === 'passkey' && <button type="button" className="btn login-submit login-back" onClick={() => closePrompt('passkey')}>Cancel</button>}
               {errorAt('passkey')}
               <p className="login-or">or use your password</p>
             </>}
             <label htmlFor="password">Password</label>
             <div className="login-field">
-              <input ref={passwordInput} id="password" name="password" type={reveal ? 'text' : 'password'} autoComplete="current-password" required autoFocus value={password}
+              <input ref={passwordInput} id="password" name="password" type={reveal ? 'text' : 'password'} autoComplete="current-password" required autoFocus={!passkeyFirst} value={password}
                 onChange={(event) => setPassword(event.target.value)} onKeyUp={watchCaps} onKeyDown={watchCaps} disabled={busy !== ''}
                 aria-invalid={error?.at === 'password' ? true : undefined} aria-describedby={capsLock ? 'caps-lock' : undefined} />
               <button type="button" className="login-reveal" aria-label={reveal ? 'Hide password' : 'Show password'} aria-pressed={reveal} onClick={() => setReveal((value) => !value)}>
@@ -197,10 +229,6 @@ export function LoginPage({ notice }: { notice?: AuthNotice | undefined }) {
             <button type="submit" className={passkeyFirst ? 'btn login-submit' : 'btn btn-primary login-submit'} disabled={busy !== ''}>
               {busy === 'password' ? <><span className="login-spinner" aria-hidden="true" /> Signing in…</> : <>Sign in <Icon name="arrow" /></>}
             </button>
-            <label className="check login-remember">
-              <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} disabled={busy !== ''} />
-              <span>Remember this device for 30 days <span className="hint">Uncheck on a shared computer.</span></span>
-            </label>
           </>}
           <p className="login-foot"><Icon name="live" /> Private, self-hosted · <span>{window.location.host}</span></p>
         </form>

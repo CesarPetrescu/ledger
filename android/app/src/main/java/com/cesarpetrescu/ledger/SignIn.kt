@@ -1,6 +1,7 @@
 package com.cesarpetrescu.ledger
 
 import android.content.Context
+import android.os.Build
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.lazy.items
@@ -29,7 +30,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
-const val NO_PASSKEY_PROVIDER = "This phone has no passkey provider turned on. Turn on Google Password Manager, or on Android 14 or newer Bitwarden, as a passkey provider in Android's settings."
+/**
+ * No usable passkey provider. Android 14 added the setting that turns providers such as Bitwarden on; before it,
+ * Credential Manager goes through Google Play services and only Google Password Manager can serve passkeys.
+ */
+fun noPasskeyProvider(sdk: Int) =
+    if (sdk >= 34) "This phone has no passkey provider turned on. Turn on Google Password Manager or Bitwarden as a passkey provider in Android's settings."
+    else "Passkeys on this phone need up-to-date Google Play services and Google Password Manager. Bitwarden passkeys need Android 14 or newer."
 
 /**
  * The phone's passkey providers (Bitwarden, Google Password Manager) through Android's Credential Manager.
@@ -60,11 +67,11 @@ class Passkeys(private val context: Context) {
 }
 
 /** What went wrong with a passkey request, in words the owner can act on. */
-fun passkeyProblem(error: Exception): String = when (error) {
+fun passkeyProblem(error: Exception, sdk: Int = Build.VERSION.SDK_INT): String = when (error) {
     is GetCredentialCancellationException, is CreateCredentialCancellationException -> "Passkey request cancelled."
     is NoCredentialException -> "No passkey for this Ledger server on this phone. Check that Bitwarden or Google Password Manager holds it and is turned on as a passkey provider."
     is GetCredentialProviderConfigurationException, is CreateCredentialProviderConfigurationException,
-    is GetCredentialUnsupportedException, is CreateCredentialUnsupportedException, is CreateCredentialNoCreateOptionException -> NO_PASSKEY_PROVIDER
+    is GetCredentialUnsupportedException, is CreateCredentialUnsupportedException, is CreateCredentialNoCreateOptionException -> noPasskeyProvider(sdk)
     is GetCredentialInterruptedException, is CreateCredentialInterruptedException -> "The passkey request was interrupted. Try again."
     is GetPublicKeyCredentialDomException -> domProblem(error.domError)
     is CreatePublicKeyCredentialDomException -> domProblem(error.domError)
@@ -106,25 +113,34 @@ fun passkeyAdded(first: Boolean, revoked: Int) = buildString {
     if (revoked > 0) append("${if (first) "" else "."} Signed out ${plural(revoked, "other device")} that used only the password.")
 }
 
+/** A passkey card's subtitle: the provider, unless the name already says it (as the server's default name does). */
+fun passkeyProvider(passkey: JSONObject) = passkey.text("provider").takeIf { it != passkey.text("name") }.orEmpty()
+
 fun passkeyDetails(passkey: JSONObject) =
     "Added: ${displayTime(passkey.text("created_at"))}\nLast used: ${displayTime(passkey.text("last_used_at")).ifBlank { "Never" }}"
 
-/** Asks for the owner password before a change to how the console is signed in to, so a stolen session cookie alone cannot make it. */
+/**
+ * Asks for the owner password before a change to how the console is signed in to, so a stolen session cookie alone cannot make it.
+ * It stays open while [action] runs: [action] closes it on success, or reports a failure (a wrong password) to show under the field.
+ */
 @Composable
-fun PasswordDialog(title: String, explanation: String, confirm: String, dismiss: () -> Unit, danger: Boolean = false, action: (String) -> Unit) {
+fun PasswordDialog(title: String, explanation: String, confirm: String, dismiss: () -> Unit, busy: Boolean, danger: Boolean = false, action: (password: String, failed: (String) -> Unit) -> Unit) {
     // Held only while the dialog is open, never in saved state.
     var password by remember { mutableStateOf("") }
-    AlertDialog(onDismissRequest = dismiss, title = { Text(title) }, text = {
+    var error by remember { mutableStateOf<String?>(null) }
+    AlertDialog(onDismissRequest = { if (!busy) dismiss() }, title = { Text(title) }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(explanation)
-            OutlinedTextField(password, { password = it }, label = { Text("Owner password") }, singleLine = true,
+            OutlinedTextField(password, { password = it; error = null }, label = { Text("Owner password") }, singleLine = true, enabled = !busy,
                 visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
+            // Not only a wrong password lands here (a closed provider sheet does too), so the field itself is not marked wrong.
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
         }
     }, confirmButton = {
-        TextButton(enabled = password.isNotEmpty(), onClick = { dismiss(); action(password) }) {
+        TextButton(enabled = password.isNotEmpty() && !busy, onClick = { error = null; action(password) { error = it } }) {
             Text(confirm, color = if (danger) MaterialTheme.colorScheme.error else Color.Unspecified)
         }
-    }, dismissButton = { TextButton(onClick = dismiss) { Text("Cancel") } })
+    }, dismissButton = { TextButton(onClick = dismiss, enabled = !busy) { Text("Cancel") } })
 }
 
 /** Settings › Access › Passkeys: once there is one, signing in anywhere needs it. */
@@ -142,7 +158,7 @@ fun PasskeysScreen(model: LedgerModel) {
                     else "No passkeys yet, so the password alone signs in. Once you add one, signing in needs it.")
             }
             items(rows, key = { it.text("id") }) { passkey ->
-                SummaryCard(passkey.text("name"), passkey.text("provider"), passkeyDetails(passkey), actions = {
+                SummaryCard(passkey.text("name"), passkeyProvider(passkey), passkeyDetails(passkey), actions = {
                     OutlinedButton(onClick = { renaming = passkey }, enabled = !model.busy) { Text("Rename") }
                     OutlinedButton(onClick = { removing = passkey }, enabled = !model.busy,
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("Remove") }
@@ -154,10 +170,10 @@ fun PasskeysScreen(model: LedgerModel) {
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        if (adding) PasswordDialog("Add a passkey", "Enter the owner password, then choose where to save the passkey.", "Continue", { adding = false }) { password ->
+        if (adding) PasswordDialog("Add a passkey", "Enter the owner password, then choose where to save the passkey.", "Continue", { adding = false }, model.busy) { password, failed ->
             val first = rows.isEmpty()
             var revoked = 0
-            model.act(after = { model.notice = passkeyAdded(first, revoked) }) { client ->
+            model.act(after = { adding = false; model.notice = passkeyAdded(first, revoked) }, failure = failed) { client ->
                 val start = client.request("POST", "/passkeys/options", json("password" to password))
                 revoked = client.request("POST", "/passkeys", json("challenge_id" to start.getString("challenge_id"), "credential" to passkeys.create(start.getJSONObject("options")))).optInt("revoked")
             }
@@ -167,8 +183,8 @@ fun PasskeysScreen(model: LedgerModel) {
             PasswordDialog("Remove passkey",
                 if (last) "${passkey.text("name")} is your last passkey. Without it the password alone signs in again, here, on the web, and when approving apps."
                 else "Remove ${passkey.text("name")}? It can no longer sign in. Delete it from your passkey provider too.",
-                "Remove", { removing = null }, danger = true) { password ->
-                model.act(if (last) "Passkey removed. The password alone signs in again." else "Passkey removed") {
+                "Remove", { removing = null }, model.busy, danger = true) { password, failed ->
+                model.act(if (last) "Passkey removed. The password alone signs in again." else "Passkey removed", after = { removing = null }, failure = failed) {
                     it.request("DELETE", "/passkeys/${segment(passkey.text("id"))}", json("password" to password))
                 }
             }
@@ -194,6 +210,15 @@ fun SignedInDevices(model: LedgerModel) {
         val sessions = data.rows("sessions").sortedByDescending { it.optBoolean("current") }
         Page {
             item { Text("Remembered devices stay signed in for 30 days after their last use, 90 days at most; others for 12 hours. Sign out any you do not recognise.") }
+            // Above the cards, so it is in view however many devices there are.
+            if (sessions.any { !it.optBoolean("current") }) item {
+                ConfirmButton("Sign out everywhere else", "Sign out every other browser and phone? This phone stays signed in.", !model.busy, danger = true) {
+                    var revoked = 0
+                    model.act(after = { model.notice = "Signed out ${plural(revoked, "other device")}" }) {
+                        revoked = it.request("POST", "/sessions/revoke-others").optInt("revoked")
+                    }
+                }
+            }
             items(sessions, key = { it.text("id") }) { session ->
                 val name = session.text("label").ifBlank { "Unknown device" }
                 val (subtitle, body) = sessionSummary(session)
@@ -204,14 +229,6 @@ fun SignedInDevices(model: LedgerModel) {
                         model.act("Signed out $name") { it.request("DELETE", "/sessions/${segment(session.text("id"))}") }
                     }
                 })
-            }
-            if (sessions.any { !it.optBoolean("current") }) item {
-                ConfirmButton("Sign out everywhere else", "Sign out every other browser and phone? This phone stays signed in.", !model.busy, danger = true) {
-                    var revoked = 0
-                    model.act(after = { model.notice = "Signed out ${plural(revoked, "other device")}" }) {
-                        revoked = it.request("POST", "/sessions/revoke-others").optInt("revoked")
-                    }
-                }
             }
         }
     }
