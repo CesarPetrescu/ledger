@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/cesarpetrescu/ledger/internal/oauth"
+	"github.com/cesarpetrescu/ledger/internal/store"
 )
 
 func (s *Server) reviewAuthorization(w http.ResponseWriter, r *http.Request) {
@@ -31,7 +32,7 @@ func (s *Server) decideAuthorization(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Invalid action.")
 		return
 	}
-	destination, err := s.oauth.DecideAuthorization(r.Context(), r.URL.Query(), input.Action == "approve")
+	destination, err := s.oauth.DecideAuthorization(r.Context(), r.URL.Query(), input.Action == "approve", sessionFrom(r).Method == store.MethodPassword)
 	if err != nil {
 		s.authorizationError(w, r, err)
 		return
@@ -42,6 +43,11 @@ func (s *Server) decideAuthorization(w http.ResponseWriter, r *http.Request) {
 func (s *Server) authorizationError(w http.ResponseWriter, r *http.Request, err error) {
 	if errors.Is(err, oauth.ErrInvalidAuthorization) {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if errors.Is(err, store.ErrPasskeyRequired) {
+		// A passkey was added while this password-only session was approving; it has been signed out.
+		writeError(w, http.StatusUnauthorized, "unauthenticated")
 		return
 	}
 	s.internalError(w, r, err)

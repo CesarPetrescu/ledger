@@ -79,7 +79,7 @@ func TestAdminSessionMigrationStoresHashesOnly(t *testing.T) {
 	for _, entry := range entries {
 		names = append(names, entry.Name())
 	}
-	if len(names) != 24 || names[0] != "0001_init.sql" || names[1] != "0002_admin_session.sql" || names[2] != "0003_admin_events.sql" || names[3] != "0004_calendar.sql" || names[4] != "0005_handoffs.sql" || names[5] != "0006_device_auth.sql" || names[6] != "0007_glass.sql" || names[7] != "0008_entry_meta.sql" || names[8] != "0009_entry_insights.sql" || names[9] != "0010_insight_fixes.sql" || names[10] != "0011_focus_metadata.sql" || names[11] != "0012_trash_and_undo.sql" || names[12] != "0013_label_overrides.sql" || names[13] != "0014_worker_problem.sql" || names[14] != "0015_read_all.sql" || names[15] != "0016_threads_and_history.sql" || names[16] != "0017_oauth_password.sql" || names[17] != "0018_research.sql" || names[18] != "0019_api_keys.sql" || names[19] != "0020_research_continuation.sql" || names[20] != "0021_research_until_done.sql" || names[21] != "0022_research_publication.sql" || names[22] != "0023_research_files.sql" || names[23] != "0024_project_repos.sql" {
+	if len(names) != 25 || names[0] != "0001_init.sql" || names[1] != "0002_admin_session.sql" || names[2] != "0003_admin_events.sql" || names[3] != "0004_calendar.sql" || names[4] != "0005_handoffs.sql" || names[5] != "0006_device_auth.sql" || names[6] != "0007_glass.sql" || names[7] != "0008_entry_meta.sql" || names[8] != "0009_entry_insights.sql" || names[9] != "0010_insight_fixes.sql" || names[10] != "0011_focus_metadata.sql" || names[11] != "0012_trash_and_undo.sql" || names[12] != "0013_label_overrides.sql" || names[13] != "0014_worker_problem.sql" || names[14] != "0015_read_all.sql" || names[15] != "0016_threads_and_history.sql" || names[16] != "0017_oauth_password.sql" || names[17] != "0018_research.sql" || names[18] != "0019_api_keys.sql" || names[19] != "0020_research_continuation.sql" || names[20] != "0021_research_until_done.sql" || names[21] != "0022_research_publication.sql" || names[22] != "0023_research_files.sql" || names[23] != "0024_project_repos.sql" || names[24] != "0025_passkeys.sql" {
 		t.Fatalf("migration files = %v, want strictly numbered sequence", names)
 	}
 }
@@ -155,6 +155,34 @@ func TestGlassMigrationOrdersChangesAndIsolatesReaders(t *testing.T) {
 	} {
 		if !strings.Contains(sql, required) {
 			t.Errorf("glass migration missing %q", required)
+		}
+	}
+}
+
+func TestPasskeyMigrationStoresOnlyPublicMaterial(t *testing.T) {
+	body, err := Files.ReadFile("0025_passkeys.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToLower(string(body))
+	for _, required := range []string{
+		"create table owner_passkey",
+		"credential_id bytea not null unique",
+		"public_key bytea not null",
+		"notify_admin_event('owner_passkey')",
+		"create table owner_webauthn_challenge",
+		"hash bytea primary key check (octet_length(hash) = 32)",
+		"references admin_session(hash) on delete cascade",
+		"add column public_id uuid not null default gen_random_uuid() unique",
+		"add column remember boolean not null default false",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Errorf("passkey migration missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{"private", "secret", "plaintext"} {
+		if strings.Contains(sql, forbidden) {
+			t.Errorf("passkey migration stores %q", forbidden)
 		}
 	}
 }

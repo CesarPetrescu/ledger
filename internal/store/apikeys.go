@@ -42,7 +42,9 @@ func scanAPIKey(row pgx.Row) (APIKey, error) {
 }
 
 // CreateAPIKey stores a new key and returns it with its secret, which cannot be read again.
-func (db *DB) CreateAPIKey(ctx context.Context, name string, scopes []string) (APIKey, string, error) {
+// passwordOnly marks a console session that has proved only the password: like an app approval, it
+// may not issue a credential once a passkey exists (checked under PasskeyLock).
+func (db *DB) CreateAPIKey(ctx context.Context, name string, scopes []string, passwordOnly bool) (APIKey, string, error) {
 	if err := ValidateContextHeader("name", name, true); err != nil || utf8.RuneCountInString(name) > 100 {
 		return APIKey{}, "", fmt.Errorf("name must be 1 to 100 characters on one line")
 	}
@@ -55,9 +57,22 @@ func (db *DB) CreateAPIKey(ctx context.Context, name string, scopes []string) (A
 	}
 	secret := "ledger_" + random
 	hash := sha256.Sum256([]byte(secret))
-	key, err := scanAPIKey(db.Pool.QueryRow(ctx, `INSERT INTO api_key(name,prefix,hash,scopes) VALUES($1,$2,$3,$4) RETURNING `+apiKeyColumns,
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return APIKey{}, "", err
+	}
+	defer tx.Rollback(ctx)
+	if passwordOnly {
+		if err := noPasskeyYet(ctx, tx); err != nil {
+			return APIKey{}, "", err
+		}
+	}
+	key, err := scanAPIKey(tx.QueryRow(ctx, `INSERT INTO api_key(name,prefix,hash,scopes) VALUES($1,$2,$3,$4) RETURNING `+apiKeyColumns,
 		name, secret[:14], hash[:], slices.Compact(slices.Sorted(slices.Values(scopes)))))
-	return key, secret, err
+	if err != nil {
+		return APIKey{}, "", err
+	}
+	return key, secret, tx.Commit(ctx)
 }
 
 func (db *DB) ListAPIKeys(ctx context.Context) ([]APIKey, error) {

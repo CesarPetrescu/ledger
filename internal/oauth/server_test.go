@@ -9,6 +9,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/cesarpetrescu/ledger/internal/passkey"
 )
 
 func TestAuthorizeTemplateIsResponsiveAndExplainsPermissions(t *testing.T) {
@@ -25,6 +27,40 @@ func TestAuthorizeTemplateIsResponsiveAndExplainsPermissions(t *testing.T) {
 		if !strings.Contains(html, want) {
 			t.Errorf("authorization page missing %q", want)
 		}
+	}
+}
+
+func TestAuthorizeTemplateHidesTheApprovalPasswordOncePasskeysExist(t *testing.T) {
+	var body bytes.Buffer
+	if err := authorizeTemplate.Execute(&body, map[string]any{"Name": "Desk app", "Read": true, "PasskeyOnly": true, "OwnerURL": "/admin/authorize?state=x"}); err != nil {
+		t.Fatal(err)
+	}
+	html := body.String()
+	// Approving is the primary button next to Deny, not a text link above it.
+	for _, want := range []string{`<a class="primary button-link" href="/admin/authorize?state=x">Continue with Ledger owner login</a></div>`, "approve with your passkey", `value="deny"`} {
+		if !strings.Contains(html, want) {
+			t.Errorf("passkey approval page missing %q", want)
+		}
+	}
+	for _, unwanted := range []string{`name="password"`, `value="approve"`, "Allow access", "Approval password"} {
+		if strings.Contains(html, unwanted) {
+			t.Errorf("passkey approval page still offers %q", unwanted)
+		}
+	}
+}
+
+func TestAssetLinksPublishTheAndroidApps(t *testing.T) {
+	apps, err := passkey.ParseAndroidApps(passkey.DefaultAndroidApps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(Config{PublicURL: "https://ledger.example.com", AndroidApps: apps}, nil)
+	res := httptest.NewRecorder()
+	server.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/.well-known/assetlinks.json", nil))
+	if res.Code != http.StatusOK || res.Header().Get("Content-Type") != "application/json" || res.Body.String() != string(passkey.AssetLinks(apps)) ||
+		!strings.Contains(res.Body.String(), `"package_name":"com.cesarpetrescu.ledger"`) || !strings.Contains(res.Body.String(), `"delegate_permission/common.get_login_creds"`) ||
+		!strings.Contains(res.Body.String(), `"8F:F3:37:CD:`) {
+		t.Fatalf("assetlinks = %d %q %s", res.Code, res.Header().Get("Content-Type"), res.Body.String())
 	}
 }
 

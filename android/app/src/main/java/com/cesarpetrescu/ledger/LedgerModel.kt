@@ -55,15 +55,33 @@ class LedgerModel(application: Application) : AndroidViewModel(application) {
     fun back() { if (!busy && stack.size > 1) stack = stack.dropLast(1) }
     fun refresh() { revision++ }
     fun clearNotice() { notice = null; undoId = null }
+
+    /** Takes over a session the server rotated, such as after adding the first passkey, and keeps it on the phone. */
+    fun adopt(fresh: Api) {
+        sessions.save(fresh)
+        api = fresh
+    }
     fun chooseTheme(value: String) { themes.save(value); theme = value }
 
-    fun login(origin: String, password: String) {
+    /** The password, then a passkey when the server asks for one (once the owner has added any). */
+    fun login(origin: String, password: String, passkeys: Passkeys) = signIn(origin) { server ->
+        try { server.login(password) }
+        catch (step: PasskeyRequired) { server.passkeyLogin("pending", step.pending, passkeys.get(step.options)) }
+    }
+
+    /** A passkey alone: the provider's own unlock (fingerprint, PIN) is the second factor. */
+    fun passkeyLogin(origin: String, passkeys: Passkeys) = signIn(origin) { server ->
+        val start = server.passkeyChallenge()
+        server.passkeyLogin("challenge_id", start.getString("challenge_id"), passkeys.get(start.getJSONObject("options")))
+    }
+
+    private fun signIn(origin: String, attempt: suspend (Api) -> Api) {
         if (busy) return
         busy = true
         viewModelScope.launch {
             try {
                 val client = withContext(Dispatchers.IO) {
-                    Api(serverOrigin(origin)).login(password).also { fresh ->
+                    attempt(Api(serverOrigin(origin))).also { fresh ->
                         try { sessions.save(fresh) } catch (e: Exception) {
                             runCatching { fresh.request("POST", "/logout") }
                             throw e
@@ -81,7 +99,11 @@ class LedgerModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun act(success: String = "Saved", after: () -> Unit = {}, block: (Api) -> Unit) {
+    /**
+     * Runs [block] off the main thread; it may suspend, as adding a passkey does while the provider's sheet is open.
+     * [failure], when given, receives the error message in place of the notice, for a dialog that shows it itself.
+     */
+    fun act(success: String = "Saved", after: () -> Unit = {}, failure: ((String) -> Unit)? = null, block: suspend (Api) -> Unit) {
         val client = api ?: return
         if (reauthRequired) return
         if (busy) return
@@ -95,7 +117,7 @@ class LedgerModel(application: Application) : AndroidViewModel(application) {
                 after()
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
-                failed(e, client)
+                failed(e, client, failure)
             } finally { busy = false }
         }
     }
@@ -108,12 +130,13 @@ class LedgerModel(application: Application) : AndroidViewModel(application) {
 
     fun undo(id: String) = act("Undone") { it.request("POST", "/actions/${segment(id)}/undo") }
 
-    suspend fun failed(error: Exception, client: Api) {
+    suspend fun failed(error: Exception, client: Api, failure: ((String) -> Unit)? = null) {
         if (error is ApiError && error.status == 401 && api === client) {
             withContext(Dispatchers.IO) { sessions.clear() }
             reauthRequired = true
         }
-        notice = errorMessage(error)
+        // An expired session goes to the sign-in dialog's notice either way.
+        if (failure != null && !reauthRequired) failure(errorMessage(error)) else notice = errorMessage(error)
     }
 
     fun logout() = act("Signed out", after = { api = null; home() }) { client ->

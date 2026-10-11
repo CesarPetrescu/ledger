@@ -28,6 +28,13 @@ DECISION = dict(id='80', slug='atlas', project_name='Atlas', kind='decision', bo
 # Dated today, so the calendar's opening day shows it whatever day the test runs.
 TODAY = __import__('datetime').date.today().isoformat()
 EVENT = dict(id='event-1', calendar_id='calendar-1', calendar_name='Planning', title='Plan the week', start=f'{TODAY}T10:00:00Z', end=f'{TODAY}T11:00:00Z', all_day=False, recurring=False, etag='"v1"')
+# The owner has no passkeys here, so the password alone signs in, as before passkeys existed.
+PASSKEYS = []
+THIS_PHONE = dict(id='0c9e8f1a-5b2d-4c3e-9f70-1a2b3c4d5e6f', label='Ledger app on Android', method='password', remember=True, current=True,
+                  created_at='2026-09-06T08:00:00Z', last_seen_at='2026-09-06T13:00:00Z', expires_at='2026-10-06T13:00:00Z')
+LAPTOP = dict(id='7d1f2e3a-4b5c-4d6e-8f90-a1b2c3d4e5f6', label='Firefox on Linux', method='password+passkey', remember=False, current=False,
+              created_at='2026-09-06T07:00:00Z', last_seen_at='2026-09-06T07:30:00Z', expires_at='2026-09-06T19:00:00Z')
+SESSIONS = []
 
 def record(kind, label, undo):
     ACTIONS.append(dict(id=str(len(ACTIONS) + 1), kind=kind, label=label, project_slug='atlas', created_at='2026-09-06T13:00:00Z', undoable=True, undo=undo))
@@ -62,7 +69,14 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/login':
             if body.get('password') != 'fixture-password':
                 return self.send_json(401, {'error': 'Invalid credentials'})
-            return self.send_json(200, {'csrf_token': CSRF, 'expires_at': '2030-01-01T00:00:00Z'}, {'Set-Cookie': f'ledger_admin_session={TOKEN}; Path=/admin; HttpOnly; Secure; SameSite=Strict'})
+            # Signed-in devices names the phone from this header; the app always asks to be remembered.
+            if not re.fullmatch(r'LedgerAndroid/\S+ \(Android [^;()]+; [^;()]+\)', self.headers.get('User-Agent', '')) or body.get('remember') is not True:
+                return self.send_json(400, {'error': 'Expected the app User-Agent and remember: true'})
+            # Each sign-in finds the laptop signed in again, so the test can sign it out on every run.
+            SESSIONS[:] = [THIS_PHONE, LAPTOP]
+            return self.send_json(200, {'csrf_token': CSRF, 'expires_at': '2030-01-01T00:00:00Z', 'remember': True}, {'Set-Cookie': f'ledger_admin_session={TOKEN}; Path=/admin; HttpOnly; Secure; SameSite=Strict'})
+        if path == '/login/passkey/options':
+            return self.send_json(409, {'error': 'no passkeys'})
         if self.headers.get('Cookie') != f'ledger_admin_session={TOKEN}':
             return self.send_json(401, {'error': 'Missing session'})
         if method != 'GET' and self.headers.get('X-CSRF-Token') != CSRF:
@@ -89,7 +103,21 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/logout':
             return self.send_json(204)
         if path == '/session':
-            return self.send_json(200, {'authenticated': True, 'csrf_token': CSRF})
+            return self.send_json(200, {'authenticated': True, 'csrf_token': CSRF, 'remember': True, 'method': 'password', 'session_id': THIS_PHONE['id']})
+        if path == '/passkeys':
+            return self.send_json(200, {'passkeys': PASSKEYS, 'required': bool(PASSKEYS)})
+        if re.fullmatch(r'/passkeys/[^/]+', path) and method in ('PATCH', 'DELETE'):
+            return self.send_json(404, {'error': 'passkey not found'})
+        if path == '/sessions':
+            return self.send_json(200, {'sessions': SESSIONS})
+        if path == '/sessions/revoke-others' and method == 'POST':
+            others = [s for s in SESSIONS if not s['current']]
+            SESSIONS[:] = [s for s in SESSIONS if s['current']]
+            return self.send_json(200, {'revoked': len(others)})
+        match = re.fullmatch(r'/sessions/([^/]+)', path)
+        if match and method == 'DELETE':
+            SESSIONS[:] = [s for s in SESSIONS if s['id'] != match.group(1)]
+            return self.send_json(204)
         if path == '/overview':
             return self.send_json(200, {'counts': {'projects': 1, 'entries': len(ENTRIES), 'oauth_clients': 1}, 'projects': [PROJECT], 'recent_entries': ENTRIES})
         if path == '/projects':
@@ -247,6 +275,7 @@ class Handler(BaseHTTPRequestHandler):
     do_POST = handle_api
     do_PUT = handle_api
     do_DELETE = handle_api
+    do_PATCH = handle_api
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

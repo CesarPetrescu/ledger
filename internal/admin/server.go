@@ -1,10 +1,12 @@
 // Package admin serves the operator web API behind /admin/api.
 //
-// Authentication is a separate Argon2id password. Sessions are opaque random
-// identifiers stored hashed in PostgreSQL and carried in a hardened cookie.
-// Every endpoint except login requires a live session; state-changing
-// endpoints additionally require the exact public Origin and the per-session
-// CSRF token. Failures never reveal internals.
+// Authentication is a separate Argon2id password and, once the owner registers
+// one, a passkey: with a passkey registered the password alone never opens a
+// session. Sessions are opaque random identifiers stored hashed in PostgreSQL
+// and carried in a hardened cookie. Every endpoint except the three sign-in
+// endpoints requires a live session; state-changing endpoints additionally
+// require the exact public Origin and the per-session CSRF token. Failures
+// never reveal internals.
 package admin
 
 import (
@@ -32,8 +34,10 @@ import (
 	calendarapi "github.com/cesarpetrescu/ledger/internal/calendar"
 	"github.com/cesarpetrescu/ledger/internal/github"
 	"github.com/cesarpetrescu/ledger/internal/oauth"
+	"github.com/cesarpetrescu/ledger/internal/passkey"
 	"github.com/cesarpetrescu/ledger/internal/retrieval"
 	"github.com/cesarpetrescu/ledger/internal/store"
+	"github.com/go-webauthn/webauthn/webauthn"
 )
 
 const (
@@ -57,6 +61,8 @@ type Config struct {
 	IndexURL          string
 	Calendar          *calendarapi.Service
 	GitHub            *github.Sync
+	// AndroidApps may use the owner's passkeys (LEDGER_ANDROID_APPS).
+	AndroidApps []passkey.AndroidApp
 }
 
 type Server struct {
@@ -72,6 +78,8 @@ type Server struct {
 	calendar *calendarapi.Service
 	github   *github.Sync
 	oauth    *oauth.Server
+	// passkeys is nil when LEDGER_PUBLIC_URL cannot be a WebAuthn RP ID (an IP address).
+	passkeys *webauthn.WebAuthn
 }
 
 type sessionKey struct{}
@@ -88,6 +96,11 @@ func NewServer(config Config, db *store.DB) *Server {
 			panic("invalid LEDGER_INTERNAL_PROXY_CIDR")
 		}
 		s.trusted = &prefix
+	}
+	if rp, err := passkey.New(s.origin, config.AndroidApps); err != nil {
+		log.Printf("admin: passkeys unavailable: %v", err)
+	} else {
+		s.passkeys = rp
 	}
 	s.mux.HandleFunc("GET /admin/api/session", s.session)
 	s.mux.HandleFunc("POST /admin/api/logout", s.logout)
@@ -158,6 +171,14 @@ func NewServer(config Config, db *store.DB) *Server {
 	s.mux.HandleFunc("GET /admin/api/api-keys", s.listAPIKeys)
 	s.mux.HandleFunc("POST /admin/api/api-keys", s.createAPIKey)
 	s.mux.HandleFunc("DELETE /admin/api/api-keys/{id}", s.revokeAPIKey)
+	s.mux.HandleFunc("GET /admin/api/passkeys", s.listPasskeys)
+	s.mux.HandleFunc("POST /admin/api/passkeys/options", s.passkeyRegistrationOptions)
+	s.mux.HandleFunc("POST /admin/api/passkeys", s.registerPasskey)
+	s.mux.HandleFunc("PATCH /admin/api/passkeys/{id}", s.renamePasskey)
+	s.mux.HandleFunc("DELETE /admin/api/passkeys/{id}", s.deletePasskey)
+	s.mux.HandleFunc("GET /admin/api/sessions", s.listSessions)
+	s.mux.HandleFunc("DELETE /admin/api/sessions/{id}", s.revokeSession)
+	s.mux.HandleFunc("POST /admin/api/sessions/revoke-others", s.revokeOtherSessions)
 	s.mux.HandleFunc("GET /admin/api/events", func(w http.ResponseWriter, r *http.Request) { s.events.serve(s.origin, w, r) })
 	return s
 }
@@ -201,13 +222,23 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	header.Set("Referrer-Policy", "no-referrer")
 	header.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
 	header.Set("Content-Type", "application/json; charset=utf-8")
-	if r.URL.Path == "/admin/api/login" {
+	// The sign-in endpoints are the only ones reachable without a session.
+	var signIn http.HandlerFunc
+	switch r.URL.Path {
+	case "/admin/api/login":
+		signIn = s.login
+	case "/admin/api/login/passkey/options":
+		signIn = s.passkeyLoginOptions
+	case "/admin/api/login/passkey":
+		signIn = s.passkeyLogin
+	}
+	if signIn != nil {
 		if r.Method != http.MethodPost {
 			header.Set("Allow", http.MethodPost)
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
-		s.login(w, r)
+		signIn(w, r)
 		return
 	}
 	session, ok := s.authenticate(w, r)
@@ -259,19 +290,28 @@ func plausibleToken(value string) bool {
 	return true
 }
 
-func (s *Server) login(w http.ResponseWriter, r *http.Request) {
+// signInAllowed admits a request to a sign-in endpoint: the exact Origin first, so a cross-origin
+// request spends no quota, then the per-address request limit.
+func (s *Server) signInAllowed(w http.ResponseWriter, r *http.Request) bool {
 	if r.Header.Get("Origin") != s.origin {
 		writeError(w, http.StatusForbidden, "origin not allowed")
-		return
+		return false
 	}
-	ip := oauth.RealIP(r, s.trusted)
-	if !s.requests.Allow("login:"+ip, 20, time.Minute) {
+	if !s.requests.Allow("login:"+oauth.RealIP(r, s.trusted), 20, time.Minute) {
 		w.Header().Set("Retry-After", "60")
 		writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
+		return false
+	}
+	return true
+}
+
+func (s *Server) login(w http.ResponseWriter, r *http.Request) {
+	if !s.signInAllowed(w, r) {
 		return
 	}
 	var input struct {
 		Password string `json:"password"`
+		Remember bool   `json:"remember"`
 	}
 	if err := decodeJSON(w, r, &input, maxLoginBytes); err != nil {
 		writeDecodeError(w, err)
@@ -280,6 +320,23 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if !s.verifyOwnerPassword(w, r, input.Password) {
 		return
 	}
+	required, err := s.db.OwnerHasPasskeys(r.Context())
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	if required {
+		// With a passkey registered the password alone opens nothing: it earns one passkey
+		// assertion, bound to a single-use pending token.
+		s.beginPasskeyLogin(w, r, store.ChallengePasswordLogin, input.Remember)
+		return
+	}
+	s.startSession(w, r, store.NewAdminSession{Remember: input.Remember, Method: store.MethodPassword})
+}
+
+// startSession signs in: it replaces the request's previous session, if any, with a new one,
+// so the session identifier changes on every sign-in.
+func (s *Server) startSession(w http.ResponseWriter, r *http.Request, input store.NewAdminSession) {
 	ctx := r.Context()
 	if previous, err := r.Cookie(sessionCookie); err == nil && plausibleToken(previous.Value) {
 		if err := s.db.DeleteAdminSession(ctx, previous.Value); err != nil {
@@ -291,37 +348,73 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	session, err := s.db.CreateAdminSession(ctx)
+	input.Label = sessionLabel(r.UserAgent())
+	session, err := s.db.CreateAdminSession(ctx, input)
+	if errors.Is(err, store.ErrPasskeyRequired) {
+		// The first passkey was registered after the password was checked: ask for it now.
+		s.beginPasskeyLogin(w, r, store.ChallengePasswordLogin, input.Remember)
+		return
+	}
 	if err != nil {
 		s.internalError(w, r, err)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: session.ID, Path: "/admin", HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode, Expires: session.ExpiresAt, MaxAge: int(time.Until(session.ExpiresAt).Seconds())})
-	writeJSON(w, http.StatusOK, map[string]any{"csrf_token": session.CSRFToken, "expires_at": session.ExpiresAt})
+	setSessionCookie(w, session)
+	writeJSON(w, http.StatusOK, map[string]any{"csrf_token": session.CSRFToken, "expires_at": session.ExpiresAt, "remember": session.Remember})
+}
+
+const (
+	failureLimit  = 4
+	failureWindow = 15 * time.Minute
+)
+
+func (s *Server) failureKey(r *http.Request) string {
+	return "login-failure:" + oauth.RealIP(r, s.trusted)
+}
+
+// lockedOut refuses a request from an address with too many recent failed sign-ins or password
+// confirmations, whether by password or passkey.
+func (s *Server) lockedOut(w http.ResponseWriter, r *http.Request) bool {
+	if s.failures.Blocked(s.failureKey(r), failureLimit, failureWindow) {
+		w.Header().Set("Retry-After", "900")
+		writeError(w, http.StatusTooManyRequests, "too many failed logins")
+		return true
+	}
+	return false
+}
+
+// refuse records a failed sign-in or confirmation toward the lockout and answers with status and
+// message, or with the lockout once this failure reaches it.
+func (s *Server) refuse(w http.ResponseWriter, r *http.Request, status int, message string) {
+	if !s.failures.Allow(s.failureKey(r), failureLimit, failureWindow) {
+		w.Header().Set("Retry-After", "900")
+		writeError(w, http.StatusTooManyRequests, "too many failed logins")
+		return
+	}
+	writeError(w, status, message)
 }
 
 func (s *Server) verifyOwnerPassword(w http.ResponseWriter, r *http.Request, password string) bool {
-	failureKey := "login-failure:" + oauth.RealIP(r, s.trusted)
-	if s.failures.Blocked(failureKey, 4, 15*time.Minute) {
-		w.Header().Set("Retry-After", "900")
-		writeError(w, http.StatusTooManyRequests, "too many failed logins")
+	if s.lockedOut(w, r) {
 		return false
 	}
 	if !oauth.VerifyPassword(s.config.PasswordHash, password) {
-		if !s.failures.Allow(failureKey, 4, 15*time.Minute) {
-			w.Header().Set("Retry-After", "900")
-			writeError(w, http.StatusTooManyRequests, "too many failed logins")
-			return false
-		}
 		// A wrong confirmation password does not invalidate the existing session.
 		status, message := http.StatusForbidden, "Password not accepted."
 		if r.URL.Path == "/admin/api/login" {
 			status, message = http.StatusUnauthorized, "invalid credentials"
 		}
-		writeError(w, status, message)
+		s.refuse(w, r, status, message)
 		return false
 	}
 	return true
+}
+
+// setSessionCookie hands a session to the browser. A remembered cookie lives until the absolute
+// cap; the server enforces the idle expiry.
+func setSessionCookie(w http.ResponseWriter, session store.AdminSession) {
+	limit := session.Cap()
+	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: session.ID, Path: "/admin", HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode, Expires: limit, MaxAge: int(time.Until(limit).Seconds())})
 }
 
 func clearSessionCookie(w http.ResponseWriter) {
@@ -335,7 +428,8 @@ func sessionFrom(r *http.Request) store.AdminSession {
 
 func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 	session := sessionFrom(r)
-	writeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "csrf_token": session.CSRFToken, "expires_at": session.ExpiresAt})
+	writeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "csrf_token": session.CSRFToken, "expires_at": session.ExpiresAt,
+		"remember": session.Remember, "method": session.Method, "session_id": session.PublicID})
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {

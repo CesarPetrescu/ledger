@@ -44,7 +44,12 @@ func (s *Server) deviceRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "Invalid action.")
 		return
 	}
-	err := s.db.DecideDevice(r.Context(), code, input.Action == "approve")
+	err := s.db.DecideDevice(r.Context(), code, input.Action == "approve", sessionFrom(r).Method == store.MethodPassword)
+	if errors.Is(err, store.ErrPasskeyRequired) {
+		// A passkey was added while this password-only session was approving; it has been signed out.
+		writeError(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
 	if errors.Is(err, store.ErrInvalidGrant) {
 		writeError(w, 409, "Code is invalid, expired, or already handled.")
 		return

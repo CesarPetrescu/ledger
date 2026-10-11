@@ -9,7 +9,7 @@ function AuthProbe() {
     <>
       <span>{state.status}</span>
       <span>{state.status === 'anonymous' ? state.notice ?? 'no-notice' : 'no-notice'}</span>
-      <button type="button" onClick={() => void signIn('password')}>
+      <button type="button" onClick={() => void signIn('password', false)}>
         Sign in
       </button>
       <button type="button" onClick={() => void signOut()}>
@@ -76,6 +76,22 @@ describe('session expiry', () => {
     await act(async () => vi.advanceTimersByTimeAsync(1000))
     expect(screen.getByText('anonymous')).toBeInTheDocument()
     expect(screen.getByText('expired')).toBeInTheDocument()
+  })
+
+  it('leaves a remembered session to the server instead of a client timer', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-04T00:00:00Z'))
+    // 30 days is more than setTimeout can hold; a timer would fire at once and sign the owner out.
+    mockApi({ 'GET /admin/api/session': { body: { authenticated: true, csrf_token: 'csrf-bootstrap', expires_at: '2026-10-04T00:00:00Z', remember: true } } })
+    render(
+      <AuthProvider>
+        <AuthProbe />
+      </AuthProvider>,
+    )
+    await flushAsyncWork()
+    expect(screen.getByText('authenticated')).toBeInTheDocument()
+    await act(async () => vi.advanceTimersByTimeAsync(60_000))
+    expect(screen.getByText('authenticated')).toBeInTheDocument()
   })
 
   it('does not let a stale expiry callback clear a newer session token', async () => {

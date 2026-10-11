@@ -40,11 +40,11 @@ func TestResearchAPIDispatchesWithKeys(t *testing.T) {
 	if _, err := db.UpsertProject(ctx, store.Project{Slug: "atlas", Name: "Atlas", Tier: "focus"}); err != nil {
 		t.Fatal(err)
 	}
-	_, key, err := db.CreateAPIKey(ctx, "Adastrion Core", []string{store.ScopeResearchDispatch})
+	_, key, err := db.CreateAPIKey(ctx, "Adastrion Core", []string{store.ScopeResearchDispatch}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, otherKey, _ := db.CreateAPIKey(ctx, "Other dispatcher", []string{store.ScopeResearchDispatch})
+	other, otherKey, _ := db.CreateAPIKey(ctx, "Other dispatcher", []string{store.ScopeResearchDispatch}, false)
 	addAccess(t, db, ctx, "agent-token", []string{"ledger:read", "ledger:write"})
 	server := httptest.NewServer(HTTPHandler(NewServer(db, "http://unused"), db, "https://ledger.example.com"))
 	defer server.Close()
@@ -162,7 +162,7 @@ func TestResearchAPIDispatchesWithKeys(t *testing.T) {
 	}
 
 	// A claim already waiting when its key is revoked must not pick up a task queued afterwards.
-	_, waitingKey, _ := db.CreateAPIKey(ctx, "Revoked mid-wait", []string{store.ScopeResearchDispatch})
+	_, waitingKey, _ := db.CreateAPIKey(ctx, "Revoked mid-wait", []string{store.ScopeResearchDispatch}, false)
 	waiting := make(chan int, 1)
 	go func() {
 		status, _ := apiCall(t, "POST", api+"/research/claim", waitingKey, `{"wait_seconds":10}`)
@@ -201,7 +201,7 @@ func strconvID(id int64) string {
 
 func TestResearchAPIContinuesAcceptedResult(t *testing.T) {
 	db, ctx := testdb.Open(t)
-	_, key, err := db.CreateAPIKey(ctx, "Dispatcher", []string{store.ScopeResearchDispatch})
+	_, key, err := db.CreateAPIKey(ctx, "Dispatcher", []string{store.ScopeResearchDispatch}, false)
 	if err != nil {
 		t.Fatal(err)
 	}

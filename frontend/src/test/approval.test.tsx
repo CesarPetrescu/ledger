@@ -56,6 +56,8 @@ it('resets the approval password from Access using the owner password and clears
     'GET /admin/api/overview': { body: overview },
     'GET /admin/api/api-keys': { body: { keys: [] } },
     'GET /admin/api/github-sync': { body: { configured: false } },
+    'GET /admin/api/passkeys': { body: { passkeys: [], required: false } },
+    'GET /admin/api/sessions': { body: { sessions: [] } },
     'PUT /admin/api/oauth/password': [
       { status: 403, body: { error: 'Password not accepted.' } },
       { status: 204 },

@@ -28,7 +28,7 @@ func TestRevokeInvalidatesPendingCodesAndTokens(t *testing.T) {
 					t.Fatal(err)
 				}
 				for _, suffix := range []string{"-issued", "-pending"} {
-					if err := db.CreateCode(ctx, id+suffix, id, redirect, PKCEChallenge(verifier), []string{ScopeRead}); err != nil {
+					if err := db.CreateCode(ctx, id+suffix, id, redirect, PKCEChallenge(verifier), []string{ScopeRead}, false); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -56,7 +56,7 @@ func TestRevokeInvalidatesPendingCodesAndTokens(t *testing.T) {
 			if _, err := db.GetClient(ctx, "agent"); err != nil {
 				t.Fatal("registration removed", err)
 			}
-			if err := db.CreateCode(ctx, "fresh-approval", "agent", redirect, PKCEChallenge(verifier), []string{ScopeRead}); err != nil {
+			if err := db.CreateCode(ctx, "fresh-approval", "agent", redirect, PKCEChallenge(verifier), []string{ScopeRead}, false); err != nil {
 				t.Fatal(err)
 			}
 			fresh, err := db.ExchangeCode(ctx, "fresh-approval", "agent", redirect, verifier, VerifyPKCE)
@@ -82,7 +82,7 @@ func TestRevokeWaitsForConcurrentIssuance(t *testing.T) {
 				if _, err := db.PutClient(ctx, store.OAuthClient{ClientID: id, Kind: "dcr", RedirectURIs: []string{redirect}}); err != nil {
 					t.Fatal(err)
 				}
-				if err := db.CreateCode(ctx, "code", id, redirect, PKCEChallenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"), []string{ScopeRead}); err != nil {
+				if err := db.CreateCode(ctx, "code", id, redirect, PKCEChallenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"), []string{ScopeRead}, false); err != nil {
 					t.Fatal(err)
 				}
 				hash := sha256.Sum256([]byte("code"))

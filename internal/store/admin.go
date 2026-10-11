@@ -8,18 +8,65 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// AdminSessionTTL is the absolute lifetime of an operator session.
+// AdminSessionTTL is the absolute lifetime of an operator session that is not remembered.
 const AdminSessionTTL = 12 * time.Hour
+
+// A remembered session expires after AdminRememberIdle without use and never lives past
+// AdminRememberMax from sign-in.
+const (
+	AdminRememberIdle = 30 * 24 * time.Hour
+	AdminRememberMax  = 90 * 24 * time.Hour
+)
+
+// How a session was signed in.
+const (
+	MethodPassword        = "password"
+	MethodPasskey         = "passkey"
+	MethodPasswordPasskey = "password+passkey"
+)
 
 // AdminSession carries the raw session identifier and CSRF token. Only the
 // SHA-256 of ID is stored; the raw value exists solely in the browser cookie.
+// PublicID names the session in the console's device list.
 type AdminSession struct {
-	ID        string
-	CSRFToken string
-	ExpiresAt time.Time
+	ID         string
+	CSRFToken  string
+	ExpiresAt  time.Time
+	PublicID   string
+	Remember   bool
+	Method     string
+	Label      string
+	CreatedAt  time.Time
+	LastSeenAt time.Time
 }
 
-func (db *DB) CreateAdminSession(ctx context.Context) (AdminSession, error) {
+// Cap is when the session ends however much it is used: the cookie lives until then, and the
+// server enforces the idle expiry before it.
+func (s AdminSession) Cap() time.Time {
+	if s.Remember {
+		return s.CreatedAt.Add(AdminRememberMax)
+	}
+	return s.CreatedAt.Add(AdminSessionTTL)
+}
+
+// NewAdminSession describes a sign-in. An empty Method means a password sign-in.
+type NewAdminSession struct {
+	Remember bool
+	Method   string
+	Label    string
+}
+
+// adminSessionLive is the server-side lifetime rule: idle expiry (expires_at) and the absolute cap
+// from created_at, which the sliding expiry can never pass.
+var adminSessionLive = `expires_at>now() AND created_at+CASE WHEN remember THEN '` + AdminRememberMax.String() + `' ELSE '` + AdminSessionTTL.String() + `' END::interval>now()`
+
+const adminSessionColumns = `csrf_token,expires_at,public_id::text,remember,method,label,created_at,last_seen_at`
+
+func scanAdminSession(row pgx.Row, session *AdminSession) error {
+	return row.Scan(&session.CSRFToken, &session.ExpiresAt, &session.PublicID, &session.Remember, &session.Method, &session.Label, &session.CreatedAt, &session.LastSeenAt)
+}
+
+func (db *DB) CreateAdminSession(ctx context.Context, input NewAdminSession) (AdminSession, error) {
 	id, err := randomToken()
 	if err != nil {
 		return AdminSession{}, err
@@ -28,18 +75,83 @@ func (db *DB) CreateAdminSession(ctx context.Context) (AdminSession, error) {
 	if err != nil {
 		return AdminSession{}, err
 	}
+	if input.Method == "" {
+		input.Method = MethodPassword
+	}
+	ttl := AdminSessionTTL
+	if input.Remember {
+		ttl = AdminRememberIdle
+	}
 	hash := sha256.Sum256([]byte(id))
-	session := AdminSession{ID: id, CSRFToken: csrf}
-	err = db.Pool.QueryRow(ctx, `INSERT INTO admin_session(hash,csrf_token,expires_at) VALUES($1,$2,now()+$3::interval) RETURNING expires_at`, hash[:], csrf, AdminSessionTTL.String()).Scan(&session.ExpiresAt)
-	return session, err
+	session := AdminSession{ID: id}
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return AdminSession{}, err
+	}
+	defer tx.Rollback(ctx)
+	// A password-only session may only open while no passkey exists, checked under PasskeyLock.
+	if input.Method == MethodPassword {
+		if err := noPasskeyYet(ctx, tx); err != nil {
+			return AdminSession{}, err
+		}
+	}
+	if err := scanAdminSession(tx.QueryRow(ctx, `INSERT INTO admin_session(hash,csrf_token,expires_at,remember,method,label) VALUES($1,$2,now()+$3::interval,$4,$5,$6) RETURNING `+adminSessionColumns,
+		hash[:], csrf, ttl.String(), input.Remember, input.Method, input.Label), &session); err != nil {
+		return AdminSession{}, err
+	}
+	return session, tx.Commit(ctx)
 }
 
-// LookupAdminSession resolves a live session by its raw identifier and records activity.
+// LookupAdminSession resolves a live session by its raw identifier and records activity. A
+// remembered session slides to AdminRememberIdle from now, at most once an hour and never past
+// its cap.
 func (db *DB) LookupAdminSession(ctx context.Context, id string) (AdminSession, error) {
 	hash := sha256.Sum256([]byte(id))
 	session := AdminSession{ID: id}
-	err := db.Pool.QueryRow(ctx, `UPDATE admin_session SET last_seen_at=now() WHERE hash=$1 AND expires_at>now() RETURNING csrf_token,expires_at`, hash[:]).Scan(&session.CSRFToken, &session.ExpiresAt)
+	err := scanAdminSession(db.Pool.QueryRow(ctx, `UPDATE admin_session SET last_seen_at=now(),
+ expires_at=CASE WHEN remember AND expires_at < LEAST(now()+$2::interval, created_at+$3::interval)-interval '1 hour'
+  THEN LEAST(now()+$2::interval, created_at+$3::interval) ELSE expires_at END
+WHERE hash=$1 AND `+adminSessionLive+` RETURNING `+adminSessionColumns, hash[:], AdminRememberIdle.String(), AdminRememberMax.String()), &session)
 	return session, err
+}
+
+// ListAdminSessions returns every live session, most recently used first, without its secrets.
+func (db *DB) ListAdminSessions(ctx context.Context) ([]AdminSession, error) {
+	rows, err := db.Pool.Query(ctx, `SELECT `+adminSessionColumns+` FROM admin_session WHERE `+adminSessionLive+` ORDER BY last_seen_at DESC, created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []AdminSession{}
+	for rows.Next() {
+		var session AdminSession
+		if err := scanAdminSession(rows, &session); err != nil {
+			return nil, err
+		}
+		session.CSRFToken = ""
+		out = append(out, session)
+	}
+	return out, rows.Err()
+}
+
+// DeleteAdminSessionByPublicID signs one device out; it reports whether a session was deleted.
+func (db *DB) DeleteAdminSessionByPublicID(ctx context.Context, publicID string) (bool, error) {
+	result, err := db.Pool.Exec(ctx, `DELETE FROM admin_session WHERE public_id::text=$1`, publicID)
+	return result.RowsAffected() > 0, err
+}
+
+// revokeOtherAdminSessions deletes every session except the one whose hash is $1, only those signed
+// in by method $2 unless it is empty, and counts how many of them were live.
+var revokeOtherAdminSessions = `WITH gone AS (DELETE FROM admin_session WHERE hash<>$1 AND ($2='' OR method=$2) RETURNING ` + adminSessionLive + ` AS live)
+SELECT count(*) FILTER (WHERE live) FROM gone`
+
+// RevokeOtherAdminSessions deletes every session except the one with raw identifier keep and
+// reports how many of them were live.
+func (db *DB) RevokeOtherAdminSessions(ctx context.Context, keep string) (int64, error) {
+	hash := sha256.Sum256([]byte(keep))
+	var revoked int64
+	err := db.Pool.QueryRow(ctx, revokeOtherAdminSessions, hash[:], "").Scan(&revoked)
+	return revoked, err
 }
 
 func (db *DB) DeleteAdminSession(ctx context.Context, id string) error {
@@ -55,7 +167,7 @@ func (db *DB) RevokeAdminSessions(ctx context.Context) (int64, error) {
 }
 
 func (db *DB) ExpireAdminSessions(ctx context.Context) error {
-	_, err := db.Pool.Exec(ctx, `DELETE FROM admin_session WHERE expires_at<=now()`)
+	_, err := db.Pool.Exec(ctx, `DELETE FROM admin_session WHERE NOT (`+adminSessionLive+`)`)
 	return err
 }
 

@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -26,7 +27,12 @@ func (s *Server) createAPIKey(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	key, secret, err := s.db.CreateAPIKey(r.Context(), input.Name, []string{store.ScopeResearchDispatch})
+	key, secret, err := s.db.CreateAPIKey(r.Context(), input.Name, []string{store.ScopeResearchDispatch}, sessionFrom(r).Method == store.MethodPassword)
+	if errors.Is(err, store.ErrPasskeyRequired) {
+		// A passkey was added while this password-only session was creating a key; it has been signed out.
+		writeError(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
 	if err != nil {
 		if store.IsCheckViolation(err) {
 			writeError(w, http.StatusBadRequest, "the key name is not allowed")

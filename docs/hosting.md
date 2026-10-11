@@ -44,7 +44,7 @@ docker run --rm -it ledger-admin-local hash-password
 
 Type each password at the prompt and send end-of-file. Paste the returned Argon2id PHC strings inside the existing single quotes for `LEDGER_PASSWORD_HASH` and `LEDGER_ADMIN_PASSWORD_HASH`. The quotes stop Compose from treating `$` in the hash as variable interpolation.
 
-The OAuth page also offers **Continue with Ledger owner login**. Sign in with your console password, review the client's permissions, then choose **Allow access** or **Deny**.
+The OAuth page also offers **Continue with Ledger owner login**. Sign in to the console, review the client's permissions, then choose **Allow access** or **Deny**. Once you register a passkey (see [Passkeys](#passkeys)), the approval password is turned off: the page hides its form, refuses password approvals, and **Continue with Ledger owner login** is the way to approve, because the console session needs your passkey.
 
 If you forget the approval password, open **Access → Approval password** in the console. Confirm your owner password and choose a new approval password of at least 12 characters. You do not need the old approval password. Ledger stores its Argon2id hash in PostgreSQL; it takes effect immediately and survives restarts. Once set in the console, this value takes precedence over `LEDGER_PASSWORD_HASH`. Include it in database backups. To restore the environment setting during server recovery, delete the singleton row from `oauth_password`.
 
@@ -90,6 +90,7 @@ claude mcp add --transport http ledger https://ledger.example.com/mcp
 | `LEDGER_CHAT_API_KEY` | no | Bearer key if the chat endpoint requires one |
 | `LEDGER_DUPLICATE_SIMILARITY` | no | Cosine similarity at which the Table folds an entry under an earlier one of the same kind and project. Default `0.9`, calibrated on Qwen3-Embedding-8B; lower it to fold more. |
 | `LEDGER_INTERNAL_SUBNET`, `LEDGER_NGINX_INTERNAL_IP` | no | Compose network overrides, change together if the default subnet collides |
+| `LEDGER_ANDROID_APPS` | no | Android apps allowed to use your passkeys, as comma-separated `package:SHA256` entries (the SHA-256 of each app's signing certificate, with or without colons). Default: the release Ledger app, `com.cesarpetrescu.ledger`. Set it when you build and sign the app yourself |
 
 The example domain and inference hostname in `.env.example` are placeholders.
 
@@ -102,22 +103,23 @@ Native deployments do not receive Compose's generated internal settings, so conf
 | Binary | Environment |
 |--------|-------------|
 | every database-using command | `LEDGER_DATABASE_URL` |
-| `ledger-auth serve` | `LEDGER_PUBLIC_URL`, `LEDGER_PASSWORD_HASH`, `LEDGER_INTERNAL_PROXY_CIDR` |
-| `ledger-admin serve` | `LEDGER_PUBLIC_URL`, `LEDGER_ADMIN_PASSWORD_HASH`, `LEDGER_CALENDAR_ENCRYPTION_KEY`, `LEDGER_INTERNAL_PROXY_CIDR`, `LEDGER_INDEX_URL` |
+| `ledger-auth serve` | `LEDGER_PUBLIC_URL`, `LEDGER_PASSWORD_HASH`, `LEDGER_INTERNAL_PROXY_CIDR`; optional `LEDGER_ANDROID_APPS` |
+| `ledger-admin serve` | `LEDGER_PUBLIC_URL`, `LEDGER_ADMIN_PASSWORD_HASH`, `LEDGER_CALENDAR_ENCRYPTION_KEY`, `LEDGER_INTERNAL_PROXY_CIDR`, `LEDGER_INDEX_URL`; optional `LEDGER_ANDROID_APPS` |
 | `ledger-mcp serve` | `LEDGER_PUBLIC_URL`, `LEDGER_CALENDAR_ENCRYPTION_KEY`, `LEDGER_INDEX_URL` |
 | `ledger-index serve`, `ledger-index reindex` | `LEDGER_INFER_URL`; `serve` also reads the optional `LEDGER_CHAT_*` settings |
 | `ledger-index reextract` | Clears model-generated entry metadata so it is extracted again |
 
-`LEDGER_DATABASE_URL` is a PostgreSQL connection URI; percent-encode reserved characters in the user-info or use a URL-safe password. You are responsible for the network isolation, startup ordering, restart policy, and TLS reverse proxy that Compose otherwise provides. Build the frontend with `npm run build` inside `frontend/` and serve it under `/admin/` on the same origin as the admin API.
+`LEDGER_DATABASE_URL` is a PostgreSQL connection URI; percent-encode reserved characters in the user-info or use a URL-safe password. You are responsible for the network isolation, startup ordering, restart policy, and TLS reverse proxy that Compose otherwise provides. Build the frontend with `npm run build` inside `frontend/` and serve it under `/admin/` on the same origin as the admin API. Route `/.well-known/assetlinks.json` to `ledger-auth` so the Android app can use passkeys.
 
 ## Operator console
 
 The console lives at `/admin/` and calls the JSON API under `/admin/api/`. It is a separate surface from MCP and OAuth.
 
-- **Sign-in** uses only `LEDGER_ADMIN_PASSWORD_HASH`. There is no username. Failed attempts return a generic error and are rate limited per validated client address.
-- **Sessions** are opaque random identifiers. PostgreSQL stores only their SHA-256 hash with creation, expiry, and last-seen timestamps and a per-session CSRF token. Sessions expire after 12 hours, rotate on every sign-in, and are deleted on sign-out.
+- **Sign-in** uses `LEDGER_ADMIN_PASSWORD_HASH` and, once you register one, a passkey. There is no username. Failed attempts, by password or passkey, return a generic error, are rate limited per validated client address, and four failures lock that address out for 15 minutes.
+- **Sessions** are opaque random identifiers. PostgreSQL stores only their SHA-256 hash with creation, expiry, and last-seen timestamps, a per-session CSRF token, how the session signed in, and a short device label from the User-Agent. Sessions rotate on every sign-in and are deleted on sign-out. Without **Remember this device**, a session ends 12 hours after sign-in. A remembered session ends after 30 days without use and never lives past 90 days from sign-in; the server enforces both.
+- **Signed-in devices** are listed under **Access**, where you can sign out one device or every other device. A signed-out device's next request is refused.
 - **Cookie** is `Secure`, `HttpOnly`, `SameSite=Strict`, scoped to `Path=/admin`. Nothing is kept in browser storage.
-- **Every endpoint** except sign-in requires a live session. State-changing endpoints also require the exact `Origin` derived from `LEDGER_PUBLIC_URL` and an `X-CSRF-Token` header. Responses are `Cache-Control: no-store` with strict browser security headers.
+- **Every endpoint** except the sign-in endpoints requires a live session. State-changing endpoints also require the exact `Origin` derived from `LEDGER_PUBLIC_URL` and an `X-CSRF-Token` header. Responses are `Cache-Control: no-store` with strict browser security headers.
 - **Capabilities:** browse projects, inspect append-only timelines, create or update project records, append entries, run lexical/semantic search, manage selected Nextcloud calendars, coordinate agent handoffs and files, and list or revoke OAuth clients. Committed changes stream to open consoles over an authenticated WebSocket.
 - Historical project entries and handoff messages are immutable. Calendar events, project metadata, handoff work states, and Draft attachments remain intentionally editable.
 - Entries written from the console are attributed with `source=ledger-admin` and a bounded per-session `client_id`.
@@ -126,6 +128,25 @@ Revoke every operator session, for example after rotating the admin password:
 
 ```sh
 docker compose run --rm ledger-admin revoke-sessions
+```
+
+### Passkeys
+
+Register a passkey under **Access → Passkeys**. Any passkey provider works, including Bitwarden on desktop and Android, iCloud Keychain, Google Password Manager, Windows Hello, and 1Password. Registering needs your owner password as well as a signed-in session, so a stolen session cookie cannot add a passkey; removing one also needs the password.
+
+Once at least one passkey is registered, the password alone never opens a session, in the browser or the Android app:
+
+- **Sign in with a passkey** in one step. Your provider's PIN or biometric check is the second factor.
+- Or enter the password, then confirm with a passkey.
+- The OAuth approval page turns its approval password off. Approve apps through **Continue with Ledger owner login**.
+- Adding a passkey signs out every other browser and app that signed in with the password alone, so a session opened before the passkey existed does not outlive it. The session that added the passkey stays signed in.
+
+Removing the last passkey returns sign-in to the password alone. Passkeys are bound to the host of `LEDGER_PUBLIC_URL`, which must be a domain name, not an IP address. The Android app uses them through `/.well-known/assetlinks.json`, which `ledger-auth` serves for the apps in `LEDGER_ANDROID_APPS`.
+
+If you lose every passkey, delete them all from the server. This also cancels pending passkey sign-ins and prints how many passkeys were deleted. Sign in with the password, then register a new passkey:
+
+```sh
+docker compose run --rm ledger-admin reset-passkeys
 ```
 
 ## Commands
@@ -141,6 +162,7 @@ ledger-auth gc
 ledger-admin serve
 ledger-admin hash-password
 ledger-admin revoke-sessions
+ledger-admin reset-passkeys
 
 ledger-mcp serve
 ledger-mcp seed [projects.json]
@@ -153,7 +175,7 @@ ledger-index reindex
 
 ## Backup and recovery
 
-Back up authoritative data with PostgreSQL tooling. Search chunk contents are derivable and `admin_session` holds only short-lived hashed sessions, so their data can be excluded while retaining every table's schema:
+Back up authoritative data with PostgreSQL tooling. Search chunk contents are derivable, `admin_session` holds only hashed sessions, and `owner_webauthn_challenge` holds only passkey ceremonies that expire within five minutes, so their data can be excluded while retaining every table's schema. Keep `owner_passkey` and `owner_webauthn`: they hold your registered passkeys.
 
 ```sh
 docker compose exec -T postgres \
@@ -161,6 +183,7 @@ docker compose exec -T postgres \
   --exclude-table-data=chunk \
   --exclude-table-data=chunk_dirty \
   --exclude-table-data=admin_session \
+  --exclude-table-data=owner_webauthn_challenge \
   > ledger.sql
 ```
 

@@ -559,6 +559,8 @@ label > textarea {
 }
 
 .notice-stale { margin-bottom: 18px; }
+/* An expected event (signed out) or a suggestion: no warning colour. */
+.notice-info { border-left-color: var(--accent); background: var(--surface-accent); color: var(--text); }
 
 .state {
   display: flex;
@@ -652,6 +654,12 @@ label > textarea {
 .login-foot { display: flex; align-items: center; gap: 6px; margin: 18px 0 0; color: var(--text-muted); font-size: 0.8rem; }
 .login-foot svg { width: 14px; height: 14px; color: var(--success); }
 .login-foot span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
+.login-or { display: flex; align-items: center; gap: 12px; margin: 4px 0 0; color: var(--text-faint); font-size: 0.78rem; }
+.login-or::before, .login-or::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+.login-card .login-back { margin-top: 0; }
+.login-card .login-remember { align-items: flex-start; margin: 2px 0 0; color: var(--text-soft); font-size: 0.84rem; font-weight: 500; line-height: 1.4; }
+.login-remember input { margin-top: 1px; }
+.login-remember .hint { display: block; font-size: 0.76rem; }
 
 /* The sign-in page never scrolls: the brand panel gives up its decoration as the window gets shorter, and on a phone
    it shrinks to a strip so the form sits high enough to stay in view above the keyboard. */
@@ -660,6 +668,7 @@ label > textarea {
   .login-points { display: none; }
   .login-pitch h1 { font-size: clamp(1.8rem, 3vw, 2.4rem); }
 }
+@media (min-width: 1001px) and (max-height: 700px) { .login-side { padding-block: 24px; } }
 @media (max-width: 1000px) {
   .login { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   .login-hero { justify-content: flex-start; gap: 22px; padding: 28px 24px 30px; }
@@ -680,22 +689,21 @@ label > textarea {
   .login-card > .muted { margin-bottom: 6px; }
   .login-foot { margin-top: 8px; }
 }
-@media (max-width: 600px) and (max-height: 620px) {
-  .login-pitch { display: none; }
-  .login-card > .muted { display: none; }
-}
+@media (max-width: 600px) and (max-height: 700px) { .login-card > .login-intro { display: none; } }
+/* A small phone (320x568) also drops the eyebrow, so the passkey prompt's Cancel row and a two-line error fit. */
+@media (max-width: 600px) and (max-height: 620px) { .login-pitch, .login-card .eyebrow { display: none; } }
 /* A phone on its side: brand and form side by side, both compact. */
 @media (max-height: 500px) and (min-width: 560px) {
   .login { grid-template-columns: minmax(0, 1fr) minmax(300px, 1.1fr); grid-template-rows: none; }
   .login-hero { justify-content: center; gap: 14px; padding: 20px 24px; }
   .login-pitch h1 { font-size: 1.35rem; }
   .login-side { place-items: center; padding: 14px 24px; }
-  .login-card { gap: 8px; }
-  .login-card .eyebrow, .login-card > .muted { display: none; }
+  .login-card { gap: 6px; }
+  .login-card .eyebrow, .login-card > .login-intro, .login-foot { display: none; }
   .login-card h2 { font-size: 1.5rem; }
   .login-field input, .login-submit { height: 46px; }
   .login-submit { margin-top: 4px; }
-  .login-foot { margin-top: 6px; }
+  .login-or { margin-top: 0; }
 }
 @media (prefers-reduced-motion: reduce) { .login-glow { animation: none; } }
 
@@ -1302,6 +1310,9 @@ label > textarea {
 .dialog form { display: flex; flex-direction: column; gap: 16px; padding: 24px; }
 .dialog h2 { font-size: 1.2rem; }
 .dialog-body { color: var(--text-muted); }
+.dialog-body > * + * { margin-top: 12px; }
+/* A warning inside a dialog reads at the dialog's size, not the smaller page-notice size. */
+.dialog-body > .notice { font-size: inherit; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; }
 
 @media (max-width: 1100px) {
@@ -1378,6 +1389,8 @@ label > textarea {
   .table td::before { content: attr(data-label); color: var(--text-faint); font-size: 0.67rem; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; }
   .table td.num,
   .table td.actions { text-align: left; }
+  /* No label over nothing, such as a row's actions while it is being renamed. */
+  .table td.actions:empty { display: none; }
   .detail-title { flex-basis: 100%; }
   .detail-actions { flex-basis: 100%; }
   .detail-actions .btn { flex: 1; }
@@ -1796,3 +1809,18 @@ label > textarea {
 .inline-form { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; margin: 0 0 12px; }
 .inline-form label { flex-basis: 100%; }
 .inline-form input { flex: 1 1 220px; min-width: 0; }
+.connected-apps > .add-passkey, .connected-apps > .sign-out-others { justify-self: start; }
+.passkey-form input { max-width: 360px; }
+/* Phones: the field on its own row, Continue and Cancel together under it. */
+@media (max-width: 620px) { .passkey-form input { flex-basis: 100%; max-width: none; } }
+/* Row text lines up with the row's buttons. */
+.table.rows-middle td { vertical-align: middle; }
+.cell-hint { display: block; margin-top: 2px; }
+.rename-form { flex-wrap: nowrap; margin: 0; }
+.rename-form input { flex-basis: 12rem; min-height: 32px; padding: 5px 9px; }
+/* Phones: the value column beside the cell label is narrow, so Save and Cancel go under the name. */
+@media (max-width: 620px) { .rename-form { flex-wrap: wrap; } .rename-form input { flex-basis: 100%; } }
+.badge[data-current] { margin-left: 4px; background: var(--tone-green-bg); color: var(--tone-green); text-transform: none; }
+.row-actions { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.passkey-nudge { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; margin: 0 0 18px; }
+.passkey-nudge p { flex: 1 1 22rem; margin: 0; }

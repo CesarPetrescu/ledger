@@ -15,7 +15,7 @@ func TestMigrationsEmptyAndIdempotent(t *testing.T) {
 		t.Fatalf("second migration: %v", err)
 	}
 	var versions []int
-	if err := db.Pool.QueryRow(ctx, `SELECT array_agg(version ORDER BY version) FROM schema_migration`).Scan(&versions); err != nil || !reflect.DeepEqual(versions, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24}) {
+	if err := db.Pool.QueryRow(ctx, `SELECT array_agg(version ORDER BY version) FROM schema_migration`).Scan(&versions); err != nil || !reflect.DeepEqual(versions, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25}) {
 		t.Fatalf("applied migrations = %v, %v", versions, err)
 	}
 	var exists bool
@@ -62,7 +62,7 @@ func TestMigrationsEmptyAndIdempotent(t *testing.T) {
 	if err := db.Pool.QueryRow(ctx, `SELECT array_agg(column_name::text ORDER BY ordinal_position) FROM information_schema.columns WHERE table_schema='public' AND table_name='admin_session'`).Scan(&sessionColumns); err != nil {
 		t.Fatal(err)
 	}
-	wantSessionColumns := []string{"hash", "csrf_token", "created_at", "expires_at", "last_seen_at"}
+	wantSessionColumns := []string{"hash", "csrf_token", "created_at", "expires_at", "last_seen_at", "public_id", "remember", "method", "label"}
 	if !reflect.DeepEqual(sessionColumns, wantSessionColumns) {
 		t.Fatalf("admin_session columns = %v, want %v", sessionColumns, wantSessionColumns)
 	}

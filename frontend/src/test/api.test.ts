@@ -20,6 +20,30 @@ describe('api client', () => {
     expect(post?.init.credentials).toBe('same-origin')
   })
 
+  it('refreshes a CSRF token replaced by signing in again in another tab, and retries once', async () => {
+    const { calls } = mockApi({
+      'POST /admin/api/projects/atlas/entries': [{ status: 403, body: { error: 'invalid csrf token' } }, { status: 201, body: { id: 1 } }],
+      'GET /admin/api/session': { body: { authenticated: true, csrf_token: 'csrf-new', expires_at: '2026-09-04T20:00:00Z' } },
+    })
+    setCsrfToken('csrf-old')
+    await expect(api.appendEntry('atlas', 'note', 'hello')).resolves.toEqual({ id: 1 })
+    expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual(['POST /admin/api/projects/atlas/entries', 'GET /admin/api/session', 'POST /admin/api/projects/atlas/entries'])
+    expect(new Headers(calls[2]?.init.headers).get('X-CSRF-Token')).toBe('csrf-new')
+    expect(calls[2]?.body).toEqual({ kind: 'note', body: 'hello' })
+  })
+
+  it('retries a CSRF refusal only once, and never an Origin refusal', async () => {
+    const { calls } = mockApi({
+      'POST /admin/api/projects/atlas/entries': { status: 403, body: { error: 'invalid csrf token' } },
+      'POST /admin/api/logout': { status: 403, body: { error: 'origin not allowed' } },
+      'GET /admin/api/session': { body: { authenticated: true, csrf_token: 'csrf-new', expires_at: '2026-09-04T20:00:00Z' } },
+    })
+    await expect(api.appendEntry('atlas', 'note', 'hello')).rejects.toMatchObject({ status: 403 })
+    expect(calls).toHaveLength(3)
+    await expect(api.logout()).rejects.toMatchObject({ status: 403, message: 'origin not allowed' })
+    expect(calls).toHaveLength(4)
+  })
+
   it('turns 401 into UnauthorizedError and notifies the listener', async () => {
     mockApi({ 'GET /admin/api/overview': { status: 401, body: { error: 'unauthenticated' } } })
     const listener = vi.fn()
@@ -43,7 +67,7 @@ describe('api client', () => {
 
   it('never stores authentication material in web storage', async () => {
     mockApi({ 'POST /admin/api/login': { body: { csrf_token: 'csrf-login', expires_at: '2026-09-04T20:00:00Z' } } })
-    await api.login('secret')
+    await api.login('secret', true)
     expect(Object.keys(window.localStorage)).toHaveLength(0)
     expect(Object.keys(window.sessionStorage)).toHaveLength(0)
     expect(document.cookie).toBe('')

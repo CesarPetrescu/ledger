@@ -12,6 +12,7 @@ import {
   IconDeviceDesktop,
   IconEye,
   IconEyeOff,
+  IconFingerprint,
   IconFolder,
   IconExternalLink,
   IconHelp,
@@ -35,7 +36,7 @@ import {
   type IconProps,
 } from '@tabler/icons-react'
 
-export type IconName = 'eye' | 'eye-off' | 'menu' | 'close' | 'search' | 'arrow' | 'filter' | 'logout' | 'plus' | 'alert' | 'back' | 'refresh' | 'book' | 'home' | 'inbox' | 'help' | 'agents' | 'projects' | 'calendar' | 'handoffs' | 'copy' | 'paperclip' | 'clients' | 'external' | 'trash' | 'live' | 'offline' | 'table' | 'system' | 'light' | 'dark' | 'dots'
+export type IconName = 'eye' | 'eye-off' | 'menu' | 'close' | 'search' | 'arrow' | 'filter' | 'logout' | 'plus' | 'alert' | 'back' | 'refresh' | 'book' | 'home' | 'inbox' | 'help' | 'agents' | 'projects' | 'calendar' | 'handoffs' | 'copy' | 'paperclip' | 'clients' | 'external' | 'trash' | 'live' | 'offline' | 'table' | 'system' | 'light' | 'dark' | 'dots' | 'passkey'
 
 const icons: Record<IconName, ComponentType<IconProps>> = {
   eye: IconEye,
@@ -70,6 +71,7 @@ const icons: Record<IconName, ComponentType<IconProps>> = {
   light: IconSun,
   dark: IconMoon,
   dots: IconDots,
+  passkey: IconFingerprint,
 }
 
 export function Icon({ name, ...props }: { name: IconName } & IconProps) {
@@ -104,7 +106,8 @@ export function formatRelative(iso: string, now = Date.now()): string {
   if (abs < 60) return relative.format(seconds, 'second')
   if (abs < 3600) return relative.format(Math.round(seconds / 60), 'minute')
   if (abs < 86400) return relative.format(Math.round(seconds / 3600), 'hour')
-  if (abs < 86400 * 30) return relative.format(Math.round(seconds / 86400), 'day')
+  // 31, not 30: a remembered session expires 30 days (and a moment) out, and every row should read in days.
+  if (abs < 86400 * 31) return relative.format(Math.round(seconds / 86400), 'day')
   return absolute.format(new Date(then))
 }
 

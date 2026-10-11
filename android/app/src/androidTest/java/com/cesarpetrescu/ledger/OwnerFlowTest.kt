@@ -133,6 +133,9 @@ class OwnerFlowTest {
         val client = Api("https://localhost:8443").login("fixture-password")
         try { client.request("GET", "/redirect-test"); fail("Followed a redirect") }
         catch (e: ApiError) { assertEquals(302, e.status) }
+        // Renaming a passkey uses PATCH; the request must reach the server (the fixture has no passkeys) rather than fail in the client.
+        try { client.request("PATCH", "/passkeys/missing", json("name" to "Laptop")); fail("Renamed a missing passkey") }
+        catch (e: ApiError) { assertEquals(404, e.status) }
         var downloaded = 0L
         client.download("/large-export", object : OutputStream() {
             override fun write(value: Int) { downloaded++ }
@@ -145,6 +148,10 @@ class OwnerFlowTest {
         ActivityScenario.launch(MainActivity::class.java).use { activity ->
             awaitText("Server address")
             fillField("Server address", "https://localhost:8443")
+            // Without a registered passkey the one-step sign-in explains what to do, before any provider sheet opens.
+            scrollTo("Sign in with a passkey")
+            tap("Sign in with a passkey")
+            awaitText("No passkeys yet. Sign in with the password, then add one in Settings › Access › Passkeys.")
             scrollTo("Owner password")
             fillField("Owner password", "fixture-password")
             scrollTo("Sign in")
@@ -412,6 +419,24 @@ class OwnerFlowTest {
             tap("Connected apps")
             tap("Revoke access")
             tap("Cancel")
+            ui.onNodeWithContentDescription("Back").performClick()
+            // Passkeys says the password alone signs in while there are none.
+            scrollTo("Passkeys")
+            tap("Passkeys")
+            awaitText("No passkeys yet, so the password alone signs in. Once you add one, signing in needs it.")
+            ui.onNodeWithContentDescription("Back").performClick()
+            // Signed-in devices marks this phone (named from the app's User-Agent) and signs out the rest.
+            scrollTo("Signed-in devices")
+            tap("Signed-in devices")
+            awaitText("Ledger app on Android")
+            scrollTo("This device")
+            awaitText("Firefox on Linux")
+            scrollTo("Sign out everywhere else")
+            tap("Sign out everywhere else")
+            ui.onNode(hasText("Sign out everywhere else") and hasClickAction() and hasAnyAncestor(isDialog())).performClick()
+            awaitText("Signed out 1 other device")
+            ui.waitUntilDoesNotExist(hasText("Firefox on Linux"), 15_000)
+            ui.onNodeWithText("This device").assertExists()
             ui.onNodeWithContentDescription("Back").performClick()
             // Sign-out sits under its own heading, not inside Access.
             scrollTo("This phone")

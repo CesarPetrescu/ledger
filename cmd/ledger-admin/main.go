@@ -12,6 +12,7 @@ import (
 	"github.com/cesarpetrescu/ledger/internal/config"
 	"github.com/cesarpetrescu/ledger/internal/github"
 	"github.com/cesarpetrescu/ledger/internal/oauth"
+	"github.com/cesarpetrescu/ledger/internal/passkey"
 )
 
 func main() {
@@ -39,6 +40,10 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
+		androidApps, err := passkey.ParseAndroidApps(config.Value("LEDGER_ANDROID_APPS", passkey.DefaultAndroidApps))
+		if err != nil {
+			log.Fatal(err)
+		}
 		handler := admin.NewServer(admin.Config{
 			PublicURL:         config.PublicURL(),
 			PasswordHash:      config.Required("LEDGER_ADMIN_PASSWORD_HASH"),
@@ -46,6 +51,7 @@ func main() {
 			IndexURL:          config.Required("LEDGER_INDEX_URL"),
 			Calendar:          calendar,
 			GitHub:            gitHub,
+			AndroidApps:       androidApps,
 		}, db)
 		eventsCtx, cancelEvents := context.WithCancel(ctx)
 		defer cancelEvents()
@@ -80,12 +86,21 @@ func main() {
 			log.Fatal(err)
 		}
 		fmt.Println(count)
+	case "reset-passkeys":
+		// Recovery when the owner has lost every passkey: sign-in returns to the password alone.
+		db := config.OpenDB(ctx)
+		defer db.Close()
+		count, err := db.ResetOwnerPasskeys(ctx)
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println(count)
 	default:
 		usage()
 	}
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: ledger-admin serve|hash-password|revoke-sessions")
+	fmt.Fprintln(os.Stderr, "usage: ledger-admin serve|hash-password|revoke-sessions|reset-passkeys")
 	os.Exit(2)
 }

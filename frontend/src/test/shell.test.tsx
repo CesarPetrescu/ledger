@@ -95,4 +95,13 @@ describe('shell', () => {
     expect(screen.queryByText(/live updates on/i)).not.toBeInTheDocument()
     expect(screen.getByRole('complementary')).toHaveTextContent(/session ends/i)
   })
+
+  it('does not give a remembered session a fixed end', async () => {
+    mockApi({ 'GET /admin/api/session': { body: { ...authenticatedSession.body, remember: true } }, ...homeRoutes })
+    renderApp()
+    await screen.findByRole('heading', { name: /^inbox$/i })
+    // It slides forward with each use, so "ends in 30 days" would never change.
+    expect(screen.getByRole('complementary')).toHaveTextContent('Remembered: signed out after 30 days without use')
+    expect(screen.getByRole('complementary')).not.toHaveTextContent(/session ends/i)
+  })
 })

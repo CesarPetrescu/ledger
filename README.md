@@ -133,7 +133,7 @@ For Codex, use `ledger connect codex` above. See the [MCP reference](docs/refere
 
 Download the signed **`ledger-android-vX.Y.Z.apk`** from [the latest release](https://github.com/CesarPetrescu/ledger/releases/latest). Requires Android 9 or newer.
 
-Enter your server's base HTTPS URL and sign in with the **owner password** used by the web console. You can manage projects, search, handoffs, calendars, and device approvals. See [Android setup and builds](android/README.md).
+Enter your server's base HTTPS URL and sign in as you do in the web console: with your passkey, or with the **owner password** (followed by a passkey once you have registered one). You can manage projects, search, handoffs, calendars, and device approvals. See [Android setup and builds](android/README.md).
 
 ### Ledger Glass (G2/R1)
 

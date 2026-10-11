@@ -10,6 +10,8 @@ import java.net.URLEncoder
 import javax.net.ssl.HttpsURLConnection
 
 fun serverOrigin(input: String): String {
+    // The passkey button works before an address is typed, so a blank one gets its own plain message.
+    require(input.isNotBlank()) { "Enter the server address first." }
     val uri = try { URI(input.trim()) } catch (_: Exception) { throw IllegalArgumentException("Enter a valid HTTPS server address.") }
     require(uri.scheme.equals("https", ignoreCase = true) && !uri.host.isNullOrBlank() &&
         uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null &&
@@ -35,6 +37,21 @@ fun sessionCookie(headers: List<String>): String = headers.flatMap { HttpCookie.
     .firstOrNull { it.name == "ledger_admin_session" && it.secure && it.path == "/admin" && it.value.matches(Regex("[A-Za-z0-9_-]{43}")) }
     ?.let { "${it.name}=${it.value}" } ?: throw IllegalStateException("The server did not return a valid session cookie.")
 
+/** How the server names this phone under Signed-in devices ("Ledger app on Android"). Header values must be printable ASCII; a model name may not be. */
+fun userAgent(version: String, release: String, model: String): String {
+    fun clean(value: String) = value.filter { it in ' '..'~' && it !in "();" }.trim().take(60).ifBlank { "unknown" }
+    return "LedgerAndroid/${clean(version).replace(' ', '-')} (Android ${clean(release)}; ${clean(model)})"
+}
+// Lazy, so JVM unit tests of this file never read the stubbed android.os.Build.
+private val USER_AGENT by lazy { userAgent(BuildConfig.VERSION_NAME, android.os.Build.VERSION.RELEASE.orEmpty(), android.os.Build.MODEL.orEmpty()) }
+
+/** The password step's answer once the owner has a passkey: no session, only a single-use token that a passkey must follow within 5 minutes. */
+class PasskeyRequired(val pending: String, val options: JSONObject) : Exception("Confirm with your passkey to finish signing in.")
+fun passkeyStep(data: JSONObject): PasskeyRequired? =
+    if (data.optBoolean("passkey_required")) PasskeyRequired(data.getString("pending"), data.getJSONObject("options")) else null
+/** The passkey sign-in body; [field] is challenge_id (a passkey alone) or pending (after the password). A phone always stays signed in. */
+fun passkeySignIn(field: String, value: String, credential: JSONObject) = json(field to value, "credential" to credential, "remember" to true)
+
 class ApiError(val status: Int, message: String) : Exception(message)
 class Api(val origin: String, val cookie: String = "", val csrf: String = "") {
     // Each client belongs to one immutable session. Never follow redirects with credentials.
@@ -47,6 +64,7 @@ class Api(val origin: String, val cookie: String = "", val csrf: String = "") {
             readTimeout = 30_000
             useCaches = false
             setRequestProperty("Accept", "application/json")
+            setRequestProperty("User-Agent", USER_AGENT)
             if (cookie.isNotEmpty()) setRequestProperty("Cookie", cookie)
             if (method != "GET") {
                 setRequestProperty("Origin", origin)
@@ -79,8 +97,35 @@ class Api(val origin: String, val cookie: String = "", val csrf: String = "") {
         } finally { connection.disconnect() }
     }
 
+    /** Signs in with the password, or throws [PasskeyRequired] once the owner has a passkey: the password alone is then never a session. */
     fun login(password: String): Api {
-        val (data, headers) = exchange("POST", "/login", json("password" to password))
+        // A phone is a personal device: always remembered (30 days after its last use, 90 at most).
+        val (data, headers) = exchange("POST", "/login", json("password" to password, "remember" to true))
+        passkeyStep(data)?.let { throw it }
+        return session(data, headers)
+    }
+
+    /** One-step passkey sign-in starts here: a challenge any of the owner's passkeys can answer. */
+    fun passkeyChallenge(): JSONObject = try { request("POST", "/login/passkey/options") } catch (e: ApiError) {
+        throw if (e.status == 409) ApiError(409, "No passkeys yet. Sign in with the password, then add one in Settings › Access › Passkeys.") else e
+    }
+
+    fun passkeyLogin(field: String, value: String, credential: JSONObject): Api = try {
+        exchange("POST", "/login/passkey", passkeySignIn(field, value, credential)).let { (data, headers) -> session(data, headers) }
+    } catch (e: ApiError) {
+        throw if (e.status == 401) ApiError(401, "Passkey not accepted. Use a passkey saved for this Ledger server.") else e
+    }
+
+    /**
+     * Adds a passkey and reports how many password-only sessions were signed out. When this session had
+     * only proved the password the server gives it a new cookie and CSRF token: the returned Api carries them.
+     */
+    fun addPasskey(challengeId: String, credential: JSONObject): Pair<Int, Api?> {
+        val (data, headers) = exchange("POST", "/passkeys", json("challenge_id" to challengeId, "credential" to credential))
+        return data.optInt("revoked") to (if (data.has("csrf_token")) session(data, headers) else null)
+    }
+
+    private fun session(data: JSONObject, headers: Map<String?, List<String>>): Api {
         val token = data.getString("csrf_token")
         require(token.matches(Regex("[A-Za-z0-9_-]{43}"))) { "Invalid session response." }
         val cookies = headers.filterKeys { it.equals("Set-Cookie", ignoreCase = true) }.values.flatten()

@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"net/http"
@@ -99,7 +100,7 @@ func TestConcurrentRefreshReplayRevokesNewFamilyCredentials(t *testing.T) {
 	if _, err := db.PutClient(ctx, store.OAuthClient{ClientID: clientID, Kind: "dcr", Name: "Concurrent replay", RedirectURIs: []string{redirectURI}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.CreateCode(ctx, "concurrent-code", clientID, redirectURI, "challenge", []string{ScopeRead}); err != nil {
+	if err := db.CreateCode(ctx, "concurrent-code", clientID, redirectURI, "challenge", []string{ScopeRead}, false); err != nil {
 		t.Fatal(err)
 	}
 	pair1, err := db.ExchangeCode(ctx, "concurrent-code", clientID, redirectURI, "verifier", func(string, string) bool { return true })
@@ -168,7 +169,7 @@ func TestGCPreservesAuthorizationCodeReplayTombstoneWhileFamilyIsLive(t *testing
 	server := NewServer(Config{PublicURL: "https://ledger.example.com"}, db)
 	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	code := "gc-code"
-	if err := db.CreateCode(ctx, code, client.ClientID, client.RedirectURIs[0], PKCEChallenge(verifier), []string{ScopeRead}); err != nil {
+	if err := db.CreateCode(ctx, code, client.ClientID, client.RedirectURIs[0], PKCEChallenge(verifier), []string{ScopeRead}, false); err != nil {
 		t.Fatal(err)
 	}
 	codeGrant := url.Values{"grant_type": {"authorization_code"}, "client_id": {client.ClientID}, "code": {code}, "redirect_uri": {client.RedirectURIs[0]}, "code_verifier": {verifier}}
@@ -206,7 +207,7 @@ func TestGCPreservesRotatedRefreshReplayTombstoneWhileFamilyIsLive(t *testing.T)
 	}
 	server := NewServer(Config{PublicURL: "https://ledger.example.com"}, db)
 	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
-	if err := db.CreateCode(ctx, "gc-refresh-code", client.ClientID, client.RedirectURIs[0], PKCEChallenge(verifier), []string{ScopeRead}); err != nil {
+	if err := db.CreateCode(ctx, "gc-refresh-code", client.ClientID, client.RedirectURIs[0], PKCEChallenge(verifier), []string{ScopeRead}, false); err != nil {
 		t.Fatal(err)
 	}
 	pair1 := exchange(t, server, url.Values{"grant_type": {"authorization_code"}, "client_id": {client.ClientID}, "code": {"gc-refresh-code"}, "redirect_uri": {client.RedirectURIs[0]}, "code_verifier": {verifier}}, http.StatusOK)
@@ -511,5 +512,82 @@ func TestApprovalGrantsAllAgentPermissionsExceptForDispatchers(t *testing.T) {
 		if page, granted := authorize(requested); granted != "research:dispatch" || strings.Contains(page, "Read selected calendars") || strings.Contains(page, "Read project memory") {
 			t.Errorf("dispatcher asked %q, granted %q", requested, granted)
 		}
+	}
+}
+
+// Once the owner registers a passkey, the approval password stops working: approval goes through
+// "Continue with Ledger owner login", whose console session needs the passkey.
+func TestApprovalPasswordIsOffWhileTheOwnerHasPasskeys(t *testing.T) {
+	db, ctx := testdb.Open(t)
+	client, err := db.PutClient(ctx, store.OAuthClient{ClientID: "desk-app", Kind: "dcr", Name: "Desk app", RedirectURIs: []string{"https://desk.example.com/cb"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	password, _ := HashPassword("secret")
+	server := NewServer(Config{PublicURL: "https://ledger.example.com", PasswordHash: password}, db)
+	form := url.Values{"client_id": {client.ClientID}, "redirect_uri": {client.RedirectURIs[0]}, "response_type": {"code"},
+		"code_challenge": {PKCEChallenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")}, "code_challenge_method": {"S256"}, "scope": {"ledger:read"}, "state": {"s"}}
+	page := func() string {
+		res := httptest.NewRecorder()
+		server.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/oauth/authorize?"+form.Encode(), nil))
+		if res.Code != http.StatusOK {
+			t.Fatalf("approval page = %d", res.Code)
+		}
+		return res.Body.String()
+	}
+	post := func(action, password string) *httptest.ResponseRecorder {
+		values, _ := url.ParseQuery(form.Encode())
+		values.Set("action", action)
+		values.Set("password", password)
+		req := httptest.NewRequest(http.MethodPost, "/oauth/authorize", strings.NewReader(values.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		res := httptest.NewRecorder()
+		server.ServeHTTP(res, req)
+		return res
+	}
+	codes := func() int {
+		var n int
+		if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM oauth_code`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	if body := page(); !strings.Contains(body, `name="password"`) || !strings.Contains(body, "Allow access") {
+		t.Fatal("approval page without passkeys lacks the password form")
+	}
+	if res := post("approve", "secret"); res.Code != http.StatusFound || codes() != 1 {
+		t.Fatalf("password approval without passkeys = %d", res.Code)
+	}
+
+	if _, _, _, err := db.AddOwnerPasskey(ctx, store.OwnerPasskey{CredentialID: []byte("credential"), PublicKey: []byte("cose"), AAGUID: []byte{}, Name: "Passkey", BackupEligible: true, BackupState: true}, store.Registration{}); err != nil {
+		t.Fatal(err)
+	}
+	body := page()
+	if strings.Contains(body, `name="password"`) || strings.Contains(body, "Allow access") || !strings.Contains(body, "Continue with Ledger owner login") || !strings.Contains(body, `value="deny"`) {
+		t.Fatalf("approval page with a passkey = %s", body)
+	}
+	res := post("approve", "secret")
+	if res.Code != http.StatusForbidden || !strings.Contains(res.Body.String(), "Continue with Ledger owner login") || codes() != 1 {
+		t.Fatalf("password approval with a passkey = %d, codes=%d", res.Code, codes())
+	}
+	if res := post("deny", ""); res.Code != http.StatusFound || !strings.Contains(res.Header().Get("Location"), "error=access_denied") {
+		t.Fatalf("deny with a passkey = %d %s", res.Code, res.Header().Get("Location"))
+	}
+	// The console's owner approval: a session that proved only the password (one being signed out by
+	// the passkey just added) cannot approve; a session that proved the passkey can.
+	if _, err := server.DecideAuthorization(ctx, form, true, true); !errors.Is(err, store.ErrPasskeyRequired) || codes() != 1 {
+		t.Fatalf("password-only console approval with a passkey = %v, codes=%d", err, codes())
+	}
+	if _, err := server.DecideAuthorization(ctx, form, true, false); err != nil || codes() != 2 {
+		t.Fatalf("passkey console approval = %v, codes=%d", err, codes())
+	}
+
+	// reset-passkeys returns approval to the password.
+	if count, err := db.ResetOwnerPasskeys(ctx); err != nil || count != 1 {
+		t.Fatalf("reset = %d, %v", count, err)
+	}
+	if res := post("approve", "secret"); res.Code != http.StatusFound || codes() != 3 {
+		t.Fatalf("password approval after reset = %d", res.Code)
 	}
 }

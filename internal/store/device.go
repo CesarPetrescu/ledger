@@ -71,16 +71,32 @@ func (db *DB) LookupDevice(ctx context.Context, code string) (DeviceRequest, err
 	return d, err
 }
 
-func (db *DB) DecideDevice(ctx context.Context, code string, approve bool) error {
+// DecideDevice approves or denies a device code. passwordOnly marks a console session that has
+// proved only the password: its approval is refused with ErrPasskeyRequired once a passkey exists,
+// under the same lock as registering one.
+func (db *DB) DecideDevice(ctx context.Context, code string, approve, passwordOnly bool) error {
 	status := "denied"
 	if approve {
 		status = "approved"
 	}
-	result, err := db.Pool.Exec(ctx, `UPDATE oauth_device SET status=$2 WHERE user_code=$1 AND status='pending' AND expires_at>now()`, NormalizeUserCode(code), status)
-	if err == nil && result.RowsAffected() != 1 {
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if approve && passwordOnly {
+		if err := noPasskeyYet(ctx, tx); err != nil {
+			return err
+		}
+	}
+	result, err := tx.Exec(ctx, `UPDATE oauth_device SET status=$2 WHERE user_code=$1 AND status='pending' AND expires_at>now()`, NormalizeUserCode(code), status)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
 		return ErrInvalidGrant
 	}
-	return err
+	return tx.Commit(ctx)
 }
 
 func (db *DB) ExchangeDevice(ctx context.Context, raw, clientID string) (TokenPair, error) {

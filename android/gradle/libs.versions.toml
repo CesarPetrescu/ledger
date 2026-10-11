@@ -12,6 +12,7 @@ junit = "4.13.2"
 orgJson = "20260814"
 kotlin = "2.3.20"
 commonmark = "0.30.0"
+androidxCredentials = "1.6.0"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidxCore" }
@@ -35,6 +36,8 @@ commonmark = { module = "org.commonmark:commonmark", version.ref = "commonmark" 
 commonmark-tables = { module = "org.commonmark:commonmark-ext-gfm-tables", version.ref = "commonmark" }
 commonmark-strikethrough = { module = "org.commonmark:commonmark-ext-gfm-strikethrough", version.ref = "commonmark" }
 commonmark-tasks = { module = "org.commonmark:commonmark-ext-task-list-items", version.ref = "commonmark" }
+androidx-credentials = { module = "androidx.credentials:credentials", version.ref = "androidxCredentials" }
+androidx-credentials-play-services-auth = { module = "androidx.credentials:credentials-play-services-auth", version.ref = "androidxCredentials" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "androidGradlePlugin" }
