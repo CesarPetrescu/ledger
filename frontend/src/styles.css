@@ -653,6 +653,13 @@ label > textarea {
 .login-foot svg { width: 14px; height: 14px; color: var(--success); }
 .login-foot span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
 
+/* The sign-in page never scrolls: the brand panel gives up its decoration as the window gets shorter, and on a phone
+   it shrinks to a strip so the form sits high enough to stay in view above the keyboard. */
+@media (min-width: 1001px) and (max-height: 900px) { .login-preview { display: none; } }
+@media (min-width: 1001px) and (max-height: 640px) {
+  .login-points { display: none; }
+  .login-pitch h1 { font-size: clamp(1.8rem, 3vw, 2.4rem); }
+}
 @media (max-width: 1000px) {
   .login { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   .login-hero { justify-content: flex-start; gap: 22px; padding: 28px 24px 30px; }
@@ -660,9 +667,35 @@ label > textarea {
   .login-preview { display: none; }
   .login-side { padding: 32px 20px 40px; }
 }
+@media (max-width: 1000px) and (max-height: 760px) { .login-points { display: none; } }
 @media (max-width: 600px) {
+  .login-hero { gap: 12px; padding: 18px 20px 20px; }
+  .login-brand .wordmark { font-size: 1.15rem; }
+  .login-brand .brand-mark { width: 30px; height: 30px; }
+  .login-pitch h1 { font-size: 1.3rem; line-height: 1.15; letter-spacing: -0.03em; }
   .login-points { display: none; }
-  .login-side { place-items: start center; }
+  .login-side { place-items: start center; padding: 22px 20px 24px; }
+  .login-card { gap: 10px; }
+  .login-card h2 { font-size: 1.65rem; }
+  .login-card > .muted { margin-bottom: 6px; }
+  .login-foot { margin-top: 8px; }
+}
+@media (max-width: 600px) and (max-height: 620px) {
+  .login-pitch { display: none; }
+  .login-card > .muted { display: none; }
+}
+/* A phone on its side: brand and form side by side, both compact. */
+@media (max-height: 500px) and (min-width: 560px) {
+  .login { grid-template-columns: minmax(0, 1fr) minmax(300px, 1.1fr); grid-template-rows: none; }
+  .login-hero { justify-content: center; gap: 14px; padding: 20px 24px; }
+  .login-pitch h1 { font-size: 1.35rem; }
+  .login-side { place-items: center; padding: 14px 24px; }
+  .login-card { gap: 8px; }
+  .login-card .eyebrow, .login-card > .muted { display: none; }
+  .login-card h2 { font-size: 1.5rem; }
+  .login-field input, .login-submit { height: 46px; }
+  .login-submit { margin-top: 4px; }
+  .login-foot { margin-top: 6px; }
 }
 @media (prefers-reduced-motion: reduce) { .login-glow { animation: none; } }
 
