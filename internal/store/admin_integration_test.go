@@ -13,7 +13,7 @@ import (
 
 func TestAdminSessionStoresOnlyHashesAndExpires(t *testing.T) {
 	db, ctx := testdb.Open(t)
-	session, err := db.CreateAdminSession(ctx)
+	session, err := db.CreateAdminSession(ctx, store.NewAdminSession{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,11 +67,11 @@ func TestAdminSessionStoresOnlyHashesAndExpires(t *testing.T) {
 
 func TestAdminSessionRevocation(t *testing.T) {
 	db, ctx := testdb.Open(t)
-	first, err := db.CreateAdminSession(ctx)
+	first, err := db.CreateAdminSession(ctx, store.NewAdminSession{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := db.CreateAdminSession(ctx)
+	second, err := db.CreateAdminSession(ctx, store.NewAdminSession{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestAdminOverviewCountsAreTruthful(t *testing.T) {
 (decode(repeat('03',32),'hex'),'access','client-a','ledger:read','00000000-0000-4000-8000-000000000002',now()-interval '1 minute')`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.CreateAdminSession(ctx); err != nil {
+	if _, err := db.CreateAdminSession(ctx, store.NewAdminSession{}); err != nil {
 		t.Fatal(err)
 	}
 	counts, err := db.AdminCounts(ctx)

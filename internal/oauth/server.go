@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cesarpetrescu/ledger/internal/passkey"
 	"github.com/cesarpetrescu/ledger/internal/store"
 )
 
@@ -26,6 +27,8 @@ type Config struct {
 	PasswordHash      string
 	InternalProxyCIDR string
 	HTTPClient        *http.Client
+	// AndroidApps are published in /.well-known/assetlinks.json so they may use the owner's passkeys.
+	AndroidApps []passkey.AndroidApp
 }
 
 type Server struct {
@@ -61,6 +64,12 @@ func NewServer(config Config, db *store.DB) *Server {
 	s.mux.HandleFunc("GET /.well-known/oauth-protected-resource", s.protectedMetadata)
 	s.mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", s.protectedMetadata)
 	s.mux.HandleFunc("GET /.well-known/oauth-authorization-server", s.authorizationMetadata)
+	assetLinks := passkey.AssetLinks(config.AndroidApps)
+	s.mux.HandleFunc("GET /.well-known/assetlinks.json", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "max-age=3600")
+		_, _ = w.Write(assetLinks)
+	})
 	s.mux.HandleFunc("POST /oauth/register", s.register)
 	s.mux.HandleFunc("GET /oauth/authorize", s.authorizeGet)
 	s.mux.HandleFunc("POST /oauth/authorize", s.authorizePost)
@@ -229,7 +238,7 @@ const authorizationStyles = `<style>
 :root{color-scheme:light;font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#172033;background:#f7f6f2;font-synthesis:none}*{box-sizing:border-box}body{margin:0;min-height:100vh}.page{width:min(100% - 32px,540px);margin:0 auto;padding:48px 0}.brand{margin-bottom:40px;font-size:22px;font-weight:750;letter-spacing:-.03em}.card{padding:32px;border:1px solid #deddd7;border-radius:2px;background:#fff}.eyebrow{margin:0 0 8px;color:#1769e0;font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase}h1{margin:0;font-size:28px;line-height:1.2;letter-spacing:-.035em}p{color:#657086;line-height:1.6}.client{margin:24px 0;padding:16px 0;border-block:1px solid #ecebe7}.client strong,.client span{display:block}.client span{margin-top:2px;color:#7a8497;font-size:13px}.permissions{margin:0 0 24px;padding:0;list-style:none}.permissions li{padding:12px 0;border-bottom:1px solid #ecebe7}.permissions strong,.permissions span{display:block}.permissions span{margin-top:3px;color:#657086;font-size:13px;line-height:1.45}form{display:grid;gap:14px}label{display:grid;gap:7px;color:#3d485d;font-size:13px;font-weight:650}input{width:100%;min-height:48px;padding:0 14px;border:1px solid #c9cbd0;border-radius:2px;background:#fff;color:#172033;font:inherit}input:focus{outline:3px solid rgba(23,105,224,.18);border-color:#1769e0}.actions{display:flex;justify-content:flex-end;gap:10px;margin-top:8px}button{min-height:46px;padding:0 18px;border:1px solid #c9cbd0;border-radius:2px;background:#fff;color:#293449;font:inherit;font-weight:700;cursor:pointer}button:hover{background:#f5f5f2}.primary{border-color:#1769e0;background:#1769e0;color:#fff}.primary:hover{background:#125abb}.privacy{margin:18px 0 0;font-size:12px;text-align:center}.error-card p{margin-bottom:0}@media(max-width:520px){.page{padding:24px 0}.brand{margin-bottom:24px}.card{padding:24px 20px}.actions{display:grid}.actions button{width:100%}h1{font-size:24px}}
 </style>`
 
-var authorizeTemplate = template.Must(template.New("authorize").Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Authorize · Ledger</title>` + authorizationStyles + `</head><body><main class="page"><div class="brand">Ledger</div><section class="card" aria-labelledby="authorize-title"><p class="eyebrow">Access request</p><h1 id="authorize-title">Allow {{if .Name}}{{.Name}}{{else}}this app{{end}} to use Ledger?</h1><p>Review what this client will be able to do in your private project memory and connected calendar.</p><div class="client"><strong>{{if .Name}}{{.Name}}{{else}}Unnamed MCP client{{end}}</strong><span>Requested by an MCP client</span></div><ul class="permissions" aria-label="Requested permissions">{{if .Read}}<li><strong>Read project memory</strong><span>View project records and search historical entries.</span></li>{{end}}{{if .Write}}<li><strong>Add and update memory</strong><span>Update project summaries and append permanent timeline entries.</span></li>{{end}}{{if .CalendarRead}}<li><strong>Read selected calendars</strong><span>View events from the Nextcloud calendars you selected.</span></li>{{end}}{{if .CalendarWrite}}<li><strong>Change selected calendars</strong><span>Create, update, and delete events in your selected Nextcloud calendars.</span></li>{{end}}{{if .ResearchDispatch}}<li><strong>Run research tasks</strong><span>Claim queued research tasks and start a sandbox for each, with a token for that task only.</span></li>{{end}}</ul><form method="post" action="/oauth/authorize">{{range $k,$v := .Fields}}<input type="hidden" name="{{$k}}" value="{{$v}}">{{end}}<p><a href="{{.OwnerURL}}">Continue with Ledger owner login</a></p><label for="approval-password">Approval password<input id="approval-password" required type="password" name="password" autocomplete="current-password" autofocus></label><div class="actions"><button name="action" value="deny" formnovalidate>Deny</button><button class="primary" name="action" value="approve">Allow access</button></div></form><p class="privacy">Ledger never shares your password with the requesting client.</p></section></main></body></html>`))
+var authorizeTemplate = template.Must(template.New("authorize").Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Authorize · Ledger</title>` + authorizationStyles + `</head><body><main class="page"><div class="brand">Ledger</div><section class="card" aria-labelledby="authorize-title"><p class="eyebrow">Access request</p><h1 id="authorize-title">Allow {{if .Name}}{{.Name}}{{else}}this app{{end}} to use Ledger?</h1><p>Review what this client will be able to do in your private project memory and connected calendar.</p><div class="client"><strong>{{if .Name}}{{.Name}}{{else}}Unnamed MCP client{{end}}</strong><span>Requested by an MCP client</span></div><ul class="permissions" aria-label="Requested permissions">{{if .Read}}<li><strong>Read project memory</strong><span>View project records and search historical entries.</span></li>{{end}}{{if .Write}}<li><strong>Add and update memory</strong><span>Update project summaries and append permanent timeline entries.</span></li>{{end}}{{if .CalendarRead}}<li><strong>Read selected calendars</strong><span>View events from the Nextcloud calendars you selected.</span></li>{{end}}{{if .CalendarWrite}}<li><strong>Change selected calendars</strong><span>Create, update, and delete events in your selected Nextcloud calendars.</span></li>{{end}}{{if .ResearchDispatch}}<li><strong>Run research tasks</strong><span>Claim queued research tasks and start a sandbox for each, with a token for that task only.</span></li>{{end}}</ul><form method="post" action="/oauth/authorize">{{range $k,$v := .Fields}}<input type="hidden" name="{{$k}}" value="{{$v}}">{{end}}<p><a href="{{.OwnerURL}}">Continue with Ledger owner login</a></p>{{if .PasskeyOnly}}<p>This Ledger signs in with a passkey, so the approval password is turned off. Continue with Ledger owner login to approve with your passkey.</p><div class="actions"><button name="action" value="deny" formnovalidate>Deny</button></div>{{else}}<label for="approval-password">Approval password<input id="approval-password" required type="password" name="password" autocomplete="current-password" autofocus></label><div class="actions"><button name="action" value="deny" formnovalidate>Deny</button><button class="primary" name="action" value="approve">Allow access</button></div>{{end}}</form>{{if not .PasskeyOnly}}<p class="privacy">Ledger never shares your password with the requesting client.</p>{{end}}</section></main></body></html>`))
 var errorTemplate = template.Must(template.New("error").Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Authorization error · Ledger</title>` + authorizationStyles + `</head><body><main class="page"><div class="brand">Ledger</div><section class="card error-card"><p class="eyebrow">Could not continue</p><h1>Authorization error</h1><p>{{.}}</p></section></main></body></html>`))
 
 func (s *Server) authorizeGet(w http.ResponseWriter, r *http.Request) {
@@ -253,8 +262,13 @@ func (s *Server) authorizeGet(w http.ResponseWriter, r *http.Request) {
 	for key, value := range fields {
 		ownerQuery.Set(key, value)
 	}
+	passkeyOnly, err := s.db.OwnerHasPasskeys(r.Context())
+	if err != nil {
+		localErrorStatus(w, http.StatusInternalServerError, "Ledger could not load this authorization. Please try again.")
+		return
+	}
 	authorizationPageHeaders(w, request.RedirectURI)
-	_ = authorizeTemplate.Execute(w, map[string]any{"Name": client.Name, "Read": HasScope(scopes, ScopeRead), "Write": HasScope(scopes, ScopeWrite), "CalendarRead": HasScope(scopes, ScopeCalendarRead), "CalendarWrite": HasScope(scopes, ScopeCalendarWrite), "ResearchDispatch": HasScope(scopes, ScopeResearchDispatch), "Fields": fields, "OwnerURL": "/admin/authorize?" + ownerQuery.Encode()})
+	_ = authorizeTemplate.Execute(w, map[string]any{"PasskeyOnly": passkeyOnly, "Name": client.Name, "Read": HasScope(scopes, ScopeRead), "Write": HasScope(scopes, ScopeWrite), "CalendarRead": HasScope(scopes, ScopeCalendarRead), "CalendarWrite": HasScope(scopes, ScopeCalendarWrite), "ResearchDispatch": HasScope(scopes, ScopeResearchDispatch), "Fields": fields, "OwnerURL": "/admin/authorize?" + ownerQuery.Encode()})
 }
 
 func (s *Server) authorizePost(w http.ResponseWriter, r *http.Request) {
@@ -281,6 +295,17 @@ func (s *Server) authorizePost(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.PostForm.Get("action") != "approve" {
 		localError(w, "invalid action")
+		return
+	}
+	// Once the owner has a passkey, no password alone approves an app: approval goes through the
+	// console, whose session needs the passkey.
+	passkeyOnly, err := s.db.OwnerHasPasskeys(r.Context())
+	if err != nil {
+		localErrorStatus(w, http.StatusInternalServerError, "Ledger could not complete this authorization. Please try again.")
+		return
+	}
+	if passkeyOnly {
+		localErrorStatus(w, http.StatusForbidden, "This Ledger signs in with a passkey, so the approval password is turned off. Go back and choose Continue with Ledger owner login to approve with your passkey.")
 		return
 	}
 	passwordHash, err := s.db.OAuthPasswordHash(r.Context(), s.config.PasswordHash)

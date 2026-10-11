@@ -43,6 +43,7 @@ services:
     environment:
       <<: *common-env
       LEDGER_INTERNAL_PROXY_CIDR: ${LEDGER_NGINX_INTERNAL_IP:-10.251.250.254}/32
+      LEDGER_ANDROID_APPS: ${LEDGER_ANDROID_APPS:-}
     depends_on:
       postgres: *postgres-ready
     networks:
@@ -103,6 +104,7 @@ services:
       LEDGER_CALENDAR_ENCRYPTION_KEY: ${LEDGER_CALENDAR_ENCRYPTION_KEY:?set LEDGER_CALENDAR_ENCRYPTION_KEY}
       LEDGER_INTERNAL_PROXY_CIDR: ${LEDGER_NGINX_INTERNAL_IP:-10.251.250.254}/32
       LEDGER_INDEX_URL: http://ledger-index:8083
+      LEDGER_ANDROID_APPS: ${LEDGER_ANDROID_APPS:-}
     depends_on:
       postgres: *postgres-ready
       ledger-index:

@@ -127,6 +127,7 @@ A project links the Git repositories it spans, up to 20: GitHub, GitLab, Bitbuck
 - Redirect URIs must be HTTPS, loopback HTTP (`localhost`, `127.0.0.1`, `[::1]`), or plain HTTP to a host that only exists on a private network, for self-hosted LAN apps: exact private IP addresses and plain ASCII names ending in `.local`, `.lan`, `.home.arpa`, or `.internal`. Public wildcard-DNS names such as `nip.io` are refused over plain HTTP, because the DNS service, not Ledger, decides where they resolve. PKCE (S256) is required for every login, and the approval page returns to plain-HTTP LAN apps through a link page rather than a redirect, so browsers do not warn about an insecure form submission.
 - Codes, tokens, and admin sessions are stored as SHA-256 hashes; refresh-token replay revokes the whole token family.
 - The console and the MCP approval page use separate passwords. Rotate the admin password and run `revoke-sessions` after suspected disclosure.
+- Once the owner registers a passkey (WebAuthn, user verification required), no password alone opens a console session or approves an app. Passkey challenges are single-use, purpose-bound, and expire after five minutes.
 - Project and handoff content is untrusted user-authored data and is never interpreted as instructions. The console shows handoff text as plain text or, with the Markdown preview switch on (the default), as Markdown without any raw HTML, with unsafe link schemes dropped and remote images shown only as links.
 
 See [SECURITY.md](../SECURITY.md) for vulnerability reporting.
