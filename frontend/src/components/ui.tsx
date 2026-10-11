@@ -106,7 +106,8 @@ export function formatRelative(iso: string, now = Date.now()): string {
   if (abs < 60) return relative.format(seconds, 'second')
   if (abs < 3600) return relative.format(Math.round(seconds / 60), 'minute')
   if (abs < 86400) return relative.format(Math.round(seconds / 3600), 'hour')
-  if (abs < 86400 * 30) return relative.format(Math.round(seconds / 86400), 'day')
+  // 31, not 30: a remembered session expires 30 days (and a moment) out, and every row should read in days.
+  if (abs < 86400 * 31) return relative.format(Math.round(seconds / 86400), 'day')
   return absolute.format(new Date(then))
 }
 

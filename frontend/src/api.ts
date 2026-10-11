@@ -623,7 +623,7 @@ export function onUnauthorized(listener: () => void): () => void {
   return () => unauthorizedListeners.delete(listener)
 }
 
-async function request<T>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<T> {
+async function request<T>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown, retried = false): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' }
   if (body !== undefined && !(body instanceof FormData)) {
     headers['Content-Type'] = 'application/json'
@@ -651,6 +651,13 @@ async function request<T>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', p
   const data: unknown = await response.json().catch(() => null)
   if (!response.ok) {
     const serverMessage = data !== null && typeof data === 'object' && 'error' in data && typeof data.error === 'string' ? data.error : ''
+    // Signing in again in another tab replaced the session this page's token belongs to, while the
+    // cookie already carries the new one. The server refused before acting, so fetch the current
+    // token and retry once; signed out, the fetch answers 401 and the sign-in page takes over.
+    if (response.status === 403 && serverMessage === 'invalid csrf token' && !retried) {
+      csrfToken = (await request<Session>('GET', '/session')).csrf_token
+      return request<T>(method, path, body, true)
+    }
     throw new ApiError(response.status, response.status < 500 && serverMessage ? serverMessage : GENERIC_FAILURE)
   }
   return data as T
@@ -680,7 +687,8 @@ export const api = {
     request<Session>('POST', '/login/passkey', { ...proof, credential, remember }),
   listPasskeys: () => request<{ passkeys: Passkey[]; required: boolean }>('GET', '/passkeys'),
   passkeyOptions: (password: string) => request<{ challenge_id: string; options: PublicKeyCredentialCreationOptionsJSON }>('POST', '/passkeys/options', { password }),
-  addPasskey: (challenge_id: string, credential: CredentialJSON) => request<{ passkey: Passkey }>('POST', '/passkeys', { challenge_id, credential }).then((response) => response.passkey),
+  /** revoked counts the other devices signed out because they had signed in with only the password. */
+  addPasskey: (challenge_id: string, credential: CredentialJSON) => request<{ passkey: Passkey; revoked: number }>('POST', '/passkeys', { challenge_id, credential }),
   renamePasskey: (id: string, name: string) => request<{ passkey: Passkey }>('PATCH', `/passkeys/${encodeURIComponent(id)}`, { name }).then((response) => response.passkey),
   removePasskey: (id: string, password: string) => request<void>('DELETE', `/passkeys/${encodeURIComponent(id)}`, { password }),
   listSessions: () => request<{ sessions: DeviceSession[] }>('GET', '/sessions').then((response) => response.sessions),

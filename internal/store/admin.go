@@ -127,13 +127,17 @@ func (db *DB) DeleteAdminSessionByPublicID(ctx context.Context, publicID string)
 	return result.RowsAffected() > 0, err
 }
 
+// revokeOtherAdminSessions deletes every session except the one whose hash is $1, only those signed
+// in by method $2 unless it is empty, and counts how many of them were live.
+var revokeOtherAdminSessions = `WITH gone AS (DELETE FROM admin_session WHERE hash<>$1 AND ($2='' OR method=$2) RETURNING ` + adminSessionLive + ` AS live)
+SELECT count(*) FILTER (WHERE live) FROM gone`
+
 // RevokeOtherAdminSessions deletes every session except the one with raw identifier keep and
 // reports how many of them were live.
 func (db *DB) RevokeOtherAdminSessions(ctx context.Context, keep string) (int64, error) {
 	hash := sha256.Sum256([]byte(keep))
 	var revoked int64
-	err := db.Pool.QueryRow(ctx, `WITH gone AS (DELETE FROM admin_session WHERE hash<>$1 RETURNING `+adminSessionLive+` AS live)
-SELECT count(*) FILTER (WHERE live) FROM gone`, hash[:]).Scan(&revoked)
+	err := db.Pool.QueryRow(ctx, revokeOtherAdminSessions, hash[:], "").Scan(&revoked)
 	return revoked, err
 }
 

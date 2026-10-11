@@ -307,11 +307,11 @@ func (s *Server) registerPasskey(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		name = passkey.DefaultName(credential.Authenticator.AAGUID)
 	}
-	saved, err := s.db.AddOwnerPasskey(ctx, store.OwnerPasskey{
+	saved, revoked, err := s.db.AddOwnerPasskey(ctx, store.OwnerPasskey{
 		CredentialID: credential.ID, PublicKey: credential.PublicKey, SignCount: credential.Authenticator.SignCount,
 		AAGUID: credential.Authenticator.AAGUID, Name: name, Transports: passkey.Transports(credential.Transport),
 		AttestationFormat: credential.AttestationFormat, BackupEligible: credential.Flags.BackupEligible, BackupState: credential.Flags.BackupState,
-	})
+	}, sessionFrom(r).ID)
 	if errors.Is(err, store.ErrPasskeyExists) {
 		writeError(w, http.StatusConflict, "this passkey is already registered")
 		return
@@ -320,7 +320,8 @@ func (s *Server) registerPasskey(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"passkey": passkeyResponse(saved)})
+	// revoked counts the other sessions signed out because they had only proved the password.
+	writeJSON(w, http.StatusCreated, map[string]any{"passkey": passkeyResponse(saved), "revoked": revoked})
 }
 
 // passkeyName trims a passkey name and reports whether it is 1 to 60 characters on one line.

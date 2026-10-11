@@ -139,6 +139,7 @@ Once at least one passkey is registered, the password alone never opens a sessio
 - **Sign in with a passkey** in one step. Your provider's PIN or biometric check is the second factor.
 - Or enter the password, then confirm with a passkey.
 - The OAuth approval page turns its approval password off. Approve apps through **Continue with Ledger owner login**.
+- Adding a passkey signs out every other browser and app that signed in with the password alone, so a session opened before the passkey existed does not outlive it. The session that added the passkey stays signed in.
 
 Removing the last passkey returns sign-in to the password alone. Passkeys are bound to the host of `LEDGER_PUBLIC_URL`, which must be a domain name, not an IP address. The Android app uses them through `/.well-known/assetlinks.json`, which `ledger-auth` serves for the apps in `LEDGER_ANDROID_APPS`.
 

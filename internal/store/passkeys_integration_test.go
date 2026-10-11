@@ -17,7 +17,7 @@ func TestResetPasskeysDeletesPasskeysAndPendingLoginsButKeepsTheOwnerHandle(t *t
 		t.Fatalf("owner handle = %x, %v", handle, err)
 	}
 	for _, id := range []string{"one", "two"} {
-		if _, err := db.AddOwnerPasskey(ctx, store.OwnerPasskey{CredentialID: []byte(id), PublicKey: []byte("cose"), AAGUID: []byte{}, Name: "Passkey"}); err != nil {
+		if _, _, err := db.AddOwnerPasskey(ctx, store.OwnerPasskey{CredentialID: []byte(id), PublicKey: []byte("cose"), AAGUID: []byte{}, Name: "Passkey"}, ""); err != nil {
 			t.Fatal(err)
 		}
 	}

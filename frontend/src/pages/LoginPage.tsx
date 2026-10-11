@@ -1,8 +1,8 @@
-import { useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { api, ApiError, type PasskeyRequired } from '../api'
 import { useAuth, type AuthNotice } from '../auth'
 import { BrandMark, Icon } from '../components/ui'
-import { getPasskey, passkeyCancelled, passkeysSupported } from '../webauthn'
+import { getPasskey, passkeyCancelled, passkeysSupported, passkeyUsedHere, setPasskeyUsedHere } from '../webauthn'
 
 const NOTICES: Record<AuthNotice, string> = {
   expired: 'Your session expired. Sign in again.',
@@ -39,8 +39,23 @@ export function LoginPage({ notice }: { notice?: AuthNotice | undefined }) {
   // Set once the password was right but a passkey is registered: sign-in ends with a passkey.
   const [pending, setPending] = useState<PasskeyRequired | null>(null)
   const canPasskey = passkeysSupported()
+  // The passkey is the primary button once this browser has used one; until then (and right after the
+  // upgrade, when no passkey exists) the password is.
+  const [passkeyFirst, setPasskeyFirst] = useState(() => canPasskey && passkeyUsedHere())
+  const passwordInput = useRef<HTMLInputElement>(null)
+  const passkeyButton = useRef<HTMLButtonElement>(null)
+
+  // Every control is disabled while waiting, which drops focus to the page. After a failure, put it
+  // back on the control that failed so Enter retries.
+  useEffect(() => {
+    if (error && !busy) (error.at === 'passkey' ? passkeyButton : passwordInput).current?.focus()
+  }, [error, busy])
 
   const fail = (failure: unknown, at: 'password' | 'passkey', passkey = at === 'passkey') => {
+    if (failure instanceof ApiError && failure.status === 409) {
+      setPasskeyUsedHere(false)
+      setPasskeyFirst(false)
+    }
     setError({ text: describeFailure(failure, passkey), at })
     setBusy('')
   }
@@ -58,6 +73,7 @@ export function LoginPage({ notice }: { notice?: AuthNotice | undefined }) {
     }
     try {
       await signInWithPasskey({ pending: step.pending }, credential, remember)
+      setPasskeyUsedHere(true)
     } catch (failure) {
       // The pending sign-in is single use (and short-lived): start again from the password.
       setPending(null)
@@ -91,6 +107,7 @@ export function LoginPage({ notice }: { notice?: AuthNotice | undefined }) {
       const { challenge_id, options } = await api.passkeyLoginOptions()
       const credential = await getPasskey(options)
       await signInWithPasskey({ challenge_id }, credential, remember)
+      setPasskeyUsedHere(true)
     } catch (failure) {
       fail(failure, 'passkey')
     }
@@ -149,7 +166,7 @@ export function LoginPage({ notice }: { notice?: AuthNotice | undefined }) {
             <h2 id="login-title">Confirm with your passkey</h2>
             <p className="muted">Your password is right. Approve the passkey prompt from Bitwarden, your phone, or this device to finish signing in.</p>
             {errorAt('passkey')}
-            <button type="submit" className="btn btn-primary login-submit" disabled={busy !== ''} autoFocus>
+            <button ref={passkeyButton} type="submit" className="btn btn-primary login-submit" disabled={busy !== ''} autoFocus>
               {busy ? waiting : <><Icon name="passkey" /> Use passkey</>}
             </button>
             <button type="button" className="btn login-submit login-back" onClick={backToPassword} disabled={busy !== ''}>
@@ -160,7 +177,7 @@ export function LoginPage({ notice }: { notice?: AuthNotice | undefined }) {
             <p className="muted login-intro">Sign in with a passkey or your owner password to reach your projects, inbox, and agents.</p>
             {notice && !error && <p className="notice">{NOTICES[notice]}</p>}
             {canPasskey && <>
-              <button type="button" className="btn btn-primary login-submit" onClick={() => void signInWithPasskeyOnly()} disabled={busy !== ''}>
+              <button ref={passkeyButton} type="button" className={passkeyFirst ? 'btn btn-primary login-submit' : 'btn login-submit'} onClick={() => void signInWithPasskeyOnly()} disabled={busy !== ''}>
                 {busy === 'passkey' ? waiting : <><Icon name="passkey" /> Sign in with a passkey</>}
               </button>
               {errorAt('passkey')}
@@ -168,7 +185,7 @@ export function LoginPage({ notice }: { notice?: AuthNotice | undefined }) {
             </>}
             <label htmlFor="password">Password</label>
             <div className="login-field">
-              <input id="password" name="password" type={reveal ? 'text' : 'password'} autoComplete="current-password" required autoFocus value={password}
+              <input ref={passwordInput} id="password" name="password" type={reveal ? 'text' : 'password'} autoComplete="current-password" required autoFocus value={password}
                 onChange={(event) => setPassword(event.target.value)} onKeyUp={watchCaps} onKeyDown={watchCaps} disabled={busy !== ''}
                 aria-invalid={error?.at === 'password' ? true : undefined} aria-describedby={capsLock ? 'caps-lock' : undefined} />
               <button type="button" className="login-reveal" aria-label={reveal ? 'Hide password' : 'Show password'} aria-pressed={reveal} onClick={() => setReveal((value) => !value)}>
@@ -177,7 +194,7 @@ export function LoginPage({ notice }: { notice?: AuthNotice | undefined }) {
             </div>
             {capsLock && <p id="caps-lock" className="login-caps">Caps Lock is on.</p>}
             {errorAt('password')}
-            <button type="submit" className={canPasskey ? 'btn login-submit' : 'btn btn-primary login-submit'} disabled={busy !== ''}>
+            <button type="submit" className={passkeyFirst ? 'btn login-submit' : 'btn btn-primary login-submit'} disabled={busy !== ''}>
               {busy === 'password' ? <><span className="login-spinner" aria-hidden="true" /> Signing in…</> : <>Sign in <Icon name="arrow" /></>}
             </button>
             <label className="check login-remember">

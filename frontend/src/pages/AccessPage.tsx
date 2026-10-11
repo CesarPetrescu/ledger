@@ -6,7 +6,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog'
 import { useToast } from '../components/Toast'
 import { EmptyState, ErrorState, Icon, Loading, StaleNotice, Timestamp } from '../components/ui'
 import { useResource } from '../hooks/useResource'
-import { createPasskey, passkeyCancelled, passkeysSupported } from '../webauthn'
+import { createPasskey, passkeyCancelled, passkeysSupported, setPasskeyUsedHere } from '../webauthn'
 
 const KIND_LABEL: Record<Client['kind'], string> = { dcr: 'Dynamic registration', cimd: 'Client ID metadata', device: 'Connected machine' }
 const PAGE_SIZE = 50
@@ -449,10 +449,13 @@ function AddPasskey({ first, onAdded }: { first: boolean; onAdded: () => void })
     setError('')
     try {
       const { challenge_id, options } = await api.passkeyOptions(password)
-      const passkey = await api.addPasskey(challenge_id, await createPasskey(options))
+      const { passkey, revoked } = await api.addPasskey(challenge_id, await createPasskey(options))
+      setPasskeyUsedHere(true)
       setPassword('')
       setOpen(false)
-      toast(first ? `Added ${passkey.name}. Your password alone no longer signs in.` : `Added ${passkey.name}.`)
+      // The server signs out the other devices that had signed in with only the password.
+      const signedOut = revoked > 0 ? ` Signed out ${revoked === 1 ? '1 other device' : `${revoked} other devices`} that used only the password.` : ''
+      toast(`Added ${passkey.name}.${first ? ' Your password alone no longer signs in.' : ''}${signedOut}`)
       onAdded()
     } catch (failure) { setError(describePasskeyFailure(failure)) }
     finally { setBusy(false) }

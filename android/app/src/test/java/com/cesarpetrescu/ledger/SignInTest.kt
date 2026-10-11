@@ -65,13 +65,19 @@ class SignInTest {
         val unused = JSONObject("""{"id":"1","name":"Bitwarden","provider":"Bitwarden","created_at":"2026-10-01T09:00:00Z","last_used_at":null}""")
         assertEquals("Added: ${displayTime("2026-10-01T09:00:00Z")}\nLast used: Never", passkeyDetails(unused))
         assertTrue(passkeyDetails(unused.put("last_used_at", "2026-10-02T09:00:00Z")).endsWith("Last used: ${displayTime("2026-10-02T09:00:00Z")}"))
+        assertEquals("Passkey added. Signing in now needs it.", passkeyAdded(first = true, revoked = 0))
+        assertEquals("Passkey added. Signing in now needs it. Signed out 2 other devices that used only the password.", passkeyAdded(first = true, revoked = 2))
+        assertEquals("Passkey added. Signed out 1 other device that used only the password.", passkeyAdded(first = false, revoked = 1))
+        assertEquals("Passkey added", passkeyAdded(first = false, revoked = 0))
         assertEquals("Passkeys", screenTitle("passkeys"))
         assertEquals("Signed-in devices", screenTitle("devices"))
     }
 
     @Test fun passkeyProviderErrorsSayWhatToDo() {
-        // No provider: the owner needs Android 14+ with Bitwarden or Google Password Manager, and is told so.
+        // No provider: turn on Google Password Manager (any supported Android, through Play services) or,
+        // on Android 14+, Bitwarden. Passkeys as a whole do not need Android 14.
         listOf("Android 14", "Bitwarden", "Google Password Manager").forEach { assertTrue(it, NO_PASSKEY_PROVIDER.contains(it)) }
+        assertFalse(NO_PASSKEY_PROVIDER.contains("need Android 14"))
         listOf(GetCredentialProviderConfigurationException(), GetCredentialUnsupportedException(), CreateCredentialNoCreateOptionException())
             .forEach { assertEquals(NO_PASSKEY_PROVIDER, passkeyProblem(it)) }
         assertEquals("Passkey request cancelled.", passkeyProblem(GetCredentialCancellationException()))

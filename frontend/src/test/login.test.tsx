@@ -1,6 +1,6 @@
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { anonymousSession, authenticatedSession, futureSessionExpiry, homeRoutes, mockApi, renderApp, requestOptionsJSON, stubPasskeys } from './helpers'
 
 describe('login', () => {
@@ -94,8 +94,12 @@ describe('login', () => {
 })
 
 describe('passkey sign-in', () => {
+  const usedHere = 'ledger.passkey-used'
+  afterEach(() => localStorage.removeItem(usedHere))
+
   it('signs in with a passkey in one step', async () => {
     const passkeys = stubPasskeys()
+    localStorage.setItem(usedHere, 'yes')
     const { calls } = mockApi({
       'GET /admin/api/session': anonymousSession,
       'POST /admin/api/login/passkey/options': { body: { challenge_id: 'ch-1', options: requestOptionsJSON } },
@@ -115,8 +119,28 @@ describe('passkey sign-in', () => {
     expect(calls.some((call) => call.path === '/admin/api/login')).toBe(false)
   })
 
+  it('leads with the password until this browser has used a passkey', async () => {
+    stubPasskeys()
+    mockApi({
+      'GET /admin/api/session': anonymousSession,
+      'POST /admin/api/login/passkey/options': { body: { challenge_id: 'ch-1', options: requestOptionsJSON } },
+      'POST /admin/api/login/passkey': { body: { csrf_token: 'csrf-pk', expires_at: futureSessionExpiry(), remember: true } },
+      ...homeRoutes,
+    })
+    renderApp()
+    const user = userEvent.setup()
+    const button = await screen.findByRole('button', { name: /sign in with a passkey/i })
+    // Right after the upgrade no passkey exists, so the primary button must be one that works.
+    expect(button).not.toHaveClass('btn-primary')
+    expect(screen.getByRole('button', { name: /^sign in$/i })).toHaveClass('btn-primary')
+    await user.click(button)
+    expect(await screen.findByRole('heading', { name: /^inbox$/i })).toBeInTheDocument()
+    expect(localStorage.getItem(usedHere)).toBe('yes')
+  })
+
   it('says so quietly when the prompt is closed, and explains when no passkey exists yet', async () => {
     const passkeys = stubPasskeys()
+    localStorage.setItem(usedHere, 'yes')
     passkeys.get.mockRejectedValueOnce(new DOMException('closed', 'NotAllowedError'))
     const { calls } = mockApi({
       'GET /admin/api/session': anonymousSession,
@@ -133,6 +157,28 @@ describe('passkey sign-in', () => {
     await user.click(screen.getByRole('button', { name: /sign in with a passkey/i }))
     expect(await screen.findByRole('alert')).toHaveTextContent(/no passkey is set up yet/i)
     expect(screen.getByRole('alert')).not.toHaveTextContent('no passkeys')
+    // With no passkey on the server (after reset-passkeys, say) the password leads again.
+    expect(screen.getByRole('button', { name: /^sign in$/i })).toHaveClass('btn-primary')
+    expect(screen.getByRole('button', { name: /sign in with a passkey/i })).not.toHaveClass('btn-primary')
+    expect(localStorage.getItem(usedHere)).toBeNull()
+  })
+
+  it('puts focus back on the passkey button after a closed prompt, so Enter retries', async () => {
+    const passkeys = stubPasskeys()
+    // The prompt stays open a moment, as a real one does, so the page renders its waiting state first.
+    passkeys.get.mockImplementation(() => new Promise((_, reject) => setTimeout(() => reject(new DOMException('closed', 'NotAllowedError')), 20)))
+    mockApi({
+      'GET /admin/api/session': anonymousSession,
+      'POST /admin/api/login': { body: { passkey_required: true, pending: 'pending-1', options: requestOptionsJSON } },
+    })
+    renderApp()
+    const user = userEvent.setup()
+    await user.type(await screen.findByLabelText(/^password$/i), 'correct horse{Enter}')
+    expect(await screen.findByRole('alert')).toHaveTextContent(/prompt closed/i)
+    await waitFor(() => expect(screen.getByRole('button', { name: /use passkey/i })).toHaveFocus())
+    await user.keyboard('{Enter}')
+    await waitFor(() => expect(passkeys.get).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.getByRole('button', { name: /use passkey/i })).toHaveFocus())
   })
 
   it('finishes a password sign-in with a passkey, retrying after a closed prompt', async () => {

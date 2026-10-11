@@ -83,17 +83,35 @@ func (db *DB) OwnerHasPasskeys(ctx context.Context) (bool, error) {
 // ErrPasskeyExists means the credential is already registered.
 var ErrPasskeyExists = errors.New("passkey already registered")
 
-func (db *DB) AddOwnerPasskey(ctx context.Context, p OwnerPasskey) (OwnerPasskey, error) {
+// AddOwnerPasskey registers a passkey and, in the same transaction, signs out every other session
+// that signed in with the password alone: once a passkey exists the password must not be enough,
+// including in a session opened before the passkey existed. keep is the raw identifier of the
+// session registering it, which has just proved the password and the passkey. It reports how many
+// live sessions were signed out.
+func (db *DB) AddOwnerPasskey(ctx context.Context, p OwnerPasskey, keep string) (OwnerPasskey, int64, error) {
 	if p.Transports == nil {
 		p.Transports = []string{}
 	}
-	saved, err := scanOwnerPasskey(db.Pool.QueryRow(ctx, `INSERT INTO owner_passkey(credential_id,public_key,sign_count,aaguid,name,transports,attestation_format,backup_eligible,backup_state)
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return OwnerPasskey{}, 0, err
+	}
+	defer tx.Rollback(ctx)
+	saved, err := scanOwnerPasskey(tx.QueryRow(ctx, `INSERT INTO owner_passkey(credential_id,public_key,sign_count,aaguid,name,transports,attestation_format,backup_eligible,backup_state)
 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING `+ownerPasskeyColumns,
 		p.CredentialID, p.PublicKey, int64(p.SignCount), p.AAGUID, p.Name, p.Transports, p.AttestationFormat, p.BackupEligible, p.BackupState))
 	if pgErrorCode(err) == "23505" {
-		return OwnerPasskey{}, ErrPasskeyExists
+		return OwnerPasskey{}, 0, ErrPasskeyExists
 	}
-	return saved, err
+	if err != nil {
+		return OwnerPasskey{}, 0, err
+	}
+	hash := sha256.Sum256([]byte(keep))
+	var revoked int64
+	if err := tx.QueryRow(ctx, revokeOtherAdminSessions, hash[:], MethodPassword).Scan(&revoked); err != nil {
+		return OwnerPasskey{}, 0, err
+	}
+	return saved, revoked, tx.Commit(ctx)
 }
 
 func (db *DB) RenameOwnerPasskey(ctx context.Context, id int64, name string) (OwnerPasskey, error) {

@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { DeviceSession, Passkey } from '../api'
 import { authenticatedSession, futureSessionExpiry, homeRoutes, mockApi, renderApp, stubPasskeys } from './helpers'
+import { formatRelative } from '../components/ui'
 
 const bitwarden: Passkey = { id: 'pk-1', name: 'Bitwarden', provider: 'Bitwarden', created_at: '2026-10-01T10:00:00Z', last_used_at: '2026-10-10T10:00:00Z' }
 // As the server sends a passkey whose provider it does not know and that was never used.
@@ -46,7 +47,7 @@ describe('passkeys on Access', () => {
         { status: 403, body: { error: 'Password not accepted.' } },
         { body: { challenge_id: 'reg-1', options: creationOptionsJSON } },
       ],
-      'POST /admin/api/passkeys': { status: 201, body: { passkey: bitwarden } },
+      'POST /admin/api/passkeys': { status: 201, body: { passkey: bitwarden, revoked: 2 } },
     })
     renderApp('/admin/access')
     const section = await screen.findByRole('region', { name: 'Passkeys' })
@@ -66,7 +67,11 @@ describe('passkeys on Access', () => {
     await user.click(within(section).getByRole('button', { name: 'Continue' }))
     const table = await within(section).findByRole('table', { name: 'Passkeys' })
     expect(table).toHaveTextContent('Bitwarden')
-    expect(notifications()).toHaveTextContent('Added Bitwarden. Your password alone no longer signs in.')
+    // The server signed out the devices that had only proved the password.
+    expect(notifications()).toHaveTextContent('Added Bitwarden. Your password alone no longer signs in. Signed out 2 other devices that used only the password.')
+    // This browser now leads with the passkey on the sign-in page.
+    expect(localStorage.getItem('ledger.passkey-used')).toBe('yes')
+    localStorage.removeItem('ledger.passkey-used')
     expect(section).toHaveTextContent(/password alone no longer signs in or approves apps/i)
     expect(passkeys.create).toHaveBeenCalledWith({ publicKey: { ...creationOptionsJSON, parsed: 'creation' } })
     const options = calls.filter((call) => call.path === '/admin/api/passkeys/options')
@@ -158,6 +163,16 @@ describe('passkeys on Access', () => {
 })
 
 describe('signed-in devices on Access', () => {
+  it('reads every expiry the same way, including a session that just slid to 30 days', () => {
+    const now = Date.parse('2026-10-11T12:00:00Z')
+    const day = 86_400_000
+    const inDays = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
+    // A sign-in or a slide lands a moment past 30 days; an older session a little under.
+    expect(formatRelative(new Date(now + 30 * day + 5).toISOString(), now)).toBe(inDays.format(30, 'day'))
+    expect(formatRelative(new Date(now + 29 * day + 20 * 3_600_000).toISOString(), now)).toBe(inDays.format(30, 'day'))
+    expect(formatRelative(new Date(now - 45 * day).toISOString(), now)).not.toMatch(/day/)
+  })
+
   it('lists devices with this one first and signs them out one by one or all at once', async () => {
     const { calls } = mockApi({
       ...accessRoutes,

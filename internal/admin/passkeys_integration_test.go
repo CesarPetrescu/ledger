@@ -18,7 +18,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cesarpetrescu/ledger/internal/oauth"
 	"github.com/cesarpetrescu/ledger/internal/passkey"
 	"github.com/cesarpetrescu/ledger/internal/store"
 	"github.com/cesarpetrescu/ledger/internal/testdb"
@@ -135,15 +134,6 @@ func (p *softPasskey) get(options json.RawMessage) string {
 	return string(body)
 }
 
-func newPasskeyServer(t *testing.T, db *store.DB, apps ...passkey.AndroidApp) *Server {
-	t.Helper()
-	hash, err := oauth.HashPassword("correct horse")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return NewServer(Config{PublicURL: testPublicURL, PasswordHash: hash, InternalProxyCIDR: "172.31.255.2/32", IndexURL: "http://127.0.0.1:1", AndroidApps: apps}, db)
-}
-
 // signInHeaders are a browser's sign-in headers from one client address, plus extra header pairs.
 func signInHeaders(ip string, extra ...string) map[string]string {
 	headers := map[string]string{"Origin": testPublicURL, "X-Ledger-Client-IP": ip}
@@ -151,19 +141,6 @@ func signInHeaders(ip string, extra ...string) map[string]string {
 		headers[extra[i]] = extra[i+1]
 	}
 	return headers
-}
-
-func cookieSession(res *httptest.ResponseRecorder) (session, *http.Cookie) {
-	var body struct {
-		CSRF string `json:"csrf_token"`
-	}
-	_ = json.Unmarshal(res.Body.Bytes(), &body)
-	for _, cookie := range res.Result().Cookies() {
-		if cookie.Name == sessionCookie && cookie.Value != "" {
-			return session{cookie: cookie.Name + "=" + cookie.Value, csrf: body.CSRF}, cookie
-		}
-	}
-	return session{}, nil
 }
 
 func decode[T any](t *testing.T, res *httptest.ResponseRecorder) T {
@@ -218,18 +195,9 @@ func finishPasskey(t *testing.T, server http.Handler, field, id, credential, ip 
 	return request(t, server, http.MethodPost, "/admin/api/login/passkey", `{"`+field+`":"`+id+`","credential":`+credential+`,"remember":true}`, signInHeaders(ip, extra...))
 }
 
-// signInWithPasskey runs the one-step passkey sign-in and returns the new session.
-func signInWithPasskey(t *testing.T, server http.Handler, p *softPasskey, ip string) (*httptest.ResponseRecorder, session) {
-	t.Helper()
-	started := passkeyOptions(t, server, ip)
-	res := finishPasskey(t, server, "challenge_id", started.ChallengeID, p.get(started.Options), ip)
-	signedIn, _ := cookieSession(res)
-	return res, signedIn
-}
-
 func TestPasskeysReplacePasswordOnlySignIn(t *testing.T) {
 	db, ctx := testdb.Open(t)
-	server := newPasskeyServer(t, db)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
 	p := newSoftPasskey(t)
 
 	// With no passkey the password alone signs in, as before.
@@ -390,7 +358,7 @@ func TestPasskeysReplacePasswordOnlySignIn(t *testing.T) {
 func TestPasskeyAssertionsAreRefusedUnlessEverythingMatches(t *testing.T) {
 	db, ctx := testdb.Open(t)
 	apps, _ := passkey.ParseAndroidApps(passkey.DefaultAndroidApps)
-	server := newPasskeyServer(t, db, apps...)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1", apps...)
 	_, owner := login(t, server, "correct horse", "")
 	p := newSoftPasskey(t)
 	registerSoftPasskey(t, server, owner, p)
@@ -504,7 +472,7 @@ func TestPasskeyAssertionsAreRefusedUnlessEverythingMatches(t *testing.T) {
 
 func TestRegistrationChallengeBelongsToItsSession(t *testing.T) {
 	db, _ := testdb.Open(t)
-	server := newPasskeyServer(t, db)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
 	_, first := login(t, server, "correct horse", "")
 	_, other := login(t, server, "correct horse", "")
 	p := newSoftPasskey(t)
@@ -528,19 +496,52 @@ func TestRegistrationChallengeBelongsToItsSession(t *testing.T) {
 		t.Fatalf("owning session = %d %s", res.Code, res.Body.String())
 	}
 	// Signing out deletes the session's unfinished registrations with it.
-	pendingRegistration := registrationOptions(t, server, other)
-	if res := request(t, server, http.MethodPost, "/admin/api/logout", "", authed(other, true)); res.Code != http.StatusNoContent {
+	registrationOptions(t, server, first)
+	if res := request(t, server, http.MethodPost, "/admin/api/logout", "", authed(first, true)); res.Code != http.StatusNoContent {
 		t.Fatalf("logout = %d", res.Code)
 	}
 	var left int
 	if err := db.Pool.QueryRow(t.Context(), `SELECT count(*) FROM owner_webauthn_challenge WHERE purpose='register'`).Scan(&left); err != nil || left != 0 {
-		t.Fatalf("registration challenges after logout = %d, %v (%s)", left, err, pendingRegistration.ChallengeID[:4])
+		t.Fatalf("registration challenges after logout = %d, %v", left, err)
+	}
+}
+
+// A session opened with the password alone, before the first passkey existed, ends when a passkey
+// is added. Otherwise it would outlive the switch (90 days when remembered) and, with the password,
+// could add its own passkey or remove the owner's.
+func TestAddingAPasskeySignsOutPasswordOnlySessions(t *testing.T) {
+	db, _ := testdb.Open(t)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
+	_, owner := login(t, server, "correct horse", "")
+	stale, _ := cookieSession(request(t, server, http.MethodPost, "/admin/api/login", `{"password":"correct horse","remember":true}`, signInHeaders("198.51.100.60")))
+	p := newSoftPasskey(t)
+	started := registrationOptions(t, server, owner)
+	if res := finishRegistration(t, server, owner, started.ChallengeID, p.create(started.Options)); res.Code != http.StatusCreated || !strings.Contains(res.Body.String(), `"revoked":1`) {
+		t.Fatalf("first passkey = %d %s", res.Code, res.Body.String())
+	}
+	if res := request(t, server, http.MethodPost, "/admin/api/passkeys/options", `{"password":"correct horse"}`, authed(stale, true)); res.Code != http.StatusUnauthorized {
+		t.Fatalf("password-only session after the first passkey = %d %s", res.Code, res.Body.String())
+	}
+	// The session that added the passkey stays: it has just proved the password and the passkey.
+	if res := request(t, server, http.MethodGet, "/admin/api/session", "", authed(owner, false)); res.Code != http.StatusOK {
+		t.Fatalf("registering session = %d", res.Code)
+	}
+	// A session that signed in with a passkey is not signed out by the next one.
+	ip := "198.51.100.61"
+	discoverable := passkeyOptions(t, server, ip)
+	withPasskey, _ := cookieSession(finishPasskey(t, server, "challenge_id", discoverable.ChallengeID, p.get(discoverable.Options), ip))
+	started = registrationOptions(t, server, owner)
+	if res := finishRegistration(t, server, owner, started.ChallengeID, newSoftPasskey(t).create(started.Options)); res.Code != http.StatusCreated || !strings.Contains(res.Body.String(), `"revoked":0`) {
+		t.Fatalf("second passkey = %d %s", res.Code, res.Body.String())
+	}
+	if res := request(t, server, http.MethodGet, "/admin/api/session", "", authed(withPasskey, false)); res.Code != http.StatusOK {
+		t.Fatalf("passkey session after another passkey = %d", res.Code)
 	}
 }
 
 func TestSignedInDevicesCanBeListedAndSignedOut(t *testing.T) {
 	db, _ := testdb.Open(t)
-	server := newPasskeyServer(t, db)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
 	signIn := func(body, userAgent string) session {
 		t.Helper()
 		res := request(t, server, http.MethodPost, "/admin/api/login", body, signInHeaders("198.51.100.40", "User-Agent", userAgent))
@@ -627,7 +628,7 @@ func TestSignedInDevicesCanBeListedAndSignedOut(t *testing.T) {
 
 func TestRememberedSessionsSlideButNeverPassNinetyDays(t *testing.T) {
 	db, ctx := testdb.Open(t)
-	server := newPasskeyServer(t, db)
+	server := newIntegrationServer(t, db, "http://127.0.0.1:1")
 	signIn := func(remember bool) (session, *http.Cookie, string) {
 		t.Helper()
 		res := request(t, server, http.MethodPost, "/admin/api/login", `{"password":"correct horse","remember":`+strconv.FormatBool(remember)+`}`, signInHeaders("198.51.100.50"))

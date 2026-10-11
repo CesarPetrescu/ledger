@@ -1804,6 +1804,8 @@ label > textarea {
 .connected-apps > .add-passkey, .connected-apps > .sign-out-others { justify-self: start; }
 .rename-form { flex-wrap: nowrap; margin: 0; }
 .rename-form input { flex-basis: 12rem; min-height: 32px; padding: 5px 9px; }
+/* Phones: the value column beside the cell label is narrow, so Save and Cancel go under the name. */
+@media (max-width: 620px) { .rename-form { flex-wrap: wrap; } .rename-form input { flex-basis: 100%; } }
 .badge[data-current] { margin-left: 4px; background: var(--tone-green-bg); color: var(--tone-green); text-transform: none; }
 .row-actions { display: inline-flex; flex-wrap: wrap; gap: 6px; }
 .passkey-nudge { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; margin: 0 0 18px; border-left-color: var(--accent); background: var(--surface-accent); color: var(--text); }

@@ -559,7 +559,7 @@ func TestApprovalPasswordIsOffWhileTheOwnerHasPasskeys(t *testing.T) {
 		t.Fatalf("password approval without passkeys = %d", res.Code)
 	}
 
-	if _, err := db.AddOwnerPasskey(ctx, store.OwnerPasskey{CredentialID: []byte("credential"), PublicKey: []byte("cose"), AAGUID: []byte{}, Name: "Passkey", BackupEligible: true, BackupState: true}); err != nil {
+	if _, _, err := db.AddOwnerPasskey(ctx, store.OwnerPasskey{CredentialID: []byte("credential"), PublicKey: []byte("cose"), AAGUID: []byte{}, Name: "Passkey", BackupEligible: true, BackupState: true}, ""); err != nil {
 		t.Fatal(err)
 	}
 	body := page()

@@ -20,6 +20,7 @@ import (
 
 	"github.com/cesarpetrescu/ledger/internal/github"
 	"github.com/cesarpetrescu/ledger/internal/oauth"
+	"github.com/cesarpetrescu/ledger/internal/passkey"
 	"github.com/cesarpetrescu/ledger/internal/store"
 	"github.com/cesarpetrescu/ledger/internal/testdb"
 	"github.com/coder/websocket"
@@ -30,13 +31,13 @@ type session struct {
 	csrf   string
 }
 
-func newIntegrationServer(t *testing.T, db *store.DB, indexURL string) *Server {
+func newIntegrationServer(t *testing.T, db *store.DB, indexURL string, apps ...passkey.AndroidApp) *Server {
 	t.Helper()
 	hash, err := oauth.HashPassword("correct horse")
 	if err != nil {
 		t.Fatal(err)
 	}
-	return NewServer(Config{PublicURL: testPublicURL, PasswordHash: hash, InternalProxyCIDR: "172.31.255.2/32", IndexURL: indexURL}, db)
+	return NewServer(Config{PublicURL: testPublicURL, PasswordHash: hash, InternalProxyCIDR: "172.31.255.2/32", IndexURL: indexURL, AndroidApps: apps}, db)
 }
 
 func login(t *testing.T, server http.Handler, password string, existing string) (*httptest.ResponseRecorder, session) {
@@ -46,16 +47,22 @@ func login(t *testing.T, server http.Handler, password string, existing string) 
 		headers["Cookie"] = existing
 	}
 	res := request(t, server, http.MethodPost, "/admin/api/login", `{"password":"`+password+`"}`, headers)
+	signedIn, _ := cookieSession(res)
+	return res, signedIn
+}
+
+// cookieSession reads the session a sign-in response set, or the zero session and nil without one.
+func cookieSession(res *httptest.ResponseRecorder) (session, *http.Cookie) {
 	var body struct {
 		CSRF string `json:"csrf_token"`
 	}
 	_ = json.Unmarshal(res.Body.Bytes(), &body)
 	for _, cookie := range res.Result().Cookies() {
 		if cookie.Name == sessionCookie && cookie.Value != "" {
-			return res, session{cookie: cookie.Name + "=" + cookie.Value, csrf: body.CSRF}
+			return session{cookie: cookie.Name + "=" + cookie.Value, csrf: body.CSRF}, cookie
 		}
 	}
-	return res, session{}
+	return session{}, nil
 }
 
 func authed(s session, mutating bool) map[string]string {

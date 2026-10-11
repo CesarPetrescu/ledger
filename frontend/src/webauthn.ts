@@ -104,3 +104,23 @@ export async function createPasskey(options: PublicKeyCredentialCreationOptionsJ
   if (!credential) throw cancelled()
   return credentialToJSON(credential as PublicKeyCredential)
 }
+
+const USED_HERE = 'ledger.passkey-used'
+
+/** Whether this browser has signed in with, or added, a Ledger passkey: the sign-in page then leads with the passkey. */
+export function passkeyUsedHere(): boolean {
+  try {
+    return localStorage.getItem(USED_HERE) === 'yes'
+  } catch {
+    return false
+  }
+}
+
+export function setPasskeyUsedHere(used: boolean): void {
+  try {
+    if (used) localStorage.setItem(USED_HERE, 'yes')
+    else localStorage.removeItem(USED_HERE)
+  } catch {
+    // Private mode: the password stays the primary way in on this browser.
+  }
+}

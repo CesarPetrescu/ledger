@@ -29,7 +29,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
-const val NO_PASSKEY_PROVIDER = "This phone has no passkey provider. Passkeys need Android 14 or newer with Bitwarden or Google Password Manager turned on as a passkey provider in Android's settings."
+const val NO_PASSKEY_PROVIDER = "This phone has no passkey provider turned on. Turn on Google Password Manager, or on Android 14 or newer Bitwarden, as a passkey provider in Android's settings."
 
 /**
  * The phone's passkey providers (Bitwarden, Google Password Manager) through Android's Credential Manager.
@@ -99,6 +99,13 @@ fun sessionSummary(session: JSONObject): Pair<String, String> =
         listOf("Signed in" to "created_at", "Last active" to "last_seen_at", "Expires" to "expires_at")
             .joinToString("\n") { (name, key) -> "$name: ${displayTime(session.text(key))}" }
 
+/** The notice after adding a passkey; the server signs out the other devices that had signed in with only the password. */
+fun passkeyAdded(first: Boolean, revoked: Int) = buildString {
+    append("Passkey added")
+    if (first) append(". Signing in now needs it.")
+    if (revoked > 0) append("${if (first) "" else "."} Signed out ${plural(revoked, "other device")} that used only the password.")
+}
+
 fun passkeyDetails(passkey: JSONObject) =
     "Added: ${displayTime(passkey.text("created_at"))}\nLast used: ${displayTime(passkey.text("last_used_at")).ifBlank { "Never" }}"
 
@@ -143,14 +150,16 @@ fun PasskeysScreen(model: LedgerModel) {
             }
             item { Button(onClick = { adding = true }, enabled = !model.busy) { Text("Add a passkey") } }
             item {
-                Text("Passkeys need Android 14 or newer with Bitwarden or Google Password Manager as a passkey provider. A passkey saved in Bitwarden also works in the web console.",
+                Text("Passkeys work with Google Password Manager on any supported Android, and with Bitwarden or other providers on Android 14 or newer. A passkey saved in Bitwarden also works in the web console.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         if (adding) PasswordDialog("Add a passkey", "Enter the owner password, then choose where to save the passkey.", "Continue", { adding = false }) { password ->
-            model.act(if (rows.isEmpty()) "Passkey added. Signing in now needs it." else "Passkey added") { client ->
+            val first = rows.isEmpty()
+            var revoked = 0
+            model.act(after = { model.notice = passkeyAdded(first, revoked) }) { client ->
                 val start = client.request("POST", "/passkeys/options", json("password" to password))
-                client.request("POST", "/passkeys", json("challenge_id" to start.getString("challenge_id"), "credential" to passkeys.create(start.getJSONObject("options"))))
+                revoked = client.request("POST", "/passkeys", json("challenge_id" to start.getString("challenge_id"), "credential" to passkeys.create(start.getJSONObject("options")))).optInt("revoked")
             }
         }
         removing?.let { passkey ->

@@ -36,7 +36,8 @@ func TestAuthorizeTemplateHidesTheApprovalPasswordOncePasskeysExist(t *testing.T
 		t.Fatal(err)
 	}
 	html := body.String()
-	for _, want := range []string{"Continue with Ledger owner login", "approve with your passkey", `value="deny"`} {
+	// Approving is the primary button next to Deny, not a text link above it.
+	for _, want := range []string{`<a class="primary button-link" href="/admin/authorize?state=x">Continue with Ledger owner login</a></div>`, "approve with your passkey", `value="deny"`} {
 		if !strings.Contains(html, want) {
 			t.Errorf("passkey approval page missing %q", want)
 		}
