@@ -11,6 +11,7 @@ import (
 
 	"github.com/cesarpetrescu/ledger/internal/config"
 	"github.com/cesarpetrescu/ledger/internal/oauth"
+	"github.com/cesarpetrescu/ledger/internal/passkey"
 	"github.com/cesarpetrescu/ledger/internal/webcors"
 )
 
@@ -28,10 +29,14 @@ func main() {
 		}
 		fmt.Println(hash)
 	case "serve":
+		androidApps, err := passkey.ParseAndroidApps(config.Value("LEDGER_ANDROID_APPS", passkey.DefaultAndroidApps))
+		if err != nil {
+			log.Fatal(err)
+		}
 		db := config.OpenDB(ctx)
 		defer db.Close()
 		handler := webcors.AllowExact(
-			oauth.NewServer(oauth.Config{PublicURL: config.PublicURL(), PasswordHash: config.Required("LEDGER_PASSWORD_HASH"), InternalProxyCIDR: config.Required("LEDGER_INTERNAL_PROXY_CIDR")}, db),
+			oauth.NewServer(oauth.Config{PublicURL: config.PublicURL(), PasswordHash: config.Required("LEDGER_PASSWORD_HASH"), InternalProxyCIDR: config.Required("LEDGER_INTERNAL_PROXY_CIDR"), AndroidApps: androidApps}, db),
 			"/oauth/register", "/oauth/device", "/oauth/token", "/oauth/revoke",
 		)
 		if err := config.Serve(":8082", handler); err != nil && err != http.ErrServerClosed {

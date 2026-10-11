@@ -51,6 +51,7 @@ internal/
   mcpserver/    MCP tools, resource, and prompt
   oauth/        OAuth 2.1 server, password hashing, rate limiting
   admin/        operator console API
+  passkey/      owner passkeys (WebAuthn relying party, Android asset links)
   retrieval/    chunking, embeddings, reranking, reciprocal rank fusion
   store/        all SQL
   config/       environment and HTTP helpers

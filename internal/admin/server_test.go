@@ -122,6 +122,14 @@ func TestEveryEndpointExceptLoginDeniesUnauthenticatedRequests(t *testing.T) {
 		{http.MethodGet, "/admin/api/oauth/clients", ""},
 		{http.MethodPost, "/admin/api/oauth/revoke", `{"client_id":"x"}`},
 		{http.MethodGet, "/admin/api/events", ""},
+		{http.MethodGet, "/admin/api/passkeys", ""},
+		{http.MethodPost, "/admin/api/passkeys/options", `{"password":"correct horse"}`},
+		{http.MethodPost, "/admin/api/passkeys", `{"challenge_id":"x","credential":{}}`},
+		{http.MethodPatch, "/admin/api/passkeys/1", `{"name":"x"}`},
+		{http.MethodDelete, "/admin/api/passkeys/1", `{"password":"correct horse"}`},
+		{http.MethodGet, "/admin/api/sessions", ""},
+		{http.MethodDelete, "/admin/api/sessions/00000000-0000-4000-8000-000000000000", ""},
+		{http.MethodPost, "/admin/api/sessions/revoke-others", ""},
 		{http.MethodGet, "/admin/api/unknown", ""},
 		{http.MethodDelete, "/admin/api/projects/atlas", ""},
 	}
@@ -193,7 +201,7 @@ func TestLoginRequiresExactOriginAndWellFormedJSON(t *testing.T) {
 		"scheme downgrade":        {"http://ledger.example.com", valid, http.StatusForbidden},
 		"null origin":             {"null", valid, http.StatusForbidden},
 		"malformed json":          {testPublicURL, `{"password":`, http.StatusBadRequest},
-		"unknown field":           {testPublicURL, `{"password":"correct horse","remember":true}`, http.StatusBadRequest},
+		"unknown field":           {testPublicURL, `{"password":"correct horse","username":"owner"}`, http.StatusBadRequest},
 		"trailing value":          {testPublicURL, `{"password":"correct horse"} {}`, http.StatusBadRequest},
 		"wrong type":              {testPublicURL, `{"password":1}`, http.StatusBadRequest},
 		"empty password":          {testPublicURL, `{"password":""}`, http.StatusUnauthorized},
@@ -318,9 +326,75 @@ func TestPublicOriginIsDerivedFromPublicURL(t *testing.T) {
 
 func TestMutatingMethodsAreRejectedOnReadEndpoints(t *testing.T) {
 	server := newTestServer(t, "correct horse")
-	res := request(t, server, http.MethodGet, "/admin/api/login", "", nil)
-	if res.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("GET login = %d, want 405", res.Code)
+	for _, path := range []string{"/admin/api/login", "/admin/api/login/passkey/options", "/admin/api/login/passkey"} {
+		res := request(t, server, http.MethodGet, path, "", nil)
+		if res.Code != http.StatusMethodNotAllowed || res.Header().Get("Allow") != http.MethodPost {
+			t.Fatalf("GET %s = %d, want 405", path, res.Code)
+		}
+		assertSecurityHeaders(t, res)
 	}
-	assertSecurityHeaders(t, res)
+}
+
+func TestPasskeySignInChecksOriginAndLockoutBeforeAnyWork(t *testing.T) {
+	// The test server has no database: reaching it would panic, so each refusal happens first.
+	server := newTestServer(t, "correct horse")
+	for _, path := range []string{"/admin/api/login/passkey/options", "/admin/api/login/passkey"} {
+		for _, origin := range []string{"", "https://evil.example", "http://ledger.example.com", "null"} {
+			res := request(t, server, http.MethodPost, path, `{}`, map[string]string{"Origin": origin, "X-Ledger-Client-IP": "198.51.100.90"})
+			if res.Code != http.StatusForbidden {
+				t.Errorf("%s from origin %q = %d, want 403", path, origin, res.Code)
+			}
+		}
+	}
+	// Four wrong passwords lock the address out of passkey sign-in too.
+	for i := 0; i < 4; i++ {
+		request(t, server, http.MethodPost, "/admin/api/login", `{"password":"wrong"}`, map[string]string{"Origin": testPublicURL, "X-Ledger-Client-IP": "198.51.100.91"})
+	}
+	for _, path := range []string{"/admin/api/login/passkey/options", "/admin/api/login/passkey"} {
+		res := request(t, server, http.MethodPost, path, `{"challenge_id":"x","credential":{}}`, map[string]string{"Origin": testPublicURL, "X-Ledger-Client-IP": "198.51.100.91"})
+		if res.Code != http.StatusTooManyRequests || res.Header().Get("Retry-After") != "900" {
+			t.Errorf("locked-out %s = %d retry=%q", path, res.Code, res.Header().Get("Retry-After"))
+		}
+	}
+	// The three sign-in endpoints share one request budget per address.
+	var last *httptest.ResponseRecorder
+	for i := 0; i < 21; i++ {
+		last = request(t, server, http.MethodPost, []string{"/admin/api/login", "/admin/api/login/passkey/options", "/admin/api/login/passkey"}[i%3], `[]`, map[string]string{"Origin": testPublicURL, "X-Ledger-Client-IP": "198.51.100.92"})
+	}
+	if last.Code != http.StatusTooManyRequests || last.Header().Get("Retry-After") != "60" {
+		t.Fatalf("21st sign-in request = %d retry=%q", last.Code, last.Header().Get("Retry-After"))
+	}
+}
+
+func TestSessionLabelsNameTheDevice(t *testing.T) {
+	for userAgent, want := range map[string]string{
+		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36":                         "Chrome on Windows",
+		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0":           "Edge on Windows",
+		"Mozilla/5.0 (X11; Linux x86_64; rv:143.0) Gecko/20100101 Firefox/143.0":                                                                  "Firefox on Linux",
+		"Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1": "Safari on iPhone",
+		"Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/141.0 Mobile/15E148 Safari/604.1":  "Chrome on iPhone",
+		"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15":                   "Safari on macOS",
+		"Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36":                   "Chrome on Android",
+		"Mozilla/5.0 (X11; CrOS x86_64 16181.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36":                          "Chrome on ChromeOS",
+		"LedgerAndroid/0.20.0 (Android 15; Pixel 9)": "Ledger app on Android",
+		"curl/8.9.1": "Unknown device",
+		"":           "Unknown device",
+	} {
+		if got := sessionLabel(userAgent); got != want {
+			t.Errorf("sessionLabel(%q) = %q, want %q", userAgent, got, want)
+		}
+	}
+}
+
+func TestPasskeyNamesAreShortSingleLines(t *testing.T) {
+	for raw, want := range map[string]string{" Work laptop ": "Work laptop", strings.Repeat("é", 60): strings.Repeat("é", 60)} {
+		if got, ok := passkeyName(raw); !ok || got != want {
+			t.Errorf("passkeyName(%q) = %q, %v", raw, got, ok)
+		}
+	}
+	for _, raw := range []string{"", "   ", strings.Repeat("x", 61), "two\nlines", "tab\there"} {
+		if _, ok := passkeyName(raw); ok {
+			t.Errorf("passkeyName(%q) accepted", raw)
+		}
+	}
 }
