@@ -1,3 +1,4 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 package com.cesarpetrescu.ledger
 
 import android.Manifest
@@ -43,34 +44,51 @@ fun openBrowser(context: Context, address: String, model: LedgerModel): Boolean 
 @Composable
 fun Settings(model: LedgerModel, atAccess: Boolean = false) {
     val context = LocalContext.current
-    // The Access heading is the fourth item: after the version card, Appearance, and Notifications.
-    // The first visible item sits below the page's 20 dp top padding, so the item before it would show
-    // its last 4 dp (20 dp padding less the 16 dp gap) as a cut-off sliver. Starting that much into the
-    // heading, inside its own 8 dp top padding, puts Notifications fully above the top edge.
-    val sliver = with(LocalDensity.current) { 20.dp.roundToPx() - 16.dp.roundToPx() }
+    // The Access heading is the fourth item: after the version, Appearance, and Notifications. The first visible item sits
+    // below the page's top padding, so starting that padding less one gap into the heading leaves no sliver of Notifications above it.
+    val sliver = with(LocalDensity.current) { Gutter.roundToPx() - PageSpacing.roundToPx() }
     Page(rememberLazyListState(if (atAccess) 3 else 0, if (atAccess) sliver else 0)) {
-        item { SummaryCard("Ledger ${BuildConfig.VERSION_NAME}", "Owner console", model.api?.origin ?: "") }
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("Ledger ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.titleMedium)
+                Text("Owner console · ${model.api?.origin.orEmpty()}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
         item { ThemeChoice(model) }
         item { NotificationsChoice(model) }
         // Who and what can reach your projects; the Agents screen only shows what agents did.
         item {
-            Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("Access", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                SectionLabel("Access", inset = 0.dp)
                 Text("The web console's Access page also has GitHub sync and the approval password.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        item { SummaryCard("Connect an agent", body = "Add Ledger to Claude, ChatGPT, Codex, or another MCP app.") { model.go("connect") } }
-        item { SummaryCard("Connected apps", body = "Review ChatGPT, Claude, CLI, and other apps. Revoke access when needed.") { model.go("clients") } }
-        item { SummaryCard("API keys", body = "Keys that let a server such as Adastrion Core pick up research. Create them in the web console; revoke them here.") { model.go("api-keys") } }
-        item { SummaryCard("Approve a device", body = "Enter the code shown by the Ledger CLI.") { model.go("device") } }
-        item { SummaryCard("Passkeys", body = "Sign in with Bitwarden or Google Password Manager. With a passkey, the password alone no longer signs in.") { model.go("passkeys") } }
-        item { SummaryCard("Signed-in devices", body = "Browsers and phones signed in to this console. Sign out any you do not recognise.") { model.go("devices") } }
-        item { SummaryCard("Calendars", body = "Connect Nextcloud and choose visible calendars.") { model.go("calendar-settings") } }
+        item {
+            Group {
+                NavRow("Connect an agent", "Add Ledger to Claude, ChatGPT, Codex, or another MCP app.") { model.go("connect") }
+                GroupDivider()
+                NavRow("Connected apps", "Review ChatGPT, Claude, CLI, and other apps. Revoke access when needed.") { model.go("clients") }
+                GroupDivider()
+                NavRow("API keys", "Keys that let a server such as Adastrion Core pick up research. Create them in the web console; revoke them here.") { model.go("api-keys") }
+                GroupDivider()
+                NavRow("Approve a device", "Enter the code shown by the Ledger CLI.") { model.go("device") }
+                GroupDivider()
+                NavRow("Passkeys", "Sign in with Bitwarden or Google Password Manager. With a passkey, the password alone no longer signs in.") { model.go("passkeys") }
+                GroupDivider()
+                NavRow("Signed-in devices", "Browsers and phones signed in to this console. Sign out any you do not recognise.") { model.go("devices") }
+                GroupDivider()
+                NavRow("Calendars", "Connect Nextcloud and choose visible calendars.") { model.go("calendar-settings") }
+            }
+        }
         // Ends the Access section: updates and sign-out are about this phone, not who can reach your projects.
-        item { Text("This phone", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }
-        item { OutlinedButton(onClick = { openBrowser(context, "https://github.com/CesarPetrescu/ledger/releases/latest", model) }) { Text("Check for updates") } }
-        item { ConfirmButton("Sign out", "Sign out and revoke this phone's owner session?", !model.busy, action = model::logout) }
-        item { ConfirmButton("Forget this phone", "Remove the saved session from this phone without contacting the server. Use this if the server is unreachable. The server session remains valid until it expires.", !model.busy, danger = true, action = model::forget) }
+        item { SectionLabel("This phone", inset = 0.dp) }
+        item {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { openBrowser(context, "https://github.com/CesarPetrescu/ledger/releases/latest", model) }, shape = ButtonShape) { Text("Check for updates") }
+                ConfirmButton("Sign out", "Sign out and revoke this phone's owner session?", !model.busy, action = model::logout)
+                ConfirmButton("Forget this phone", "Remove the saved session from this phone without contacting the server. Use this if the server is unreachable. The server session remains valid until it expires.", !model.busy, danger = true, action = model::forget)
+            }
+        }
     }
 }
 
@@ -122,7 +140,7 @@ fun NotificationsChoice(model: LedgerModel) {
     val toggle = rememberNotificationSwitch(model) { on = it }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text("Notifications", style = MaterialTheme.typography.titleSmall)
+            Text("Notifications", style = MaterialTheme.typography.titleMedium)
             Text("Tell me when an agent asks something or a todo becomes overdue. Your phone asks your own server about every 15 minutes; nothing goes through Google.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -139,7 +157,7 @@ fun ConnectScreen(model: LedgerModel) {
         item { SelectionContainer { Text("$origin/mcp", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) } }
         item { Text("Codex: install the Ledger CLI and run this on the computer, then approve the code it shows.", style = MaterialTheme.typography.bodyMedium) }
         item { SelectionContainer { Text("ledger connect codex --server $origin", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) } }
-        item { OutlinedButton(onClick = { model.go("device") }, enabled = !model.busy) { Text("Approve a device") } }
+        item { OutlinedButton(shape = ButtonShape, onClick = { model.go("device") }, enabled = !model.busy) { Text("Approve a device") } }
     }
 }
 
@@ -196,7 +214,7 @@ fun Device(model: LedgerModel) {
         item { Text("Connect the Ledger CLI", style = MaterialTheme.typography.headlineSmall) }
         item { Text("Run ledger login on your computer, then enter its device code here.") }
         item { Field("Device code", code, { code = it.uppercase(); result = null }, max = 12, placeholder = "ABCD-EFGH") }
-        item { Button(enabled = !model.busy && code.replace("-", "").length == 8, onClick = {
+        item { Button(shape = ButtonShape, enabled = !model.busy && code.replace("-", "").length == 8, onClick = {
             var response = JSONObject()
             val submitted = code
             model.act("Review this request before approving", after = { result = response; verifiedCode = submitted }) { response = it.request("POST", "/oauth/device", json("user_code" to submitted, "action" to "lookup")) }
@@ -207,7 +225,7 @@ fun Device(model: LedgerModel) {
                 ConfirmButton("Approve", "Allow ${request.text("client_name")} the scope shown above? Only approve a code from a device you control.", !model.busy) {
                     model.act("Device approved", after = model::back) { it.request("POST", "/oauth/device", json("user_code" to verifiedCode, "action" to "approve")) }
                 }
-                OutlinedButton(enabled = !model.busy, onClick = {
+                OutlinedButton(shape = ButtonShape, enabled = !model.busy, onClick = {
                     model.act("Request denied", after = { result = null; code = "" }) { it.request("POST", "/oauth/device", json("user_code" to verifiedCode, "action" to "deny")) }
                 }) { Text("Deny") }
             } }

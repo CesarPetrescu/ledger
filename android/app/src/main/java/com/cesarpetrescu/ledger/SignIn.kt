@@ -159,12 +159,12 @@ fun PasskeysScreen(model: LedgerModel) {
             }
             items(rows, key = { it.text("id") }) { passkey ->
                 SummaryCard(passkey.text("name"), passkeyProvider(passkey), passkeyDetails(passkey), actions = {
-                    OutlinedButton(onClick = { renaming = passkey }, enabled = !model.busy) { Text("Rename") }
-                    OutlinedButton(onClick = { removing = passkey }, enabled = !model.busy,
+                    OutlinedButton(shape = ButtonShape, onClick = { renaming = passkey }, enabled = !model.busy) { Text("Rename") }
+                    OutlinedButton(shape = ButtonShape, onClick = { removing = passkey }, enabled = !model.busy,
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("Remove") }
                 })
             }
-            item { Button(onClick = { adding = true }, enabled = !model.busy) { Text("Add a passkey") } }
+            item { Button(shape = ButtonShape, onClick = { adding = true }, enabled = !model.busy) { Text("Add a passkey") } }
             item {
                 Text("Passkeys work with Google Password Manager on any supported Android, and with Bitwarden or other providers on Android 14 or newer. A passkey saved in Bitwarden also works in the web console.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

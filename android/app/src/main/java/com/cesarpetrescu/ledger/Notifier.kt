@@ -130,7 +130,7 @@ object Notifier {
         if (announce.size > MAX_SHOWN) manager.notify(CHANNEL.hashCode(), android.app.Notification.Builder(context, CHANNEL)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle("${announce.size - MAX_SHOWN} more need you")
-            .setContentText("Open the Inbox to see them all.")
+            .setContentText("Open Today to see them all.")
             .setAutoCancel(true)
             .setContentIntent(open(context, "inbox", CHANNEL.hashCode(), api.origin))
             .build())

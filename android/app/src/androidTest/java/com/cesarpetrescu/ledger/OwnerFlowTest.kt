@@ -74,11 +74,20 @@ class OwnerFlowTest {
         }
         ui.onNodeWithText(text).assertIsDisplayed()
     }
-    /** Opens a project tab; on a phone the tab row scrolls sideways, so the tab may start out of sight. */
-    private fun projectTab(text: String) {
+    /** Opens a project tab; the four tabs always fit, so none needs scrolling into sight. */
+    private fun projectTab(text: String) = tap(text)
+    /** Opens one of the four tabs; on its own screen its name is also the title, so match the navigation item. */
+    private fun tab(text: String) {
         awaitText(text)
-        ui.onNodeWithText(text).performScrollTo()
-        tap(text)
+        ui.onNode(hasText(text) and isSelectable()).performClick()
+        ui.waitForIdle()
+    }
+    /** Opens a destination from the account sheet, behind the round button on the four main screens. */
+    private fun account(destination: String) {
+        ui.waitUntilAtLeastOneExists(hasContentDescription("Account"), 15_000)
+        ui.onNodeWithContentDescription("Account").performClick()
+        ui.waitForIdle()
+        tap(destination)
     }
     /** Runs network work off the main thread, as the system job does. */
     private fun <T> onBackground(block: () -> T): T {
@@ -208,7 +217,7 @@ class OwnerFlowTest {
             // The system Back key, not a touch: a notification can briefly cover the top bar.
             androidx.test.espresso.Espresso.pressBack()
             awaitText("Confirm the fixture pricing")
-            tap("Projects")
+            tab("Projects")
             tap("Atlas")
             tap("Add entry")
             fillField("Entry", "Android verification note")
@@ -225,46 +234,49 @@ class OwnerFlowTest {
             ui.waitUntilDoesNotExist(hasText("Session expired"), 15_000)
             ui.onNodeWithText("Android verification note").assertExists()
             tap("Add entry")
-            awaitText("Activity")
+            awaitText("Log")
             scrollTo("Android verification note")
             ui.onNodeWithText("Android verification note").assertExists()
-            // Scrolling the list on slides the header away while the tabs stay; scrolling back brings it back.
+            // Scrolling the list on slides the header away while the tabs and Add entry stay; scrolling back brings it back.
             ui.onNodeWithTag("page").performTouchInput { swipeUp() }
             ui.waitForIdle()
-            ui.onNodeWithText("Add entry").assertIsNotDisplayed()
+            ui.onNodeWithText("open todo").assertIsNotDisplayed()
             ui.onNodeWithText("Todos").assertIsDisplayed()
+            ui.onNodeWithText("Add entry").assertIsDisplayed()
             ui.onNodeWithTag("page").performTouchInput { swipeDown() }
             ui.waitForIdle()
-            ui.onNodeWithText("Add entry").assertIsDisplayed()
-            // The stat tiles lead to what they count: open todos switches to the Todos tab.
+            ui.onNodeWithText("open todo").assertIsDisplayed()
+            // The numbers lead to what they count: open todos switches to the Todos tab.
             tap("open todo")
             awaitText("Write the fixture todo")
-            // The question tile opens the Inbox on top of the project, so Back returns to the project, as on the web.
+            // The question count opens Today on top of the project, so Back returns to the project, as on the web.
             tap("question waits for you")
             awaitText("Confirm the fixture pricing")
             androidx.test.espresso.Espresso.pressBack()
             awaitText("Write the fixture todo")
             ui.onNodeWithText("question waits for you").assertIsDisplayed()
-            // Details lists the project's fields; Handoffs lists its handoffs, each opening its thread.
-            projectTab("Details")
-            awaitText("Ship the next milestone")
+            // About lists the project's fields and leads to its handoffs, each opening its thread.
+            projectTab("About")
             awaitText("Edit project")
-            projectTab("Handoffs")
+            tap("Handoffs")
             tap("Atlas handoff")
             awaitText("Add message")
             ui.onNodeWithContentDescription("Back").performClick()
-            // Files and Repos are tabs now; the ⋯ menu keeps Edit project and Delete project.
+            ui.onNodeWithContentDescription("Back").performClick()
+            // Files and Repos are under About; the ⋮ menu keeps Edit project and Delete project.
             ui.onNodeWithContentDescription("More actions for Atlas").performClick()
             awaitText("Delete project")
             listOf("Files", "Repos").forEach { ui.onNode(hasText(it) and hasAnyAncestor(isPopup())).assertDoesNotExist() }
-            tap("Edit project")
+            // About has its own Edit project button; this is the menu's.
+            ui.onNode(hasText("Edit project") and hasAnyAncestor(isPopup())).performClick()
             awaitText("Atlas · Edit")
             ui.onNodeWithContentDescription("Back").performClick()
-            projectTab("Files")
+            tap("Files")
             awaitText("No handoff attachments for this project.")
-            // The top bar names the project; Repos keeps its link form folded until asked for, and folds it again after linking.
+            // The top bar names the project; Repositories keeps its link form folded until asked for, and folds it again after linking.
             awaitText("Atlas")
-            projectTab("Repos")
+            ui.onNodeWithContentDescription("Back").performClick()
+            tap("Repositories")
             awaitText("No repositories linked yet.")
             ui.onNodeWithText("Repository URL").assertDoesNotExist()
             // The empty state reads before the button it motivates.
@@ -278,7 +290,10 @@ class OwnerFlowTest {
             tap("Unlink")
             tap("Cancel")
             ui.onNodeWithContentDescription("Back").performClick()
-            tap("Handoffs")
+            // Below the rows, About lists the project's fields; on a short screen they start below the fold.
+            scrollTo("Ship the next milestone")
+            ui.onNodeWithContentDescription("Back").performClick()
+            tab("Handoffs")
             tap("Atlas handoff")
             awaitText("Add message")
             // Messages read as Markdown (no raw HTML); the switch shows them exactly as written.
@@ -300,8 +315,7 @@ class OwnerFlowTest {
             tap("Complete")
             awaitText("Reopen")
             ui.onNodeWithContentDescription("Back").performClick()
-            tap("More")
-            tap("Calendar")
+            account("Calendar")
             tap("Plan the week")
             awaitText("Title")
             fillField("Title", "Updated planning session")
@@ -309,32 +323,32 @@ class OwnerFlowTest {
             tap("Save event")
             awaitText("Updated planning session")
             ui.onNodeWithContentDescription("Back").performClick()
-            tap("Search")
+            ui.onNodeWithContentDescription("Search").performClick()
             fillField("Search your work", "Atlas")
             ui.onNodeWithTag("search-submit").performClick()
             awaitText("Atlas search result")
-            // An entry hit opens the entry itself.
-            scrollTo("Atlas decision hit")
-            tap("Atlas decision hit")
+            // An entry hit reads as its matching text and opens the entry itself.
+            scrollTo("Use SQLite for the fixture cache.")
+            tap("Use SQLite for the fixture cache.")
             awaitText("Use SQLite for the fixture cache")
             awaitText("Chose")
             ui.onNodeWithContentDescription("Back").performClick()
             awaitText("Atlas search result")
             ui.onNodeWithContentDescription("Back").performClick()
-            tap("Inbox")
-            // The inbox says why labelling is paused, why each item is there, and what labels mean.
+            tab("Today")
+            // Today says, in one quiet line, that labelling is paused; Why? gives the whole reason.
+            awaitText("AI labels paused · 1 entry waiting")
+            tap("Why?")
             awaitText("AI labelling is paused: can't reach the AI model. 1 entry is waiting and will get titles and labels when it is back.")
-            tap("What do the labels mean?")
-            awaitText("What the labels mean")
             tap("Close")
-            // Inbox: answer an ask from its sheet (its history shows where it came from), then complete a todo.
+            // Today: answer an ask from its page (its history shows where it came from), then complete a todo.
             tap("Confirm the fixture pricing")
             ui.waitUntilAtLeastOneExists(hasText("claude-code wrote it through Fixture Agent", substring = true), 15_000)
             // The question sits above the box that answers it.
             val question = ui.onNodeWithText("Confirm the fixture pricing").fetchSemanticsNode().boundsInRoot.top
             assertTrue(question < ui.onNodeWithText("Answer claude-code").fetchSemanticsNode().boundsInRoot.top)
             fillField("Answer claude-code", "The fixture pricing is right.")
-            tap("Send")
+            ui.onNodeWithContentDescription("Send").performClick()
             awaitText("Nothing is waiting on you.")
             // The meta line and the labels say why the todo is here; no "Why:" line repeats them.
             ui.onNodeWithText("Why:", substring = true).assertDoesNotExist()
@@ -350,7 +364,7 @@ class OwnerFlowTest {
             tap("Mark done")
             awaitText("No open todos. Nice.")
             // Reading: mark the only unread item read.
-            tap("Reading")
+            tab("Reading")
             tap("Fixture model ships")
             tap("Mark read")
             awaitText("Nothing left to read.")
@@ -361,33 +375,31 @@ class OwnerFlowTest {
             tap("Fixture model ships")
             tap("Mark read")
             awaitText("Nothing left to read.")
-            tap("More")
-            tap("Recent actions")
+            account("Recent actions")
             awaitText("Done: Write the fixture todo")
             ui.onAllNodesWithText("Undo")[0].performClick()
             awaitText("Undone")
             ui.onNodeWithContentDescription("Back").performClick()
-            tap("Reading")
+            tab("Reading")
             awaitText("Fixture model ships")
-            tap("More")
-            tap("Trash")
+            account("Trash")
             awaitText("Trash is empty.")
             ui.onNodeWithContentDescription("Back").performClick()
-            // The Table lists every project's entries, by view and filter.
-            tap("Table")
+            // With no words, Search lists every project's entries, by kind and filter, as the Table did.
+            ui.onNodeWithContentDescription("Search").performClick()
             awaitText("Android verification note")
+            tap("Kind")
             tap("Decisions")
             awaitText("Use SQLite for the fixture cache")
-            ui.onNodeWithContentDescription("Filters").performClick()
-            awaitText("All projects")
+            tap("Project")
+            tap("All projects")
             tap("Use SQLite for the fixture cache")
             awaitText("Chose")
             androidx.test.espresso.Espresso.pressBack()
             ui.waitUntilDoesNotExist(hasText("Chose"), 15_000)
             ui.onNodeWithContentDescription("Back").performClick()
             // Agents shows only what each agent did; connecting one lives under Settings › Access.
-            scrollTo("Agents")
-            tap("Agents")
+            account("Agents")
             awaitText("Working on 1 handoff")
             ui.onNodeWithText("Connect an agent").assertDoesNotExist()
             tap("Manage access →")
@@ -404,17 +416,16 @@ class OwnerFlowTest {
             ui.onNodeWithContentDescription("Back").performClick()
             ui.onNodeWithContentDescription("Back").performClick()
             // Help explains the rules.
-            scrollTo("Help")
-            tap("Help")
+            account("Help")
             awaitText("How Ledger works")
             // Help is a lazy list: on a short screen (CI's Pixel 2) later sections exist only once scrolled to.
-            scrollTo("How the Inbox decides")
+            scrollTo("How Today decides")
             ui.onNodeWithContentDescription("Back").performClick()
-            ui.onNodeWithContentDescription("Settings").performClick()
+            account("Settings")
             tap("Dark")
             tap("System")
             ui.onNodeWithContentDescription("Back").performClick()
-            ui.onNodeWithContentDescription("Settings").performClick()
+            account("Settings")
             scrollTo("Connected apps")
             tap("Connected apps")
             tap("Revoke access")

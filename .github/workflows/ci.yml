@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: 1.27.2
+          go-version: 1.27.3
           cache: true
       - name: Download modules
         run: go mod download
@@ -121,7 +121,10 @@ jobs:
           LEDGER_CALENDAR_ENCRYPTION_KEY: placeholder-calendar-key-at-least-32
           LEDGER_TRUSTED_PROXY_CIDR: 203.0.113.0/24
           LEDGER_INFER_URL: http://inference.example.com/v1
-        run: docker compose config --quiet
+          SPARK_TUNNEL_TOKEN: placeholder-connector-token
+        run: |
+          docker compose config --quiet
+          python3 scripts/check-sparktunnel.py
       - name: Build admin image
         run: docker build --build-arg CMD=ledger-admin -t ledger-admin:ci .
       - name: Build frontend image
@@ -210,7 +213,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: 1.27.2
+          go-version: 1.27.3
       - name: Test native Linux client and installer
         run: |
           go test -race -count=1 -v ./cmd/ledger
@@ -225,7 +228,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: 1.27.2
+          go-version: 1.27.3
       - name: Test Windows client in Docker and Wine
         shell: bash
         run: ./scripts/test-wine.sh 2>&1 | tee "$RUNNER_TEMP/wine-tests.log"
