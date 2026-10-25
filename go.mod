@@ -11,7 +11,7 @@ require (
 	github.com/go-webauthn/webauthn v0.18.2
 	github.com/google/jsonschema-go v0.4.3
 	github.com/jackc/pgx/v5 v5.9.2
-	github.com/modelcontextprotocol/go-sdk v1.7.0
+	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/pgvector/pgvector-go v0.4.1
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.44.0
