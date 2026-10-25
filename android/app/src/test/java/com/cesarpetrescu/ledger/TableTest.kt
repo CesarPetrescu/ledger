@@ -112,13 +112,14 @@ class TableTest {
         assertEquals(listOf("project", "atlas", "activity", "Ship v2/3 & more"), route.split('/').map { java.net.URLDecoder.decode(it, Charsets.UTF_8.name()) })
     }
 
-    @Test fun projectTabsFollowTheWebAndOldFilesAndReposRoutesOpenTheirTabs() {
-        assertEquals(listOf("activity", "todos", "decisions", "details", "handoffs", "files", "repos"), projectTabs.map { it.first })
+    @Test fun projectTabsAreFourAndOldTabLinksOpenAbout() {
+        assertEquals(listOf("activity", "todos", "decisions", "details"), projectTabs.map { it.first })
+        assertEquals(listOf("Log", "Todos", "Decisions", "About"), projectTabs.map { it.second })
         assertEquals(Triple("atlas", "activity", "Ship v2/3 & more"), projectScreenArgs(projectRoute("atlas", "activity", "Ship v2/3 & more")))
         assertEquals(Triple("atlas", "details", ""), projectScreenArgs(projectRoute("atlas", "details")))
-        assertEquals(Triple("atlas", "files", ""), projectScreenArgs("project-files/atlas"))
-        assertEquals(Triple("atlas", "repos", ""), projectScreenArgs("project-repos/atlas"))
-        // A missing or unknown tab opens Activity.
+        // Handoffs, Files and Repos were tabs; About now leads to each.
+        listOf("handoffs", "files", "repos").forEach { assertEquals(Triple("atlas", "details", ""), projectScreenArgs(projectRoute("atlas", it))) }
+        // A missing or unknown tab opens the log.
         assertEquals(Triple("atlas", "activity", ""), projectScreenArgs("project/atlas"))
         assertEquals(Triple("atlas", "activity", ""), projectScreenArgs("project/atlas/bogus/"))
     }
@@ -301,6 +302,41 @@ class TableTest {
         assertEquals("AI summaries: 3 of 4 entries processed." to false, aiStatusText(progress(true, true)))
         assertEquals(null, aiStatusText(progress(false, false)))
         assertEquals(null, aiStatusText(progress(true, true, ready = 4)))
+    }
+
+    @Test fun aPausedLabellerIsOneQuietLine() {
+        fun progress(ready: Int) = JSONObject().put("total", 4).put("ready", ready).put("failed", 0).put("active", true).put("configured", true).put("problem", "down")
+        assertEquals("AI labels paused · 1 entry waiting", aiStatusLine(progress(3)))
+        assertEquals("AI labels paused · 3 entries waiting", aiStatusLine(progress(1)))
+        assertEquals(null, aiStatusLine(progress(4)))
+    }
+
+    @Test fun rowsShowAtMostThreeLabelsAndLeaveTheQuestionToTheirMark() {
+        val today = LocalDate.parse("2026-10-25")
+        val now = java.time.OffsetDateTime.parse("2026-10-25T12:00:00Z")
+        val todo = focus("todo", JSONObject().put("ask", "Which disk?").put("priority", "high").put("size", "M").put("due", "2026-10-20")
+            .put("category", "infra").put("unsure", org.json.JSONArray().put("size")), created = "2026-09-01T10:00:00Z")
+        assertEquals(listOf("Asks you", "High", "M", "Overdue 20 Oct", "Stale", "Check", "infra"), focusLabels(todo, today, now).map { it.first })
+        assertEquals(listOf("High", "M", "Overdue 20 Oct"), rowLabels(todo, today, now).map { it.first })
+    }
+
+    @Test fun agentsKeepOneMonogramAndColourEverywhere() {
+        assertEquals("CC", agentInitials("claude-code"))
+        assertEquals("CO", agentInitials("codex"))
+        assertEquals("You", agentInitials(OWNER_SOURCE))
+        assertEquals(Tone.Research, agentTone("claude-code"))
+        assertEquals(Tone.Good, agentTone("codex"))
+        assertEquals(Tone.Accent, agentTone("chatgpt"))
+        // Any other agent gets a colour from its name, the same on every screen.
+        assertEquals(agentTone("hermes"), agentTone("hermes"))
+    }
+
+    @Test fun projectRowsLeaveTheTierAndQuestionsToTheirHeadingAndLabel() {
+        val p = JSONObject().put("tier", "focus").put("open_todos", 4).put("needs_you", 1).put("week_entries", 2)
+        assertEquals("4 open todos · 2 this week", projectFacts(p, brief = true))
+        assertEquals("Today", screenTitle("inbox"))
+        assertEquals("Search", screenTitle("table/codex"))
+        assertEquals("Sunday 25 October", todayLabel(LocalDate.parse("2026-10-25")))
     }
 
     @Test fun notificationsAnnounceNewAsksAndOverdueTodosOnce() {

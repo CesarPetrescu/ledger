@@ -96,8 +96,8 @@ private fun allEntries(api: Api, query: String): List<JSONObject> {
 @Composable
 private fun kindColor(item: DayItem): Color = when {
     item.overdue || item.kind == "deadline" -> MaterialTheme.colorScheme.error
-    item.kind == "todo" -> if (isDark()) Color(0xFFF3C46E) else Color(0xFFB66A0A)
-    item.kind == "wake" -> if (isDark()) Color(0xFFB9A5F0) else Color(0xFF6B3FA0)
+    item.kind == "todo" -> toneColors(Tone.Warn).second
+    item.kind == "wake" -> toneColors(Tone.Research).second
     else -> MaterialTheme.colorScheme.primary
 }
 
@@ -137,7 +137,7 @@ fun CalendarScreen(model: LedgerModel) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(month.format(DateTimeFormatter.ofPattern("MMMM yyyy")), Modifier.weight(1f), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
                     TextButton(onClick = { show(month.minusMonths(1)) }, modifier = Modifier.semantics { contentDescription = "Previous month" }) { Text("‹", style = MaterialTheme.typography.headlineSmall) }
-                    OutlinedButton(onClick = { show(YearMonth.from(today)) }, contentPadding = PaddingValues(horizontal = 14.dp)) { Text("Today") }
+                    OutlinedButton(shape = ButtonShape, onClick = { show(YearMonth.from(today)) }, contentPadding = PaddingValues(horizontal = 14.dp)) { Text("Today") }
                     TextButton(onClick = { show(month.plusMonths(1)) }, modifier = Modifier.semantics { contentDescription = "Next month" }) { Text("›", style = MaterialTheme.typography.headlineSmall) }
                 }
             }
@@ -158,14 +158,14 @@ fun CalendarScreen(model: LedgerModel) {
                     }
                 }
             }
-            item { Text(selected.format(DateTimeFormatter.ofPattern("EEEE, d MMMM")), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp)) }
+            item { Text(selected.format(DateTimeFormatter.ofPattern("EEEE, d MMMM")), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 4.dp)) }
             val onDay = items[selected].orEmpty()
             if (onDay.isEmpty()) item { Empty("Nothing on this day.") }
             items(onDay) { item -> DayRow(item) { model.go(item.route) } }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (connected) Button(onClick = { model.go("event-new") }, enabled = !model.busy) { Text("New event") }
-                    OutlinedButton(onClick = { model.go("calendar-settings") }) { Text(if (connected) "Calendars" else "Connect Nextcloud") }
+                    if (connected) Button(shape = ButtonShape, onClick = { model.go("event-new") }, enabled = !model.busy) { Text("New event") }
+                    OutlinedButton(shape = ButtonShape, onClick = { model.go("calendar-settings") }) { Text(if (connected) "Calendars" else "Connect Nextcloud") }
                 }
             }
             if (!connected) item { Text("Connect a Nextcloud calendar to see your events here too. Todos due, deadlines, and snoozed items show either way.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -266,7 +266,7 @@ private fun EventForm(model: LedgerModel, id: String, event: JSONObject, calenda
         item { Text(if (allDay) "The end date is the first day after the event." else "Time zone: ${ZoneId.systemDefault()}", style = MaterialTheme.typography.bodySmall) }
         item { Field("Location", location, { location = it }, max = 500) }
         item { Field("Description", description, { description = it }, multiline = true, max = 4000) }
-        item { Button(enabled = !model.busy && title.isNotBlank() && calendar.isNotBlank() && !recurring, modifier = Modifier.fillMaxWidth(), onClick = {
+        item { Button(shape = ButtonShape, enabled = !model.busy && title.isNotBlank() && calendar.isNotBlank() && !recurring, modifier = Modifier.fillMaxWidth(), onClick = {
             model.act(after = model::back) { api ->
                 val payload = json("title" to title.trim(), "start" to eventTimestamp(start, allDay), "end" to eventTimestamp(end, allDay), "all_day" to allDay, "location" to location, "description" to description)
                 require(if (allDay) LocalDateTime.parse(end).toLocalDate() > LocalDateTime.parse(start).toLocalDate() else LocalDateTime.parse(end) > LocalDateTime.parse(start)) { "End must be after start." }
@@ -287,10 +287,10 @@ fun DateTimeField(label: String, value: String, allDay: Boolean, change: (String
     Column {
         Text(label, style = MaterialTheme.typography.labelLarge)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = {
+            OutlinedButton(shape = ButtonShape, onClick = {
                 DatePickerDialog(context, { _, y, m, d -> change(LocalDate.of(y, m + 1, d).atTime(date.toLocalTime()).toString()) }, date.year, date.monthValue - 1, date.dayOfMonth).show()
             }) { Text(date.format(DateTimeFormatter.ofPattern("EEE, d MMM yyyy"))) }
-            if (!allDay) OutlinedButton(onClick = {
+            if (!allDay) OutlinedButton(shape = ButtonShape, onClick = {
                 TimePickerDialog(context, { _, h, m -> change(date.withHour(h).withMinute(m).withSecond(0).withNano(0).toString()) }, date.hour, date.minute, DateFormat.is24HourFormat(context)).show()
             }) { Text(date.format(DateTimeFormatter.ofPattern("HH:mm"))) }
         }
@@ -336,13 +336,13 @@ fun CalendarSettings(model: LedgerModel) {
                 }
                 // While a sign-in is pending, "Finish connecting" is the one filled action; starting over stays outlined.
                 item {
-                    if (pending.isBlank()) Button(enabled = !model.busy && url.isNotBlank(), onClick = connect) { Text("Connect Nextcloud") }
-                    else OutlinedButton(enabled = !model.busy && url.isNotBlank(), onClick = connect) { Text("Connect Nextcloud") }
+                    if (pending.isBlank()) Button(shape = ButtonShape, enabled = !model.busy && url.isNotBlank(), onClick = connect) { Text("Connect Nextcloud") }
+                    else OutlinedButton(shape = ButtonShape, enabled = !model.busy && url.isNotBlank(), onClick = connect) { Text("Connect Nextcloud") }
                 }
                 if (pending.isNotBlank()) {
                     item { Text("After approving access in the browser, return here and finish connecting.") }
-                    item { OutlinedButton(onClick = { openBrowser(context, loginURL, model) }) { Text("Open sign-in again") } }
-                    item { Button(enabled = !model.busy, onClick = {
+                    item { OutlinedButton(shape = ButtonShape, onClick = { openBrowser(context, loginURL, model) }) { Text("Open sign-in again") } }
+                    item { Button(shape = ButtonShape, enabled = !model.busy, onClick = {
                         var result = JSONObject()
                         model.act("Connection checked", after = {
                             if (result.optBoolean("pending")) model.notice = "Waiting for approval. Complete sign-in in the browser first."

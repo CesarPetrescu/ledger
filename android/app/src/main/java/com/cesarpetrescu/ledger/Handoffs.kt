@@ -4,9 +4,11 @@ package com.cesarpetrescu.ledger
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
@@ -15,9 +17,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 
+/** Work passed between agents: the active ones first, a filter for the rest, and New handoff. */
 @Composable
 fun Handoffs(model: LedgerModel) {
     var query by rememberSaveable { mutableStateOf("") }
@@ -26,50 +31,73 @@ fun Handoffs(model: LedgerModel) {
     var target by rememberSaveable { mutableStateOf("") }
     var project by rememberSaveable { mutableStateOf("") }
     var filters by rememberSaveable { mutableStateOf(false) }
-    var filter by rememberSaveable { mutableStateOf("archive=active") }
-    Column {
-        Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { model.go("handoff-new") }, enabled = !model.busy) { Text("New handoff") }
-                TextButton(onClick = { filters = !filters }) { Text("Filter") }
-            }
-            if (filters) ModalBottomSheet(onDismissRequest = { filters = false }) {
-                Column(Modifier.padding(20.dp).imePadding().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Field("Find handoffs", query, { query = it }, max = 1000)
-                Choice("Archive", archive, listOf("active" to "Active", "archived" to "Archived", "all" to "All")) { archive = it }
-                Choice("Status", status, listOf("" to "All statuses") + listOf("draft", "ready", "in_progress", "blocked", "done").map { it to label(it) }) { status = it }
-                Field("Project slug (optional)", project, { project = it }, max = 64)
-                Field("Target (optional)", target, { target = it }, max = 100)
-                Button(onClick = {
-                    filter = "archive=$archive&q=${segment(query)}&status=$status&project=${segment(project)}&target=${segment(target)}"
-                    filters = false
-                }) { Text("Apply filters") }
+    // The sheet's fields apply together; the archive chips apply at once.
+    var applied by rememberSaveable { mutableStateOf("") }
+    val filter = "archive=$archive$applied"
+    Box(Modifier.fillMaxSize()) {
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                FilterChips(listOf("active" to "Active", "archived" to "Archived", "all" to "All"), archive, Modifier.weight(1f)) { archive = it }
+                BadgedBox(badge = { if (applied.isNotBlank()) Badge() }, Modifier.padding(end = 8.dp)) {
+                    IconButton(onClick = { filters = true }) { Glyph("filter", "Filter") }
                 }
             }
+            HandoffList(model, filter, bottom = 96)
         }
-        HandoffList(model, filter)
+        LedgerFab("New handoff", Modifier.align(Alignment.BottomEnd)) { model.go("handoff-new") }
+    }
+    if (filters) ModalBottomSheet(onDismissRequest = { filters = false }) {
+        Column(Modifier.padding(start = Gutter, end = Gutter, bottom = 24.dp).imePadding().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Filter handoffs", style = MaterialTheme.typography.titleMedium)
+            Field("Find handoffs", query, { query = it }, max = 1000)
+            Choice("Status", status, listOf("" to "All statuses") + listOf("draft", "ready", "in_progress", "blocked", "done").map { it to label(it) }) { status = it }
+            Field("Project slug (optional)", project, { project = it }, max = 64)
+            Field("Target (optional)", target, { target = it }, max = 100)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(shape = ButtonShape, onClick = {
+                    applied = listOf("q" to query, "status" to status, "project" to project, "target" to target).filter { it.second.isNotBlank() }
+                        .joinToString("") { (k, v) -> "&$k=${segment(v.trim())}" }
+                    filters = false
+                }) { Text("Apply filters") }
+                if (applied.isNotBlank()) TextButton(onClick = { query = ""; status = ""; project = ""; target = ""; applied = ""; filters = false }) { Text("Clear") }
+            }
+        }
     }
 }
 
 /** A page of handoffs matching [filter], each opening its thread; research ones carry their state. A new filter starts from the latest. */
 @Composable
-fun HandoffList(model: LedgerModel, filter: String, empty: String = "No handoffs match this view.", showProject: Boolean = true) {
+fun HandoffList(model: LedgerModel, filter: String, empty: String = "No handoffs match this view.", showProject: Boolean = true, bottom: Int = 24) {
     var before by rememberSaveable(filter) { mutableStateOf("") }
     Load(model, "handoffs:$filter:$before", { it.request("GET", "/handoffs?$filter&before=${segment(before)}") }) { data ->
-        Page {
-            if (data.rows("handoffs").isEmpty()) item { Empty(empty) }
-            items(data.rows("handoffs")) { h ->
-                val updated = displayTime(h.text("updated_at"))
-                SummaryCard(h.text("title"), if (showProject) h.text("project_name").ifBlank { "General" } + " · " + updated else updated,
-                    listOf(handoffProgress(h), h.text("description")).filter { it.isNotBlank() }.joinToString("\n"), researchTags(h)) { model.go("handoff/${h.text("id")}") }
-            }
-            item { Row {
+        LazyColumn(Modifier.fillMaxSize().testTag("page"), contentPadding = PaddingValues(bottom = bottom.dp)) {
+            if (data.rows("handoffs").isEmpty()) item { Box(Modifier.padding(horizontal = Gutter)) { Empty(empty) } }
+            items(data.rows("handoffs")) { h -> HandoffRow(model, h, showProject) }
+            item { Row(Modifier.padding(horizontal = 8.dp)) {
                 if (before.isNotBlank()) TextButton(onClick = { before = "" }) { Text("Latest") }
                 if (data.text("next_before").isNotBlank()) TextButton(onClick = { before = data.text("next_before") }) { Text("Older handoffs") }
             } }
         }
     }
 }
+
+@Composable
+private fun HandoffRow(model: LedgerModel, h: JSONObject, showProject: Boolean) {
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    Column(Modifier.fillMaxWidth().clickable(enabled = !model.busy) { model.go("handoff/${h.text("id")}") }.padding(horizontal = Gutter, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(h.text("title"), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Text(listOf(if (showProject) h.text("project_name").ifBlank { "General" } else "", handoffProgress(h), "updated ${ago(h.text("updated_at"))} ago")
+            .filter { it.isNotBlank() }.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = muted)
+        if (h.text("description").isNotBlank()) Text(h.text("description"), style = MaterialTheme.typography.bodyMedium, color = ledgerColors.body, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        val tags = researchTags(h)
+        if (tags.isNotEmpty()) Row(Modifier.padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) { tags.forEach { (text, tone) -> Tag(text, tone) } }
+    }
+    GroupDivider()
+}
+
+/** A message's work state as a coloured label. */
+fun workStateTone(state: String) = when (state) { "done" -> Tone.Good; "blocked" -> Tone.Danger; "ready", "in_progress" -> Tone.Accent; else -> Tone.Neutral }
 
 @Composable
 fun HandoffDetail(model: LedgerModel, id: String) {
@@ -79,21 +107,30 @@ fun HandoffDetail(model: LedgerModel, id: String) {
         val h = data.getJSONObject("handoff")
         val research = data.optJSONObject("research")
         Page {
-            item { MarkdownCard(h.text("title"), h.text("project_name").ifBlank { "General" }, listOf(h.text("description"), h.text("scope")).filter { it.isNotBlank() }.joinToString("\n\n"), markdown.value) }
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val tags = researchTags(h)
+                    if (tags.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) { tags.forEach { (text, tone) -> Tag(text, tone) } }
+                    Text(h.text("title"), style = MaterialTheme.typography.headlineSmall)
+                    Text(listOf(h.text("project_name").ifBlank { "General" }, handoffProgress(h), "updated ${ago(h.text("updated_at"))} ago").filter { it.isNotBlank() }.joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    val about = listOf(h.text("description"), h.text("scope")).filter { it.isNotBlank() }.joinToString("\n\n")
+                    if (about.isNotBlank()) MarkdownText(about, markdown.value)
+                }
+            }
             if (research != null) item {
                 val (state, phase) = research.text("state") to research.text("phase")
                 // The state is the same coloured label as on the Handoffs list.
                 SummaryCard("Research task", body = researchHint(state, phase, research.optInt("attempt"), research.optInt("failures"), research.optInt("max_attempts"), research.text("progress"), research.text("last_error")),
-                    tags = listOfNotNull(researchStatusTag(researchStatus(state, phase))))
-                // The task's buttons live here: the brief is the oldest message and a long thread pages it out.
-                Row(Modifier.padding(top = 12.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    researchActions(state, phase, true).forEach { (action, name) ->
-                        val run: () -> Unit = { model.act("$name applied") { it.request("POST", "/handoff-messages/${segment(research.text("message_id"))}/actions", json("action" to action)) } }
-                        // Accept and Queue lead; Send back and the other moves are secondary.
-                        if (isResearchPrimary(action)) Button(onClick = run, enabled = !model.busy) { Text(name) }
-                        else OutlinedButton(onClick = run, enabled = !model.busy) { Text(name) }
-                    }
-                }
+                    tags = listOfNotNull(researchStatusTag(researchStatus(state, phase))), actions = {
+                        // The task's buttons live here: the brief is the oldest message and a long thread pages it out.
+                        researchActions(state, phase, true).forEach { (action, name) ->
+                            val run: () -> Unit = { model.act("$name applied") { it.request("POST", "/handoff-messages/${segment(research.text("message_id"))}/actions", json("action" to action)) } }
+                            // Accept and Queue lead; Send back and the other moves are secondary.
+                            if (isResearchPrimary(action)) Button(onClick = run, enabled = !model.busy, shape = ButtonShape) { Text(name) }
+                            else OutlinedButton(onClick = run, enabled = !model.busy, shape = ButtonShape) { Text(name) }
+                        }
+                    })
             }
             item {
                 val export = rememberDownload(model, "/handoffs/${segment(id)}/export", "handoff-$id.md", "text/markdown")
@@ -102,12 +139,14 @@ fun HandoffDetail(model: LedgerModel, id: String) {
                     val write = { model.go(if (research != null) "message-new/$id/reply" else "message-new/$id") }
                     val label = if (research != null) "Reply" else "Add message"
                     // Under Accept or Queue, Reply steps back so one button leads; answering a question, Reply is the next step.
-                    if (research != null && researchLeads(research.text("state"), research.text("phase"))) OutlinedButton(onClick = write, enabled = !model.busy) { Text(label) }
-                    else Button(onClick = write, enabled = !model.busy) { Text(label) }
+                    if (research != null && researchLeads(research.text("state"), research.text("phase"))) OutlinedButton(onClick = write, enabled = !model.busy, shape = ButtonShape) { Text(label) }
+                    else Button(onClick = write, enabled = !model.busy, shape = ButtonShape) { Text(label) }
+                    Spacer(Modifier.weight(1f))
                     Overflow("More actions for this handoff", listOf(MenuAction("Edit details") { model.go("handoff-edit/$id") }, MenuAction("Export", run = export)), enabled = !model.busy)
                 }
             }
             item { MarkdownSwitch(markdown) }
+            item { SectionLabel("Messages", count = data.rows("messages").size, inset = 0.dp) }
             items(data.rows("messages"), key = { it.text("id") }) { message -> MessageCard(model, message, markdown.value, research) }
             item { Row {
                 if (before.isNotBlank()) TextButton(onClick = { before = "" }) { Text("Latest messages") }
@@ -122,23 +161,32 @@ private fun MessageCard(model: LedgerModel, message: JSONObject, markdown: Boole
     val id = message.text("id")
     var retarget by remember { mutableStateOf(false) }
     var target by rememberSaveable { mutableStateOf(message.text("target")) }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        val to = if (message.text("target").isNotBlank()) " → ${message.text("target")}" else ""
-        // A research thread is notes around one brief: who wrote each, not its delivery and work states.
-        if (research != null) MarkdownCard(researchNoteTitle(message), displayTime(message.text("created_at")) + to, message.text("body"), markdown)
-        else MarkdownCard("${label(message.text("work_state"))} · ${label(message.text("delivery_state"))}",
-            "${displayTime(message.text("created_at"))} · ${message.text("source")}$to", message.text("body"), markdown)
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val actions = if (research != null) researchActions(message.text("work_state"), research.text("phase"), brief = false)
-                else messageActions(message.text("work_state"), message.text("delivery_state")).map { it to label(it) }
-            actions.forEach { (action, name) ->
-                OutlinedButton(enabled = !model.busy, onClick = { model.act("$name applied") { it.request("POST", "/handoff-messages/${segment(id)}/actions", json("action" to action)) } }) { Text(name) }
+    val state = message.text("work_state")
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    Group {
+        Column(Modifier.padding(start = Gutter, end = Gutter, top = 12.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AgentMark(message.text("source"))
+                val to = if (message.text("target").isNotBlank()) " → ${message.text("target")}" else ""
+                // A research thread is notes around one brief: who wrote each, not its delivery and work states.
+                Text(if (research != null) researchNoteTitle(message) + " · " + displayTime(message.text("created_at")) + to
+                    else "${writerName(message.text("source"))} · ${displayTime(message.text("created_at"))}$to",
+                    Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (research == null) Tag(label(state), workStateTone(state))
             }
-            if (research == null && canRetarget(message.text("work_state"), message.text("claimed_at").isNotBlank())) TextButton(onClick = { retarget = true }, enabled = !model.busy) { Text("Retarget") }
+            if (research == null) Text(label(message.text("delivery_state")), style = MaterialTheme.typography.bodySmall, color = muted)
+            MarkdownText(message.text("body"), markdown)
+            val actions = if (research != null) researchActions(state, research.text("phase"), brief = false)
+                else messageActions(state, message.text("delivery_state")).map { it to label(it) }
+            if (actions.isNotEmpty() || (research == null && canRetarget(state, message.text("claimed_at").isNotBlank()))) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                actions.forEach { (action, name) ->
+                    OutlinedButton(enabled = !model.busy, shape = ButtonShape, onClick = { model.act("$name applied") { it.request("POST", "/handoff-messages/${segment(id)}/actions", json("action" to action)) } }) { Text(name) }
+                }
+                if (research == null && canRetarget(state, message.text("claimed_at").isNotBlank())) TextButton(onClick = { retarget = true }, enabled = !model.busy) { Text("Retarget") }
+            }
+            message.rows("files").forEach { file -> FileRow(model, file, state == "draft") }
+            if (state == "draft") UploadButton(model, id)
         }
-        message.rows("files").forEach { file -> FileRow(model, file, message.text("work_state") == "draft") }
-        if (message.text("work_state") == "draft") UploadButton(model, id)
-        HorizontalDivider()
     }
     if (retarget) AlertDialog(onDismissRequest = { retarget = false }, title = { Text("Retarget message") },
         text = { Field("Target", target, { target = it }, max = 100) },
@@ -176,7 +224,7 @@ private fun HandoffForm(model: LedgerModel, id: String, h: JSONObject) {
             item { Field("Target (optional)", target, { target = it }, max = 100) }
             item { DraftSwitch(draft) { draft = it } }
         }
-        item { Button(enabled = !model.busy && title.isNotBlank() && (id.isNotBlank() || body.isNotBlank()), modifier = Modifier.fillMaxWidth(), onClick = {
+        item { Button(shape = ButtonShape, enabled = !model.busy && title.isNotBlank() && (id.isNotBlank() || body.isNotBlank()), modifier = Modifier.fillMaxWidth(), onClick = {
             model.act(after = model::back) { api ->
                 val payload = json("title" to title.trim(), "project_slug" to project.trim(), "description" to description, "scope" to scope)
                 if (id.isBlank()) api.request("POST", "/handoffs", payload.put("body", body.trim()).put("target", target.trim()).put("draft", draft))
@@ -211,7 +259,7 @@ fun MessageEditor(model: LedgerModel, id: String, reply: Boolean = false) {
         if (!reply) item { Field("Target (optional)", target, { target = it }, max = 100) }
         item { DraftSwitch(draft) { draft = it } }
         item { Text("Messages are permanent. Add a correction as a new message.", style = MaterialTheme.typography.bodySmall) }
-        item { Button(enabled = !model.busy && body.isNotBlank(), modifier = Modifier.fillMaxWidth(), onClick = {
+        item { Button(shape = ButtonShape, enabled = !model.busy && body.isNotBlank(), modifier = Modifier.fillMaxWidth(), onClick = {
             model.act(if (reply) "Reply added" else "Message added", after = model::back) {
                 it.request("POST", "/handoffs/${segment(id)}/messages", json("body" to body.trim(), "target" to if (reply) "" else target.trim(), "draft" to draft))
             }
@@ -235,7 +283,7 @@ fun rememberDownload(model: LedgerModel, path: String, filename: String, mime: S
 @Composable
 fun DownloadButton(model: LedgerModel, path: String, filename: String, text: String = "Save file", mime: String = "application/octet-stream") {
     val download = rememberDownload(model, path, filename, mime)
-    OutlinedButton(onClick = download, enabled = !model.busy) { Text(text) }
+    OutlinedButton(shape = ButtonShape, onClick = download, enabled = !model.busy) { Text(text) }
 }
 
 @Composable
@@ -250,14 +298,17 @@ fun UploadButton(model: LedgerModel, messageId: String) {
             api.upload(messageId, name, bytes)
         }
     }
-    OutlinedButton(onClick = { launcher.launch(arrayOf("*/*")) }, enabled = !model.busy) { Text("Attach file (up to 25 MiB)") }
+    OutlinedButton(shape = ButtonShape, onClick = { launcher.launch(arrayOf("*/*")) }, enabled = !model.busy) { Text("Attach file (up to 25 MiB)") }
 }
 
 @Composable
 fun FileRow(model: LedgerModel, file: JSONObject, removable: Boolean = false) {
-    Column {
-        Text(file.text("filename"), style = MaterialTheme.typography.titleSmall)
-        Text("${(file.optLong("size_bytes") + 1023) / 1024} KiB", style = MaterialTheme.typography.bodySmall)
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Glyph("attach", null, tint = MaterialTheme.colorScheme.onSurfaceVariant, size = 18.dp)
+            Text(file.text("filename"), Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text("${(file.optLong("size_bytes") + 1023) / 1024} KiB", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             DownloadButton(model, "/handoff-files/${segment(file.text("id"))}", file.text("filename"), mime = file.text("media_type").ifBlank { "application/octet-stream" })
             if (removable) ConfirmButton("Remove", "Remove this attachment from the draft?", !model.busy, danger = true) {
@@ -271,6 +322,6 @@ fun FileRow(model: LedgerModel, file: JSONObject, removable: Boolean = false) {
 fun ProjectFiles(model: LedgerModel, slug: String) = Load(model, "files:$slug", { it.request("GET", "/projects/${segment(slug)}/files") }) { data ->
     Page {
         if (data.rows("files").isEmpty()) item { Empty("No handoff attachments for this project.") }
-        items(data.rows("files")) { FileRow(model, it) }
+        items(data.rows("files")) { Group { Box(Modifier.padding(Gutter)) { FileRow(model, it) } } }
     }
 }

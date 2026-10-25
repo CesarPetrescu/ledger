@@ -12,6 +12,10 @@ Settings › Access › Signed-in devices lists every browser and phone with an 
 
 Install `ledger-android-vX.Y.Z.apk` from [GitHub Releases](https://github.com/CesarPetrescu/ledger/releases/latest). Android may ask you to allow installations from the browser or file manager. Future release APKs update the same app and retain its session. The Settings screen links to the latest release; installation remains under Android's control.
 
+The app opens on **Today**: what your agents are waiting on you for, each with Reply, Handled and Snooze on its card, then the most urgent todos (tap the ring to finish one), blocked projects, and each project's week. The other tabs are Projects, Handoffs and Reading; Search, at the top of each, also lists every project's entries by project, kind, agent or tag. The round account button opens Calendar, Agents, Recent actions, Trash, Settings and Help.
+
+Its look lives in two files: `Theme.kt` holds the web console's colours for light and dark, the state colours, type (Sora, bundled under the SIL Open Font License in `assets/fonts`) and shapes, and `Components.kt` the building blocks screens are made of. Screens use those instead of styling Material components themselves.
+
 The app supports projects and append-only entries; handoffs, message state transitions and attachments; cross-project search; Nextcloud calendars and event editing; connected-client revocation and CLI device approval. Recurring calendar series are managed in the calendar provider. It requires a network connection and does not queue writes offline. Draft attachments must be added before publishing a message.
 
 ## Build and verify

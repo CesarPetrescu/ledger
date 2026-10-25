@@ -38,7 +38,7 @@ fun TrashScreen(model: LedgerModel) = Load(model, "trash", { it.request("GET", "
             val days = runCatching { ChronoUnit.DAYS.between(OffsetDateTime.now(), OffsetDateTime.parse(item.text("purge_at"))).coerceAtLeast(0) }.getOrDefault(0L)
             val what = if (item.text("kind") == "project") "Project · ${plural(item.optInt("entry_count"), "entry", "entries")}" else "Entry in ${item.text("project_slug")}"
             SummaryCard(item.text("label"), what, "Deleted ${ago(item.text("deleted_at"))} · removed for good in ${plural(days.toInt(), "day")}", actions = {
-                Button(onClick = { model.act("Restored") { it.request("POST", "/trash/${segment(id)}/restore") } }, enabled = !model.busy) { Text("Restore") }
+                Button(shape = ButtonShape, onClick = { model.act("Restored") { it.request("POST", "/trash/${segment(id)}/restore") } }, enabled = !model.busy) { Text("Restore") }
                 ConfirmButton("Delete forever", "Remove \"${item.text("label")}\" permanently? This cannot be undone.", !model.busy, danger = true) {
                     model.act("Deleted forever") { it.request("DELETE", "/trash/${segment(id)}") }
                 }
@@ -72,7 +72,7 @@ fun DeleteProjectDialog(model: LedgerModel, slug: String, close: () -> Unit) {
 @Composable
 fun ThemeChoice(model: LedgerModel) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("Appearance", style = MaterialTheme.typography.titleSmall)
+        Text("Appearance", style = MaterialTheme.typography.titleMedium)
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
             THEMES.forEachIndexed { index, theme ->
                 SegmentedButton(selected = model.theme == theme, onClick = { model.chooseTheme(theme) }, shape = SegmentedButtonDefaults.itemShape(index, THEMES.size)) {

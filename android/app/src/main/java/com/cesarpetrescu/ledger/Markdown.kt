@@ -251,18 +251,6 @@ private fun inline(parent: Node): AnnotatedString {
     }
 }
 
-/** A card like [SummaryCard] whose body is Markdown (or plain text when [formatted] is off). */
-@Composable
-fun MarkdownCard(title: String, subtitle: String, body: String, formatted: Boolean) {
-    OutlinedCard(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            if (subtitle.isNotBlank()) Text(subtitle, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (body.isNotBlank()) MarkdownText(body, formatted)
-        }
-    }
-}
-
 /** How a message will read once sent, while it is being written. */
 @Composable
 fun MarkdownPreviewBox(body: String) {
