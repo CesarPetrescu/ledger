@@ -1,0 +1,23 @@
+# Apply last so no earlier production override can publish the origin port.
+services:
+  nginx:
+    ports: !reset []
+    environment:
+      LEDGER_TRUSTED_PROXY_CIDR: ${LEDGER_SPARKTUNNEL_IP:-10.251.250.253}/32
+
+  spark-tunnel:
+    restart: unless-stopped
+    platform: linux/amd64
+    build:
+      context: ./sparktunnel
+    environment:
+      SPARK_TUNNEL_TOKEN: ${SPARK_TUNNEL_TOKEN:?set SPARK_TUNNEL_TOKEN in .env}
+    depends_on:
+      nginx:
+        condition: service_started
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks:
+      ledger-internal:
+        ipv4_address: ${LEDGER_SPARKTUNNEL_IP:-10.251.250.253}

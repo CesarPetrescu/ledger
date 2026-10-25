@@ -11,7 +11,7 @@ Deploy Ledger, configure authentication, and manage the server. For a first depl
 ### Requirements
 
 - Docker with Compose
-- An HTTPS reverse proxy in front of it. The console sets `Secure` cookies and will not work over plain HTTP except on `localhost`.
+- SparkTunnel or an HTTPS reverse proxy in front of it. The console sets `Secure` cookies and will not work over plain HTTP except on `localhost`.
 - For semantic search, an OpenAI-compatible embeddings endpoint and a Jina/Cohere-style reranking endpoint. Set `LEDGER_INFER_URL` in Compose; if the endpoint is unavailable, search falls back to lexical-only mode.
 
 For a native deployment instead of Compose you need Go 1.26+, Node.js 24, and PostgreSQL 16 with the `vector` and `unaccent` extensions. See [Configuration](#configuration).
@@ -55,6 +55,30 @@ docker compose up -d --build
 ```
 
 Point your reverse proxy at host port `8080`, then open `<LEDGER_PUBLIC_URL>/admin/` and sign in.
+
+#### SparkTunnel instead of an inbound proxy
+
+On Linux amd64, add these settings to the ignored `.env` file:
+
+```dotenv
+COMPOSE_FILE=docker-compose.yml:compose.sparktunnel.yml
+SPARK_TUNNEL_TOKEN=<one-time-connector-token-from-the-site-panel>
+```
+
+Keep `LEDGER_PUBLIC_URL` equal to the site's public HTTPS origin, especially if you already use passkeys. If you use other Compose overrides, put them before `compose.sparktunnel.yml` in `COMPOSE_FILE`. Run:
+
+```sh
+chmod 600 .env
+python3 scripts/check-sparktunnel.py
+docker compose up -d --build
+docker compose logs --tail=30 spark-tunnel
+```
+
+The pinned 0.3.1 connector dials `https://webhost.photonspark.com` and forwards to `http://nginx:8080` inside Docker. nginx continues to route the console, OAuth, MCP and WebSockets to Ledger's services. The override removes nginx's host port binding; no inbound firewall rule or router forwarding is needed. Docker restarts the connector automatically, and the connector reconnects after network interruptions.
+
+The connector uses `SPARK_TUNNEL_TOKEN` from its environment. Keep the real token only in `.env`; never put it in Compose, Dockerfiles, build arguments, or Git. Avoid sharing `docker compose config` or container inspection output, which can contain environment secrets. If it leaks, rotate it in the SparkTunnel dashboard and recreate the connector.
+
+nginx trusts forwarded client addresses only from the connector's fixed Docker address, `LEDGER_SPARKTUNNEL_IP` (default `10.251.250.253`). Set it to an unused address inside `LEDGER_INTERNAL_SUBNET` if you changed that subnet. Check the site's panel for an online connector, then verify `<LEDGER_PUBLIC_URL>/admin/`; a running container alone does not prove public traffic is connected.
 
 ### 4. Connect a client
 

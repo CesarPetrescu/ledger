@@ -121,7 +121,10 @@ jobs:
           LEDGER_CALENDAR_ENCRYPTION_KEY: placeholder-calendar-key-at-least-32
           LEDGER_TRUSTED_PROXY_CIDR: 203.0.113.0/24
           LEDGER_INFER_URL: http://inference.example.com/v1
-        run: docker compose config --quiet
+          SPARK_TUNNEL_TOKEN: placeholder-connector-token
+        run: |
+          docker compose config --quiet
+          python3 scripts/check-sparktunnel.py
       - name: Build admin image
         run: docker build --build-arg CMD=ledger-admin -t ledger-admin:ci .
       - name: Build frontend image
